@@ -8,14 +8,13 @@ use crate::fs_scan::{self, ScanOpts};
 use crate::git::status::RepoStatus;
 use crate::git::{self, GitCache};
 use crate::model::{DirListing, Entry, Kind, Place, RepoInfo, Rollup, WorktreeInfo};
+use crate::thumb_pool::{ThumbPool, ThumbReady, ThumbReq};
 use crate::watcher::FsWatcher;
 
 pub struct AppState {
     pub cache: Arc<GitCache>,
     pub watcher: Arc<FsWatcher>,
-    /// Caps concurrent thumbnail work. Scrolling a photo folder can queue hundreds
-    /// of requests; decoding them all at once would starve everything else.
-    pub thumb_slots: Arc<tokio::sync::Semaphore>,
+    pub thumbs: Arc<ThumbPool>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -240,19 +239,28 @@ pub async fn inspect(path: String) -> Result<Inspect, String> {
     .map_err(|e| format!("inspect task failed: {e}"))?
 }
 
-/// Path to a cached preview for `path`, generating it if needed. Returns `None`
-/// when the file has no meaningful preview rather than treating that as an error.
+/// Declare the full set of tiles currently worth rendering, nearest-to-viewport
+/// first. This supersedes the previous set, so anything scrolled past is
+/// abandoned before it costs a decode. Whatever is already cached comes back
+/// here; the rest arrives later on `fiddler:thumbs`.
 #[tauri::command]
-pub async fn thumbnail(
+pub async fn thumbnails(
     state: State<'_, AppState>,
-    path: String,
-    size: u32,
-) -> Result<Option<String>, String> {
-    let slots = state.thumb_slots.clone();
-    let permit = slots.acquire_owned().await.map_err(|e| e.to_string())?;
+    wanted: Vec<ThumbReq>,
+) -> Result<Vec<ThumbReady>, String> {
+    let thumbs = state.thumbs.clone();
+    // A cache probe is one `stat` per tile — cheap, but a viewport's worth of
+    // them still doesn't belong on the async runtime's shoulders.
+    tauri::async_runtime::spawn_blocking(move || thumbs.request(wanted))
+        .await
+        .map_err(|e| format!("thumbnail task failed: {e}"))
+}
 
+/// Path to a cached preview for a single file, generating it if needed. This is
+/// the preview pane's route: one file, wanted right now, so it skips the queue.
+#[tauri::command]
+pub async fn thumbnail(path: String, size: u32) -> Result<Option<String>, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let _permit = permit;
         let p = PathBuf::from(&path);
         if !crate::thumb::can_thumbnail(&p) {
             return None;

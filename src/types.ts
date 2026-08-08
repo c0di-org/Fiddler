@@ -99,6 +99,17 @@ export function rollupTotal(r: Rollup): number {
   return r.staged + r.modified + r.untracked + r.deleted + r.conflicted;
 }
 
+/** One tile's worth of want, in the order the backend should render it. */
+export interface ThumbReq {
+  path: string;
+  size: number;
+}
+
+/** A finished tile. `src` is null when the file has no preview to give. */
+export interface ThumbReady extends ThumbReq {
+  src: string | null;
+}
+
 export interface Inspect {
   /** Leading text of a small, textual file. */
   text: string | null;

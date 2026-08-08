@@ -3,6 +3,7 @@ mod fs_scan;
 mod git;
 mod model;
 mod thumb;
+mod thumb_pool;
 mod watcher;
 
 use std::sync::Arc;
@@ -11,6 +12,7 @@ use tauri::Manager;
 
 use commands::AppState;
 use git::GitCache;
+use thumb_pool::ThumbPool;
 use watcher::FsWatcher;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -20,11 +22,8 @@ pub fn run() {
         .setup(|app| {
             let cache = Arc::new(GitCache::new());
             let watcher = FsWatcher::start(app.handle().clone(), cache.clone());
-            app.manage(AppState {
-                cache,
-                watcher,
-                thumb_slots: Arc::new(tokio::sync::Semaphore::new(6)),
-            });
+            let thumbs = ThumbPool::start(app.handle().clone());
+            app.manage(AppState { cache, watcher, thumbs });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -33,6 +32,7 @@ pub fn run() {
             commands::refresh_repo,
             commands::sidebar_places,
             commands::thumbnail,
+            commands::thumbnails,
             commands::inspect,
             commands::reveal_in_finder,
             commands::open_terminal_here,

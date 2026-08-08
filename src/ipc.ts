@@ -1,6 +1,14 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import type { DirListing, Inspect, Place, RepoInfo, RepoStatusPayload } from "./types";
+import type {
+  DirListing,
+  Inspect,
+  Place,
+  RepoInfo,
+  RepoStatusPayload,
+  ThumbReady,
+  ThumbReq,
+} from "./types";
 
 export const listDir = (path: string, showHidden: boolean) =>
   invoke<DirListing>("list_dir", { path, showHidden });
@@ -31,5 +39,12 @@ export const onDirsChanged = (fn: (dirs: string[]) => void) =>
 
 export const thumbnail = (path: string, size: number) =>
   invoke<string | null>("thumbnail", { path, size });
+
+/** Declare everything worth rendering right now; returns whatever was cached. */
+export const thumbnails = (wanted: ThumbReq[]) =>
+  invoke<ThumbReady[]>("thumbnails", { wanted });
+
+export const onThumbs = (fn: (ready: ThumbReady[]) => void) =>
+  listen<ThumbReady[]>("fiddler:thumbs", (e) => fn(e.payload));
 
 export const inspect = (path: string) => invoke<Inspect>("inspect", { path });

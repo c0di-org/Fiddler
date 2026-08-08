@@ -20,8 +20,19 @@ serde_json = "1"
 notify = "8"
 trash = "5"
 dirs = "6"
-image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "bmp", "ico", "tiff", "webp", "avif", "hdr", "pnm", "qoi", "tga", "dds"] }
-tokio = { version = "1", features = ["sync"] }
+num_cpus = "1"
+
+# Thumbnails go through the same macOS frameworks Finder uses: ImageIO for raster
+# formats and QuickLookThumbnailing for everything else. Both are dramatically
+# faster than decoding in-process, and Quick Look shares the system thumbnail
+# cache, so files Finder has already seen come back essentially for free.
+objc2 = "0.6"
+block2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSURL", "NSString", "NSError"] }
+objc2-core-foundation = { version = "0.3", default-features = false, features = ["std", "CFBase", "CFCGTypes", "CFDictionary", "CFString", "CFNumber", "CFURL"] }
+objc2-core-graphics = { version = "0.3", default-features = false, features = ["std", "CGImage"] }
+objc2-image-io = { version = "0.3", default-features = false, features = ["std", "CGImageSource", "CGImageDestination", "objc2-core-graphics"] }
+objc2-quick-look-thumbnailing = { version = "0.3", default-features = false, features = ["std", "block2", "QLThumbnailGenerator", "QLThumbnailGenerationRequest", "QLThumbnailRepresentation", "objc2-core-foundation", "objc2-core-graphics"] }
 
 [profile.release]
 codegen-units = 1
