@@ -19,7 +19,13 @@
         "minHeight": 420,
         "titleBarStyle": "Overlay",
         "hiddenTitle": true,
-        "dragDropEnabled": false
+        "dragDropEnabled": false,
+        "transparent": true,
+        "windowEffects": {
+          "effects": ["sidebar"],
+          "state": "followsWindowActiveState",
+          "radius": 12
+        }
       }
     ],
     "macOSPrivateApi": true,

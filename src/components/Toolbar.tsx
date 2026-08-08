@@ -1,6 +1,7 @@
 import { tildify } from "../format";
 import type { ViewMode } from "../store/tree";
 import {
+  BranchIcon,
   ChevronLeft,
   Chevron,
   EyeIcon,
@@ -15,7 +16,6 @@ interface Props {
   path: string;
   home: string;
   view: ViewMode;
-  iconSize: number;
   filter: string;
   showHidden: boolean;
   previewOpen: boolean;
@@ -28,7 +28,6 @@ interface Props {
   onUp: () => void;
   onCrumb: (path: string) => void;
   onView: (v: ViewMode) => void;
-  onIconSize: (px: number) => void;
   onFilter: (v: string) => void;
   onToggleHidden: () => void;
   onTogglePreview: () => void;
@@ -41,7 +40,7 @@ export function Toolbar(p: Props) {
     <header className="toolbar" data-tauri-drag-region>
       <div className="tb-nav">
         <button className="tb-btn" disabled={!p.canBack} onClick={p.onBack} title="Back (⌘[)">
-          <ChevronLeft size={15} />
+          <ChevronLeft size={18} />
         </button>
         <button
           className="tb-btn"
@@ -49,89 +48,101 @@ export function Toolbar(p: Props) {
           onClick={p.onForward}
           title="Forward (⌘])"
         >
-          <Chevron size={15} />
+          <Chevron size={18} />
         </button>
         <button className="tb-btn" onClick={p.onUp} title="Enclosing folder (⌘↑)">
-          <UpIcon size={15} />
+          <UpIcon size={18} />
         </button>
       </div>
 
       <nav className="crumbs">
-        {crumbs.map((c, i) => (
-          <button
-            key={c.path}
-            className={`crumb ${i === crumbs.length - 1 ? "here" : ""}`}
-            onClick={() => p.onCrumb(c.path)}
-          >
-            {c.label}
-          </button>
-        ))}
-        {p.branch && (
-          <span className="crumb-branch" title="Current branch">
-            {p.branch}
-          </span>
+        {collapse(crumbs).map((c, i, all) =>
+          c === ELLIPSIS ? (
+            <span key="gap" className="crumb crumb-gap" title={p.path}>
+              …
+            </span>
+          ) : (
+            <button
+              key={c.path}
+              className={`crumb ${i === all.length - 1 ? "here" : ""}`}
+              onClick={() => p.onCrumb(c.path)}
+            >
+              {c.label}
+            </button>
+          )
         )}
       </nav>
 
-      <div className="tb-spacer" />
-
-      {p.view === "icons" && (
-        <input
-          className="tb-size"
-          type="range"
-          min={48}
-          max={192}
-          step={8}
-          value={p.iconSize}
-          onChange={(e) => p.onIconSize(Number(e.target.value))}
-          title="Icon size"
-        />
+      {/* Outside .crumbs, which clips: a long path must never eat the branch. */}
+      {p.branch && (
+        <span className="crumb-branch" title="Current branch">
+          <BranchIcon size={12} />
+          <span className="crumb-branch-name">{p.branch}</span>
+        </span>
       )}
 
-      <div className="tb-seg">
+      <div className="tb-spacer" data-tauri-drag-region />
+
+      <div className="tb-tools">
+        <div className="tb-seg" data-at={p.view === "icons" ? 0 : 1}>
+          <button
+            className={p.view === "icons" ? "on" : ""}
+            onClick={() => p.onView("icons")}
+            title="Icons (⌘1)"
+          >
+            <GridIcon size={16} />
+          </button>
+          <button
+            className={p.view === "list" ? "on" : ""}
+            onClick={() => p.onView("list")}
+            title="List (⌘2)"
+          >
+            <ListIcon size={16} />
+          </button>
+        </div>
+
         <button
-          className={p.view === "icons" ? "on" : ""}
-          onClick={() => p.onView("icons")}
-          title="Icons (⌘1)"
+          className={`tb-btn ${p.previewOpen ? "on" : ""}`}
+          onClick={p.onTogglePreview}
+          title="Preview (⇧⌘P)"
         >
-          <GridIcon size={14} />
+          <PanelIcon size={17} />
         </button>
+
         <button
-          className={p.view === "list" ? "on" : ""}
-          onClick={() => p.onView("list")}
-          title="List (⌘2)"
+          className={`tb-btn ${p.showHidden ? "on" : ""}`}
+          onClick={p.onToggleHidden}
+          title="Show hidden files (⇧⌘.)"
         >
-          <ListIcon size={14} />
+          <EyeIcon size={17} />
         </button>
+
+        <label className="tb-search">
+          <SearchIcon size={15} />
+          <input
+            value={p.filter}
+            placeholder="Search"
+            spellCheck={false}
+            onChange={(e) => p.onFilter(e.target.value)}
+          />
+        </label>
       </div>
-
-      <button
-        className={`tb-btn ${p.previewOpen ? "on" : ""}`}
-        onClick={p.onTogglePreview}
-        title="Preview (⇧⌘P)"
-      >
-        <PanelIcon size={14} />
-      </button>
-
-      <button
-        className={`tb-btn ${p.showHidden ? "on" : ""}`}
-        onClick={p.onToggleHidden}
-        title="Show hidden files (⇧⌘.)"
-      >
-        <EyeIcon size={14} />
-      </button>
-
-      <label className="tb-search">
-        <SearchIcon size={13} />
-        <input
-          value={p.filter}
-          placeholder="Search"
-          spellCheck={false}
-          onChange={(e) => p.onFilter(e.target.value)}
-        />
-      </label>
     </header>
   );
+}
+
+type Crumb = { label: string; path: string };
+
+const ELLIPSIS = { label: "…", path: "" };
+
+/**
+ * Deep paths get their middle elided rather than letting every segment shrink to
+ * two illegible characters. The root and the last two are what people navigate
+ * with; everything between them is one "…".
+ */
+function collapse(crumbs: Crumb[]): Crumb[] {
+  if (crumbs.length <= 3) return crumbs;
+  return [crumbs[0], ELLIPSIS, ...crumbs.slice(-2)];
 }
 
 function buildCrumbs(path: string, home: string) {

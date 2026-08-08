@@ -352,6 +352,65 @@ pub fn trash_paths(state: State<'_, AppState>, paths: Vec<String>) -> Result<(),
     Ok(())
 }
 
+/// The user's macOS accent colour (System Settings › Appearance), as sRGB bytes.
+///
+/// The obvious route — CSS's `AccentColor` system keyword — is supported by this
+/// WebView but always answers the default blue, whatever the user has actually
+/// chosen. So the real value is read from AppKit, which is also what makes
+/// "Multicolour" and Graphite come out right rather than needing a lookup table.
+#[tauri::command]
+pub async fn system_accent(app: AppHandle) -> Option<[u8; 3]> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    // NSColor is main-thread-only, and commands run off it.
+    app.run_on_main_thread(move || {
+        let _ = tx.send(read_accent());
+    })
+    .ok()?;
+    // Bounded so a wedged event loop can't pin this worker; the caller treats a
+    // miss as "no system accent" and carries on with the current colour.
+    rx.recv_timeout(std::time::Duration::from_millis(500)).ok().flatten()
+}
+
+#[cfg(target_os = "macos")]
+fn read_accent() -> Option<[u8; 3]> {
+    use objc2::runtime::AnyObject;
+    use objc2::{class, msg_send};
+
+    // SAFETY: all four selectors are read-only AppKit accessors, called on the
+    // main thread, and each result is null-checked before it is used again.
+    unsafe {
+        let color: *mut AnyObject = msg_send![class!(NSColor), controlAccentColor];
+        if color.is_null() {
+            return None;
+        }
+        // controlAccentColor lives in a catalog colour space with no components;
+        // it has to be converted before red/green/blueComponent are legal.
+        let space: *mut AnyObject = msg_send![class!(NSColorSpace), sRGBColorSpace];
+        if space.is_null() {
+            return None;
+        }
+        let srgb: *mut AnyObject = msg_send![color, colorUsingColorSpace: space];
+        if srgb.is_null() {
+            return None;
+        }
+
+        let r: f64 = msg_send![srgb, redComponent];
+        let g: f64 = msg_send![srgb, greenComponent];
+        let b: f64 = msg_send![srgb, blueComponent];
+        Some([channel(r), channel(g), channel(b)])
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn read_accent() -> Option<[u8; 3]> {
+    None
+}
+
+#[cfg(target_os = "macos")]
+fn channel(v: f64) -> u8 {
+    (v.clamp(0.0, 1.0) * 255.0).round() as u8
+}
+
 /// Join `name` onto `parent`, rejecting anything that would escape it.
 fn safe_child(parent: &str, name: &str) -> Result<PathBuf, String> {
     let trimmed = name.trim();

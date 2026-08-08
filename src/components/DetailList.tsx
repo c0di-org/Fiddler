@@ -5,11 +5,12 @@ import { kindOf } from "../kind";
 import type { Row, SortKey } from "../store/tree";
 import { Thumb } from "./Thumb";
 import { GitDot } from "./GitDot";
+import { EmptyState } from "./EmptyState";
 import { Chevron, ForkIcon, LockIcon, WarnIcon } from "./icons";
 
 /** Finder's list view: dense, sortable, with disclosure triangles. */
 
-export const ROW_H = 26;
+export const ROW_H = 34;
 const OVERSCAN = 12;
 
 const COLUMNS: { key: SortKey; label: string; cls: string }[] = [
@@ -140,9 +141,7 @@ export function DetailList(props: Props) {
             ))}
           </div>
         </div>
-        {rows.length === 0 && props.loaded && (
-          <div className="view-empty">{props.emptyMessage}</div>
-        )}
+        {rows.length === 0 && props.loaded && <EmptyState message={props.emptyMessage} />}
       </div>
     </div>
   );
@@ -181,16 +180,16 @@ function RowView({
       data-row-id={row.id}
       style={{ height: ROW_H }}
     >
-      <div className="c-name" style={{ paddingLeft: 8 + row.depth * 15 }}>
+      <div className="c-name" style={{ paddingLeft: 6 + row.depth * 17 }}>
         <span
           className={`twisty ${expandable ? "" : "hidden"} ${row.expanded ? "open" : ""}`}
           data-twisty
         >
-          <Chevron size={10} />
+          <Chevron size={11} />
         </span>
 
         <span className="lrow-icon">
-          {e ? <Thumb entry={e} size={17} /> : <ForkIcon size={15} />}
+          {e ? <Thumb entry={e} size={22} /> : <ForkIcon size={18} />}
         </span>
 
         {renaming ? (
@@ -201,11 +200,15 @@ function RowView({
 
         <GitDot code={e?.code} rollup={e?.rollup} withCount />
 
-        {e?.isRepo && e.branch && <span className="tag">{e.branch}</span>}
+        {e?.isRepo && e.branch && (
+          <span className="tag tag-branch" title={e.branch}>
+            <span>{e.branch}</span>
+          </span>
+        )}
         {row.kind === "worktree" && (
           <>
-            <span className="tag">
-              {row.wt.detached ? row.wt.head ?? "detached" : row.wt.branch}
+            <span className="tag tag-branch">
+              <span>{row.wt.detached ? (row.wt.head ?? "detached") : row.wt.branch}</span>
             </span>
             {row.wt.external && (
               <span className="tag alt" title={row.wt.path}>
@@ -214,12 +217,12 @@ function RowView({
             )}
             {row.wt.locked && (
               <span className="tag" title={row.wt.lockReason ?? "Locked"}>
-                <LockIcon size={9} />
+                <LockIcon size={10} />
               </span>
             )}
             {row.wt.prunable && (
               <span className="tag warn" title="This folder no longer exists on disk">
-                <WarnIcon size={9} />
+                <WarnIcon size={10} />
                 missing
               </span>
             )}

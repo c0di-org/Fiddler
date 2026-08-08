@@ -31,6 +31,7 @@ pub fn run() {
             commands::repo_info,
             commands::refresh_repo,
             commands::sidebar_places,
+            commands::system_accent,
             commands::thumbnail,
             commands::thumbnails,
             commands::inspect,

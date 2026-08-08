@@ -127,6 +127,32 @@ const DesktopIcon = stroked(
   </>
 );
 
+export const BranchIcon = stroked(
+  <>
+    <circle cx="4.5" cy="4" r="1.6" />
+    <circle cx="4.5" cy="12.5" r="1.6" />
+    <circle cx="11.5" cy="4" r="1.6" />
+    <path d="M4.5 5.6v5.3" />
+    <path d="M11.5 5.6v1.15a2.5 2.5 0 0 1-2.5 2.5H4.5" />
+  </>
+);
+
+/** The app's own mark: a tuning fork, for a browser called Fiddler. */
+export const SparkIcon = stroked(
+  <>
+    <path d="M4.5 2v4.5a3.5 3.5 0 0 0 7 0V2" />
+    <path d="M8 10v4" />
+  </>
+);
+
+/** Empty-state artwork: an open, and pointedly empty, folder. */
+export const EmptyIcon = stroked(
+  <>
+    <path d="M2.25 12V4.5a1 1 0 0 1 1-1h3.1l1.4 1.75h5.05a1 1 0 0 1 1 1V7.5" />
+    <path d="M2.25 12 4 7.75h11.25L13.5 12a1 1 0 0 1-.95.75H3.2A1 1 0 0 1 2.25 12Z" />
+  </>
+);
+
 export const placeIcon: Record<string, (p: P) => React.ReactElement> = {
   home: HomeIcon,
   code: CodeIcon,

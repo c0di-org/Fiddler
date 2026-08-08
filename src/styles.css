@@ -1,55 +1,114 @@
+/* ============================================================== tokens ==
+ *
+ * The window itself is a translucent NSVisualEffectView (see tauri.conf.json),
+ * so every surface here is a tint over blurred desktop rather than a solid
+ * colour. Alphas are chosen so text keeps its contrast over any wallpaper:
+ * the content surface never drops below ~0.7, and anything carrying small
+ * text sits on top of it rather than on the raw vibrancy.
+ */
+
 :root {
-  --bg: #ffffff;
-  --bg-chrome: #f6f6f7;
-  --bg-sidebar: #ebebed;
-  --fg: #1d1d1f;
-  --fg-dim: #86868b;
-  --fg-faint: #aeaeb2;
-  --line: #e0e0e2;
-  --line-soft: #ededef;
-  --accent: #0a72e8;
-  --sel-bg: #0a72e8;
+  color-scheme: light dark;
+
+  /* surfaces */
+  --surface: rgba(255, 255, 255, 0.7);
+  --surface-2: rgba(255, 255, 255, 0.5);
+  --glass: rgba(250, 250, 252, 0.72);
+  --glass-strong: rgba(252, 252, 254, 0.86);
+
+  /* ink */
+  --fg: #1c1c1e;
+  --fg-dim: rgba(60, 60, 67, 0.62);
+  --fg-faint: rgba(60, 60, 67, 0.38);
+
+  /* hairlines + control fills, following Apple's systemFill ramp */
+  --hair: rgba(0, 0, 0, 0.09);
+  --hair-soft: rgba(0, 0, 0, 0.05);
+  --fill: rgba(120, 120, 128, 0.12);
+  --fill-hover: rgba(120, 120, 128, 0.18);
+  --fill-strong: rgba(120, 120, 128, 0.24);
+  --highlight: rgba(255, 255, 255, 0.7);
+
+  /* accent */
+  --accent: #0a84ff;
+  --accent-2: #5e5ce6;
+  --accent-ink: #0563c8;
   --sel-fg: #ffffff;
-  --sel-soft: #e6effc;
-  --hover: rgba(0, 0, 0, 0.04);
+  --sel-cell: rgba(10, 132, 255, 0.15);
+  --sel-ring: rgba(10, 132, 255, 0.38);
+  --focus-ring: rgba(10, 132, 255, 0.28);
 
-  --folder-1: #66b3f5;
-  --folder-2: #2e87e0;
-  --sheet: #ffffff;
-  --sheet-line: #d6d6d9;
+  /* file glyph palette */
+  --folder-1: #7cc0fb;
+  --folder-2: #2b8cf0;
+  --folder-3: #1c6fd4;
+  --sheet-1: #ffffff;
+  --sheet-2: #eceef3;
+  --sheet-edge: rgba(0, 0, 0, 0.1);
+  --sheet-ink: rgba(60, 60, 67, 0.3);
 
-  --git-modified: #e0a02a;
-  --git-staged: #34a853;
-  --git-untracked: #4a90e2;
-  --git-conflict: #e05445;
+  --git-modified: #f0a92c;
+  --git-staged: #32d158;
+  --git-untracked: #58a6ff;
+  --git-conflict: #ff5f56;
+
+  /* elevation */
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.05), 0 2px 6px rgba(0, 0, 0, 0.05);
+  --shadow-2: 0 2px 6px rgba(0, 0, 0, 0.07), 0 10px 30px rgba(0, 0, 0, 0.11);
+  --shadow-3: 0 8px 20px rgba(0, 0, 0, 0.14), 0 24px 60px rgba(0, 0, 0, 0.2);
+
+  /* radii */
+  --r-sm: 8px;
+  --r-md: 11px;
+  --r-lg: 16px;
+  --r-xl: 22px;
+  --r-pill: 999px;
+
+  /* motion */
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --spring: cubic-bezier(0.34, 1.4, 0.64, 1);
+  --fast: 130ms;
+  --med: 220ms;
 
   --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, monospace;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #1e1e20;
-    --bg-chrome: #2c2c2e;
-    --bg-sidebar: #252527;
-    --fg: #f2f2f4;
-    --fg-dim: #98989d;
-    --fg-faint: #6e6e73;
-    --line: #3a3a3c;
-    --line-soft: #313133;
-    --accent: #4a9bf7;
-    --sel-bg: #2c6dd4;
-    --sel-soft: #2b3a52;
-    --hover: rgba(255, 255, 255, 0.055);
+    --surface: rgba(28, 28, 30, 0.62);
+    --surface-2: rgba(255, 255, 255, 0.045);
+    --glass: rgba(44, 44, 48, 0.72);
+    --glass-strong: rgba(48, 48, 52, 0.88);
 
-    --folder-1: #5aa5e8;
-    --folder-2: #2b6fc0;
-    --sheet: #3a3a3d;
-    --sheet-line: #4c4c50;
+    --fg: #f5f5f7;
+    --fg-dim: rgba(235, 235, 245, 0.6);
+    --fg-faint: rgba(235, 235, 245, 0.34);
 
-    --git-modified: #e8b44a;
-    --git-staged: #4cc76a;
-    --git-untracked: #6aa9f5;
-    --git-conflict: #ff6f61;
+    --hair: rgba(255, 255, 255, 0.1);
+    --hair-soft: rgba(255, 255, 255, 0.06);
+    --fill: rgba(120, 120, 128, 0.24);
+    --fill-hover: rgba(120, 120, 128, 0.34);
+    --fill-strong: rgba(120, 120, 128, 0.44);
+    --highlight: rgba(255, 255, 255, 0.14);
+
+    --accent: #0a84ff;
+    --accent-2: #6e6bf2;
+    --accent-ink: #6db8ff;
+    --sel-cell: rgba(10, 132, 255, 0.26);
+    --sel-ring: rgba(10, 132, 255, 0.55);
+
+    --folder-1: #6bb4f2;
+    --folder-2: #2b7fd8;
+    --folder-3: #1a5fb0;
+    --sheet-1: #55555c;
+    --sheet-2: #3d3d44;
+    --sheet-edge: rgba(255, 255, 255, 0.14);
+    --sheet-ink: rgba(235, 235, 245, 0.4);
+
+    --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.3), 0 2px 6px rgba(0, 0, 0, 0.24);
+    --shadow-2: 0 2px 8px rgba(0, 0, 0, 0.36), 0 12px 32px rgba(0, 0, 0, 0.4);
+    --shadow-3: 0 10px 24px rgba(0, 0, 0, 0.45), 0 28px 70px rgba(0, 0, 0, 0.55);
   }
 }
 
@@ -66,9 +125,11 @@ body,
 
 body {
   font-family: var(--font);
-  font-size: 13px;
+  font-size: 13.5px;
+  letter-spacing: -0.005em;
   color: var(--fg);
-  background: var(--bg);
+  /* Transparent all the way down so the window's vibrancy is what you see. */
+  background: transparent;
   -webkit-font-smoothing: antialiased;
   user-select: none;
   overflow: hidden;
@@ -78,6 +139,42 @@ button {
   font: inherit;
   color: inherit;
   cursor: default;
+  -webkit-app-region: no-drag;
+}
+
+::selection {
+  background: var(--sel-cell);
+}
+
+/* The main scrollers keep the system's overlay scrollbars, which fade out on
+   their own. Only the inset panels, where an overlay bar would sit on top of
+   text, get a thin drawn one. */
+.preview-text::-webkit-scrollbar,
+.preview::-webkit-scrollbar,
+.sidebar::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.preview-text::-webkit-scrollbar-thumb,
+.preview::-webkit-scrollbar-thumb,
+.sidebar::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: var(--r-pill);
+  background-clip: padding-box;
+  background-color: rgba(120, 120, 128, 0.3);
+}
+
+.preview-text::-webkit-scrollbar-thumb:hover,
+.preview::-webkit-scrollbar-thumb:hover,
+.sidebar::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(120, 120, 128, 0.5);
+}
+
+.preview-text::-webkit-scrollbar-track,
+.preview::-webkit-scrollbar-track,
+.sidebar::-webkit-scrollbar-track {
+  background: transparent;
 }
 
 .app {
@@ -85,194 +182,350 @@ button {
   height: 100%;
 }
 
-/* ------------------------------------------------------------- sidebar */
+/* Gradients and filters for the file glyphs, defined once for the document
+   rather than re-emitted inside every icon. */
+.glyph-defs {
+  position: absolute;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+}
+
+/* ============================================================= sidebar == */
 
 .sidebar {
-  width: 184px;
-  flex: 0 0 184px;
-  background: var(--bg-sidebar);
-  border-right: 1px solid var(--line);
-  padding: 40px 10px 10px;
+  width: 228px;
+  flex: 0 0 228px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  /* Left untinted: this column is pure window vibrancy, the way a Mac sidebar is. */
+  background: transparent;
+  border-right: 1px solid var(--hair-soft);
+  padding: 8px 12px 12px;
   overflow-y: auto;
+  overflow-x: hidden;
+}
+
+/* Sits below the traffic lights, which float over this column, and ends level
+   with the toolbar's bottom edge: 8 (padding) + 22 + 32 = 62. */
+.sidebar-head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  height: 32px;
+  flex: 0 0 32px;
+  padding: 0 6px;
+  margin-top: 22px;
+  -webkit-app-region: drag;
+}
+
+.sidebar-mark {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  color: var(--sel-fg);
+  background: linear-gradient(150deg, var(--accent-2), var(--accent));
+  box-shadow: var(--shadow-1), inset 0 1px 0 rgba(255, 255, 255, 0.35);
+}
+
+.sidebar-wordmark {
+  font-size: 15px;
+  font-weight: 640;
+  letter-spacing: -0.015em;
 }
 
 .sidebar-title {
   font-size: 11px;
-  font-weight: 600;
+  font-weight: 620;
+  letter-spacing: 0.045em;
+  text-transform: uppercase;
   color: var(--fg-faint);
-  padding: 4px 8px 6px;
+  padding: 12px 10px 6px;
 }
 
 .place {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 11px;
   width: 100%;
-  padding: 5px 8px;
+  height: 38px;
+  flex: 0 0 38px;
+  padding: 0 10px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--r-md);
   background: transparent;
   text-align: left;
+  font-size: 13.5px;
+  font-weight: 480;
+  transition:
+    background var(--fast) var(--ease),
+    transform var(--fast) var(--ease);
 }
 
 .place:hover {
-  background: var(--hover);
+  background: var(--fill);
+}
+
+.place:active {
+  transform: scale(0.975);
 }
 
 .place.active {
-  background: var(--sel-bg);
+  background: linear-gradient(180deg, var(--accent), color-mix(in srgb, var(--accent) 86%, #000));
   color: var(--sel-fg);
+  font-weight: 560;
+  box-shadow: var(--shadow-1), inset 0 1px 0 rgba(255, 255, 255, 0.28);
 }
 
-.place svg {
+.place-icon {
+  display: grid;
+  place-items: center;
   flex: 0 0 auto;
-  opacity: 0.7;
+  color: var(--accent-ink);
+  opacity: 0.95;
 }
 
-.place.active svg {
-  opacity: 1;
+.place.active .place-icon {
+  color: currentColor;
 }
 
-/* ------------------------------------------------------------- toolbar */
+.place-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ============================================================= toolbar == */
 
 .main {
   flex: 1;
   display: flex;
   flex-direction: column;
   min-width: 0;
+  /* The one real surface in the window; everything else floats over it. */
+  background: var(--surface);
 }
 
 .toolbar {
   display: flex;
   align-items: center;
   gap: 10px;
-  height: 46px;
-  flex: 0 0 46px;
-  padding: 0 12px;
-  background: var(--bg-chrome);
-  border-bottom: 1px solid var(--line);
+  height: 62px;
+  flex: 0 0 62px;
+  padding: 0 14px;
+  background: transparent;
+  border-bottom: 1px solid var(--hair-soft);
 }
 
 .tb-nav {
   display: flex;
-  gap: 1px;
+  gap: 2px;
 }
 
 .tb-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 26px;
-  height: 24px;
-  padding: 0 5px;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--r-md);
   background: transparent;
   color: var(--fg-dim);
+  transition:
+    background var(--fast) var(--ease),
+    color var(--fast) var(--ease),
+    transform var(--fast) var(--spring);
 }
 
 .tb-btn:hover:not(:disabled) {
-  background: var(--hover);
+  background: var(--fill);
   color: var(--fg);
 }
 
+.tb-btn:active:not(:disabled) {
+  transform: scale(0.9);
+  background: var(--fill-hover);
+}
+
 .tb-btn:disabled {
-  opacity: 0.3;
+  opacity: 0.28;
 }
 
 .tb-btn.on {
-  background: var(--sel-bg);
+  background: linear-gradient(180deg, var(--accent), color-mix(in srgb, var(--accent) 86%, #000));
   color: var(--sel-fg);
+  box-shadow: var(--shadow-1), inset 0 1px 0 rgba(255, 255, 255, 0.3);
 }
 
+/* Crumbs never shrink: half a word is worse than no word. When the window gets
+   tight the toolbar drops whole pieces instead — see the queries at the end of
+   this section. */
 .crumbs {
   display: flex;
   align-items: center;
-  min-width: 0;
-  overflow: hidden;
+  gap: 1px;
+  flex: 0 0 auto;
+  margin-left: 4px;
+}
+
+.crumbs .crumb {
+  flex: 0 0 auto;
+}
+
+.crumb-gap {
+  color: var(--fg-faint);
+  cursor: default;
+}
+
+.crumb-gap:hover {
+  background: transparent;
 }
 
 .crumb {
   border: 0;
   background: transparent;
-  padding: 2px 5px;
-  border-radius: 5px;
+  padding: 5px 9px;
+  border-radius: var(--r-sm);
   color: var(--fg-dim);
+  font-size: 13.5px;
   white-space: nowrap;
+  transition:
+    background var(--fast) var(--ease),
+    color var(--fast) var(--ease);
 }
 
 .crumb:hover {
-  background: var(--hover);
+  background: var(--fill);
   color: var(--fg);
 }
 
 .crumb.here {
   color: var(--fg);
-  font-weight: 600;
+  font-weight: 620;
+  font-size: 15px;
+  letter-spacing: -0.015em;
 }
 
 .crumb + .crumb::before {
   content: "›";
   color: var(--fg-faint);
-  margin-right: 7px;
+  margin-right: 9px;
   font-weight: 400;
 }
 
 .crumb-branch {
-  margin-left: 8px;
-  padding: 1.5px 7px;
-  border-radius: 20px;
-  background: var(--hover);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  /* The one elastic thing up here: it gives up its width before anything else. */
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 200px;
+  margin-left: 10px;
+  padding: 4px 11px 4px 9px;
+  border-radius: var(--r-pill);
+  background: var(--fill);
   color: var(--fg-dim);
-  font-size: 11px;
+  font-size: 12px;
+  font-weight: 520;
   white-space: nowrap;
+}
+
+.crumb-branch svg {
+  flex: 0 0 auto;
+}
+
+.crumb-branch-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.crumb-branch svg {
+  opacity: 0.65;
 }
 
 .tb-spacer {
   flex: 1;
+  min-width: 8px;
+  align-self: stretch;
 }
 
-.tb-size {
-  width: 84px;
-  accent-color: var(--fg-dim);
-}
-
-.tb-seg {
+.tb-tools {
   display: flex;
-  padding: 2px;
-  border-radius: 7px;
-  background: var(--hover);
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+/* Segmented control with a single indicator that slides between the cells. */
+.tb-seg {
+  position: relative;
+  display: flex;
+  padding: 3px;
+  border-radius: var(--r-md);
+  background: var(--fill);
+}
+
+.tb-seg::before {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 40px;
+  height: 28px;
+  border-radius: 8px;
+  background: var(--glass-strong);
+  box-shadow: var(--shadow-1), inset 0 1px 0 var(--highlight);
+  transition: transform var(--med) var(--ease);
+}
+
+.tb-seg[data-at="1"]::before {
+  transform: translateX(40px);
 }
 
 .tb-seg button {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 21px;
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 28px;
   border: 0;
-  border-radius: 5px;
+  border-radius: 8px;
   background: transparent;
   color: var(--fg-dim);
+  transition: color var(--fast) var(--ease);
 }
 
 .tb-seg button.on {
-  background: var(--bg);
   color: var(--fg);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
 }
 
 .tb-search {
   display: flex;
   align-items: center;
-  gap: 6px;
-  width: 158px;
-  height: 24px;
-  padding: 0 8px;
-  border-radius: 7px;
-  background: var(--bg);
-  border: 1px solid var(--line);
+  gap: 7px;
+  flex: 0 0 auto;
+  width: 152px;
+  height: 34px;
+  padding: 0 12px;
+  border-radius: var(--r-pill);
+  background: var(--fill);
   color: var(--fg-faint);
+  transition:
+    background var(--med) var(--ease),
+    box-shadow var(--med) var(--ease),
+    width var(--med) var(--ease);
+}
+
+.tb-search:focus-within {
+  width: 208px;
+  background: var(--glass-strong);
+  box-shadow: 0 0 0 3.5px var(--focus-ring), var(--shadow-1);
+  color: var(--accent-ink);
 }
 
 .tb-search input {
@@ -283,9 +536,50 @@ button {
   background: transparent;
   color: var(--fg);
   font: inherit;
+  user-select: text;
 }
 
-/* ---------------------------------------------------------- icon grid */
+.tb-search input::placeholder {
+  color: var(--fg-faint);
+}
+
+/**
+ * Narrowing the window sheds toolbar content in order of what you can most
+ * afford to lose: the branch chip, then the path's ancestors, then the search
+ * field's resting width. Thresholds are viewport-wide because the sidebar left
+ * of the toolbar is a fixed 228px.
+ */
+@media (max-width: 1110px) {
+  .crumb-branch {
+    display: none;
+  }
+}
+
+@media (max-width: 980px) {
+  .crumbs .crumb:not(.here) {
+    display: none;
+  }
+}
+
+@media (max-width: 820px) {
+  .tb-search {
+    width: 44px;
+  }
+
+  .tb-search input {
+    opacity: 0;
+  }
+
+  .tb-search:focus-within {
+    width: 190px;
+  }
+
+  .tb-search:focus-within input {
+    opacity: 1;
+  }
+}
+
+/* =========================================================== icon grid == */
 
 .grid-scroller {
   flex: 1;
@@ -308,36 +602,59 @@ button {
 
 .grid-section {
   position: absolute;
-  left: 14px;
-  right: 0;
-  height: 30px;
+  /* Lines up with the first cell's content, not its box. */
+  left: 26px;
+  right: 20px;
+  height: 42px;
   display: flex;
-  align-items: flex-end;
-  padding-bottom: 6px;
-  font-size: 11px;
-  font-weight: 600;
+  align-items: center;
+  gap: 12px;
+  font-size: 11.5px;
+  font-weight: 620;
+  letter-spacing: 0.045em;
+  text-transform: uppercase;
   color: var(--fg-faint);
+}
+
+/* A rule that runs from the label to the right edge, so sections read as
+   sections without a heavy header bar. */
+.grid-section::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--hair-soft);
 }
 
 .cell {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 5px;
-  padding: 6px 4px 4px;
-  border-radius: 9px;
+  /* Tight: the name belongs to the thumbnail above it. The air goes between
+     cells (see GAP in IconGrid), not between an item and its own label. */
+  gap: 8px;
+  padding: 10px 6px 8px;
+  border-radius: var(--r-lg);
+  transition:
+    background var(--fast) var(--ease),
+    box-shadow var(--fast) var(--ease),
+    transform var(--fast) var(--ease);
 }
 
 .cell:hover {
-  background: var(--hover);
+  background: var(--surface-2);
+}
+
+.cell:active {
+  transform: scale(0.975);
 }
 
 .cell.selected {
-  background: var(--sel-soft);
+  background: var(--sel-cell);
+  box-shadow: inset 0 0 0 1px var(--sel-ring);
 }
 
 .cell.muted {
-  opacity: 0.42;
+  opacity: 0.4;
 }
 
 .cell-art {
@@ -358,29 +675,34 @@ button {
   flex-direction: column;
   align-items: center;
   max-width: 100%;
-  gap: 1px;
+  gap: 3px;
 }
 
 .cell-name {
   max-width: 100%;
-  padding: 1px 6px;
-  border-radius: 5px;
+  padding: 2px 8px;
+  border-radius: var(--r-sm);
   text-align: center;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  line-height: 1.35;
+  line-height: 1.3;
+  font-weight: 480;
 }
 
 .cell.selected .cell-name {
-  background: var(--sel-bg);
-  color: var(--sel-fg);
+  font-weight: 600;
 }
 
 .cell-sub {
-  font-size: 10.5px;
-  color: var(--fg-faint);
+  display: inline-block;
   max-width: 100%;
+  padding: 1.5px 8px;
+  border-radius: var(--r-pill);
+  background: var(--fill);
+  color: var(--fg-dim);
+  font-size: 11px;
+  font-weight: 500;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -397,78 +719,88 @@ button {
 .thumb-img {
   max-width: 100%;
   max-height: 100%;
-  border-radius: 3px;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.22);
+  border-radius: 6px;
+  box-shadow:
+    0 1px 3px rgba(0, 0, 0, 0.18),
+    0 6px 16px rgba(0, 0, 0, 0.16);
   object-fit: contain;
+}
+
+.lrow-icon .thumb-img {
+  border-radius: 3px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
 }
 
 /* glyphs */
 
 .glyph {
   display: block;
+  overflow: visible;
 }
 
-.glyph-file .sheet {
-  fill: var(--sheet);
-  stroke: var(--sheet-line);
-  stroke-width: 1;
+/* Only artwork-sized glyphs pay for a shadow; list-row icons are 20px and would
+   spend a compositing layer each for something nobody can see. */
+.glyph-lg {
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.12)) drop-shadow(0 4px 8px rgba(0, 0, 0, 0.14));
+}
+
+.glyph-file .sheet-face {
+  fill: url(#g-sheet);
+  stroke: var(--sheet-edge);
+  stroke-width: 0.75;
 }
 
 .glyph-file .fold {
-  fill: none;
-  stroke: var(--sheet-line);
-  stroke-width: 1;
+  fill: var(--sheet-edge);
 }
 
 .glyph-file .lines {
-  stroke: var(--fg-faint);
+  stroke: var(--sheet-ink);
   stroke-width: 2;
   stroke-linecap: round;
-  opacity: 0.55;
+  opacity: 0.75;
 }
 
-.glyph-file .tag {
-  fill: var(--fg-faint);
-}
-
-.glyph-file .tag-text {
+.glyph-file .band-text {
   fill: #fff;
   font-family: var(--font);
-  font-size: 8.5px;
   font-weight: 700;
-  letter-spacing: 0.03em;
+  letter-spacing: 0.04em;
 }
 
-.cat-code .tag {
-  fill: #7c5cd6;
+.cat-code .band {
+  fill: url(#g-code);
 }
-.cat-config .tag {
-  fill: #8a8a8f;
+.cat-config .band {
+  fill: url(#g-config);
 }
-.cat-image .tag {
-  fill: #2f9e63;
+.cat-image .band {
+  fill: url(#g-image);
 }
-.cat-media .tag {
-  fill: #d6558f;
+.cat-media .band {
+  fill: url(#g-media);
 }
-.cat-doc .tag {
-  fill: #3a7fd5;
+.cat-doc .band {
+  fill: url(#g-doc);
 }
-.cat-archive .tag {
-  fill: #c88a2c;
+.cat-archive .band {
+  fill: url(#g-archive);
+}
+.cat-plain .band {
+  fill: url(#g-plain);
 }
 
 .folder-repo-mark circle {
-  fill: rgba(255, 255, 255, 0.9);
+  fill: rgba(255, 255, 255, 0.92);
 }
 
 .folder-repo-mark path {
-  stroke: rgba(255, 255, 255, 0.9);
+  stroke: rgba(255, 255, 255, 0.92);
   fill: none;
   stroke-linecap: round;
 }
 
-/* --------------------------------------------------------- list view */
+/* ============================================================ list view == */
 
 .list-view {
   flex: 1;
@@ -479,31 +811,39 @@ button {
 
 .list-header {
   display: flex;
-  height: 25px;
-  flex: 0 0 25px;
-  background: var(--bg-chrome);
-  border-bottom: 1px solid var(--line);
+  height: 32px;
+  flex: 0 0 32px;
+  /* Matches the rows' content edge: 12px row margin + 4px row padding. */
+  padding: 0 16px;
+  background: transparent;
+  border-bottom: 1px solid var(--hair-soft);
 }
 
 .lh {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 5px;
   border: 0;
-  border-right: 1px solid var(--line-soft);
+  border-radius: var(--r-sm);
   background: transparent;
-  padding: 0 9px;
+  padding: 0 10px;
   font-size: 11.5px;
-  color: var(--fg-dim);
+  font-weight: 560;
+  letter-spacing: 0.02em;
+  color: var(--fg-faint);
   overflow: hidden;
+  transition:
+    background var(--fast) var(--ease),
+    color var(--fast) var(--ease);
 }
 
 .lh:hover {
-  background: var(--hover);
+  background: var(--fill);
+  color: var(--fg-dim);
 }
 
 .lh.sorted {
-  color: var(--fg);
+  color: var(--accent-ink);
 }
 
 .lh i {
@@ -514,11 +854,11 @@ button {
 }
 
 .lh i.asc {
-  border-bottom: 4px solid currentColor;
+  border-bottom: 4.5px solid currentColor;
 }
 
 .lh i.desc {
-  border-top: 4px solid currentColor;
+  border-top: 4.5px solid currentColor;
 }
 
 .list-scroller {
@@ -527,6 +867,7 @@ button {
   overflow-x: hidden;
   position: relative;
   contain: strict;
+  padding: 6px 0;
 }
 
 .list-sizer {
@@ -541,30 +882,36 @@ button {
   will-change: transform;
 }
 
+/* No zebra striping. Rows are separated by rhythm and a hover state, which is
+   quieter and lets the selection pill be the only strong horizontal mark. */
 .lrow {
   display: flex;
   align-items: center;
+  margin: 0 12px;
+  padding: 0 4px;
+  border-radius: var(--r-md);
   contain: layout style;
 }
 
-.lrow:nth-child(even) {
-  background: var(--line-soft);
-}
-
 .lrow:hover {
-  background: var(--hover);
+  background: var(--fill);
 }
 
 .lrow.selected {
-  background: var(--sel-bg);
+  background: linear-gradient(180deg, var(--accent), color-mix(in srgb, var(--accent) 86%, #000));
   color: var(--sel-fg);
+  box-shadow: var(--shadow-1), inset 0 1px 0 rgba(255, 255, 255, 0.25);
 }
 
 .lrow.selected .c-when,
 .lrow.selected .c-size,
 .lrow.selected .c-kind,
 .lrow.selected .tag {
-  color: rgba(255, 255, 255, 0.82);
+  color: color-mix(in srgb, var(--sel-fg) 85%, transparent);
+}
+
+.lrow.selected .twisty {
+  color: color-mix(in srgb, var(--sel-fg) 75%, transparent);
 }
 
 .lrow.muted {
@@ -576,7 +923,7 @@ button {
 }
 
 .lrow.section .lrow-name {
-  font-weight: 600;
+  font-weight: 620;
   color: var(--fg-dim);
 }
 
@@ -590,26 +937,38 @@ button {
   min-width: 0;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 9px;
+  overflow: hidden;
 }
 
+/* Wide enough for the longest stamp this formats ("Nov 29, 2023 7:51 PM"), and
+   nowrap regardless — a wrapped date would push the row past its fixed height
+   and desynchronise the virtual scroller. */
 .c-when {
-  flex: 0 0 132px;
+  flex: 0 0 150px;
   color: var(--fg-dim);
+  font-size: 12.5px;
   padding-right: 10px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .c-size {
-  flex: 0 0 88px;
+  flex: 0 0 82px;
   color: var(--fg-dim);
+  font-size: 12.5px;
   text-align: right;
-  padding-right: 14px;
+  padding-right: 16px;
+  overflow: hidden;
+  white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }
 
 .c-kind {
-  flex: 0 0 152px;
+  flex: 0 0 132px;
   color: var(--fg-dim);
+  font-size: 12.5px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -626,20 +985,36 @@ button {
   color: var(--fg-dim);
 }
 
+/* The name outranks the tags beside it: a worktree row crowded with branch,
+   "elsewhere" and "missing" chips must still tell you what it's called. */
 .lrow-name {
+  min-width: 52px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-weight: 480;
+}
+
+.lrow.selected .lrow-name {
+  font-weight: 560;
 }
 
 .twisty {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 12px;
-  flex: 0 0 12px;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+  border-radius: 5px;
   color: var(--fg-faint);
-  transition: transform 90ms ease;
+  transition:
+    transform var(--fast) var(--ease),
+    background var(--fast) var(--ease);
+}
+
+.twisty:hover {
+  background: var(--fill-hover);
+  color: var(--fg);
 }
 
 .twisty.open {
@@ -650,55 +1025,87 @@ button {
   visibility: hidden;
 }
 
+/* Chips hold their size — a half-rendered "elsewhere" is worse than none. Only
+   the branch chip, which is the long and least surprising one, gives ground. */
 .tag {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
+  gap: 4px;
   flex: 0 0 auto;
-  padding: 0.5px 6px;
-  border-radius: 20px;
-  background: var(--hover);
-  color: var(--fg-faint);
-  font-size: 10.5px;
+  white-space: nowrap;
+  padding: 1.5px 8px;
+  border-radius: var(--r-pill);
+  background: var(--fill);
+  color: var(--fg-dim);
+  font-size: 11px;
+  font-weight: 520;
+}
+
+.tag-branch {
+  flex: 0 1 auto;
+  min-width: 44px;
+  max-width: 190px;
+}
+
+.tag-branch span {
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .lrow.selected .tag {
-  background: rgba(255, 255, 255, 0.18);
+  background: color-mix(in srgb, var(--sel-fg) 22%, transparent);
 }
 
 .tag.alt {
-  color: var(--accent);
+  color: var(--accent-ink);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
 }
 
 .tag.warn {
-  color: var(--git-modified);
+  color: #b5701a;
+  background: color-mix(in srgb, var(--git-modified) 20%, transparent);
 }
 
-/* ------------------------------------------------------------- git dot */
+@media (prefers-color-scheme: dark) {
+  .tag.warn {
+    color: var(--git-modified);
+  }
+}
+
+/* ============================================================= git dot == */
 
 .gitdot {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
+  gap: 4px;
   flex: 0 0 auto;
 }
 
 .gitdot i {
-  width: 7px;
-  height: 7px;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
   display: block;
-  box-shadow: 0 0 0 1.5px var(--bg);
 }
 
 .gitdot b {
-  font-size: 10px;
-  font-weight: 600;
+  font-size: 10.5px;
+  font-weight: 620;
   color: var(--fg-faint);
+  font-variant-numeric: tabular-nums;
 }
 
 .lrow.selected .gitdot b {
-  color: rgba(255, 255, 255, 0.85);
+  color: color-mix(in srgb, var(--sel-fg) 85%, transparent);
+}
+
+/* The badge sits over a thumbnail, so it needs its own halo to stay legible. */
+.cell-badge .gitdot i {
+  width: 13px;
+  height: 13px;
+  box-shadow:
+    0 0 0 2.5px var(--surface),
+    0 1px 3px rgba(0, 0, 0, 0.3);
 }
 
 .gitdot.modified i {
@@ -714,66 +1121,287 @@ button {
   background: var(--git-conflict);
 }
 
-/* ------------------------------------------------------------ chrome */
+/* ============================================================== chrome == */
 
 .view-empty {
   position: absolute;
   inset: 0;
-  display: grid;
-  place-items: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
   color: var(--fg-faint);
+  font-size: 14px;
+  text-align: center;
+  white-space: pre-line;
+  padding: 0 40px;
   pointer-events: none;
 }
 
+.view-empty svg {
+  opacity: 0.4;
+}
+
+/* Three tracks so the count stays optically centred whether or not the zoom
+   slider is present. */
 .statusbar {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  height: 32px;
+  flex: 0 0 32px;
+  padding: 0 14px;
+  border-top: 1px solid var(--hair-soft);
+  background: transparent;
+  color: var(--fg-faint);
+  font-size: 11.5px;
+  font-weight: 500;
+}
+
+.status-text {
+  grid-column: 2;
+  text-align: center;
+}
+
+/* ------------------------------------------------------------ accent tint */
+
+.tint {
+  grid-column: 1;
+  justify-self: start;
+  position: relative;
+  display: flex;
+}
+
+.tint-btn {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-pill);
+  background: transparent;
+  transition: background var(--fast) var(--ease);
+}
+
+.tint-btn:hover {
+  background: var(--fill);
+}
+
+.tint-swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow:
+    inset 0 0 0 0.5px rgba(0, 0, 0, 0.18),
+    inset 0 1px 0 rgba(255, 255, 255, 0.35);
+}
+
+.tint-pop {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: -6px;
+  z-index: 55;
+  width: 178px;
+  padding: 7px;
+  border-radius: var(--r-lg);
+  background: var(--glass);
+  backdrop-filter: blur(30px) saturate(180%);
+  -webkit-backdrop-filter: blur(30px) saturate(180%);
+  border: 0.5px solid var(--hair);
+  box-shadow: var(--shadow-3), inset 0 1px 0 var(--highlight);
+  transform-origin: bottom left;
+  animation: tint-in var(--med) var(--spring);
+}
+
+@keyframes tint-in {
+  from {
+    opacity: 0;
+    transform: scale(0.92) translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.tint-system {
   display: flex;
   align-items: center;
-  justify-content: center;
-  height: 24px;
-  flex: 0 0 24px;
-  border-top: 1px solid var(--line);
-  background: var(--bg-chrome);
-  color: var(--fg-dim);
-  font-size: 11.5px;
+  gap: 9px;
+  width: 100%;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  font-size: 12.5px;
+  color: var(--fg);
+  transition: background var(--fast) var(--ease);
+}
+
+.tint-system:hover:not(:disabled) {
+  background: var(--fill);
+}
+
+.tint-system:disabled {
+  opacity: 0.4;
+}
+
+.tint-system.on {
+  color: var(--accent-ink);
+  font-weight: 560;
+}
+
+.tint-grid {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 4px;
+  margin-top: 5px;
+  padding: 6px 4px 2px;
+  border-top: 1px solid var(--hair);
+}
+
+.tint-dot {
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  box-shadow:
+    inset 0 0 0 0.5px rgba(0, 0, 0, 0.2),
+    inset 0 1px 0 rgba(255, 255, 255, 0.3);
+  transition: transform var(--fast) var(--spring);
+}
+
+.tint-dot:hover {
+  transform: scale(1.18);
+}
+
+/* The current colour wears a ring rather than a tick, which no swatch this
+   small can carry legibly. */
+.tint-dot.on {
+  box-shadow:
+    inset 0 0 0 0.5px rgba(0, 0, 0, 0.2),
+    0 0 0 2px var(--glass),
+    0 0 0 3.5px var(--accent);
+}
+
+.tint-dot.system {
+  flex: 0 0 auto;
+  background: conic-gradient(
+    from 210deg,
+    #ff5f56,
+    #f7821b,
+    #ffc409,
+    #62ba46,
+    #007aff,
+    #953d96,
+    #ff5f56
+  );
+}
+
+.status-zoom {
+  grid-column: 3;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  justify-self: end;
+  color: var(--fg-faint);
+  opacity: 0.75;
+  transition: opacity var(--fast) var(--ease);
+}
+
+.status-zoom:hover {
+  opacity: 1;
+}
+
+.status-zoom input {
+  width: 88px;
+  height: 16px;
+  appearance: none;
+  background: transparent;
+}
+
+.status-zoom input::-webkit-slider-runnable-track {
+  height: 3px;
+  border-radius: var(--r-pill);
+  background: var(--fill-strong);
+}
+
+.status-zoom input::-webkit-slider-thumb {
+  appearance: none;
+  width: 13px;
+  height: 13px;
+  margin-top: -5px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow:
+    0 1px 3px rgba(0, 0, 0, 0.3),
+    0 0 0 0.5px rgba(0, 0, 0, 0.14);
+  transition: transform var(--fast) var(--spring);
+}
+
+.status-zoom input:active::-webkit-slider-thumb {
+  transform: scale(1.2);
 }
 
 .rename-input {
   flex: 1;
   min-width: 0;
-  height: 19px;
-  padding: 0 5px;
-  border: 1px solid var(--accent);
-  border-radius: 4px;
-  background: var(--bg);
+  height: 24px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: var(--glass-strong);
   color: var(--fg);
   font: inherit;
   outline: 0;
+  box-shadow: 0 0 0 3px var(--focus-ring), var(--shadow-1);
   user-select: text;
 }
 
+/* Floating surfaces are the one place a real backdrop blur earns its cost. */
 .ctx-menu {
   position: fixed;
   z-index: 50;
-  min-width: 190px;
-  padding: 5px;
-  border-radius: 10px;
-  background: var(--bg-chrome);
-  border: 1px solid var(--line);
-  box-shadow: 0 10px 34px rgba(0, 0, 0, 0.3);
+  min-width: 216px;
+  padding: 6px;
+  border-radius: var(--r-lg);
+  background: var(--glass);
+  backdrop-filter: blur(30px) saturate(180%);
+  -webkit-backdrop-filter: blur(30px) saturate(180%);
+  border: 0.5px solid var(--hair);
+  box-shadow: var(--shadow-3), inset 0 1px 0 var(--highlight);
+  transform-origin: top left;
+  animation: pop-in var(--med) var(--spring);
+}
+
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: scale(0.94) translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
 
 .ctx-item {
   display: block;
   width: 100%;
-  padding: 5px 10px;
+  padding: 7px 11px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--r-sm);
   background: transparent;
   text-align: left;
+  font-size: 13.5px;
 }
 
 .ctx-item:hover {
-  background: var(--sel-bg);
+  background: linear-gradient(180deg, var(--accent), color-mix(in srgb, var(--accent) 86%, #000));
   color: var(--sel-fg);
 }
 
@@ -782,31 +1410,47 @@ button {
 }
 
 .ctx-item.danger:hover {
-  background: var(--git-conflict);
+  background: linear-gradient(180deg, #ff5f56, #e0463c);
   color: #fff;
 }
 
 .ctx-sep {
   height: 1px;
-  margin: 4px 7px;
-  background: var(--line);
+  margin: 5px 8px;
+  background: var(--hair);
 }
 
 .toast {
   position: fixed;
   left: 50%;
-  bottom: 40px;
-  transform: translateX(-50%);
+  bottom: 48px;
   max-width: 70%;
-  padding: 8px 15px;
-  border-radius: 9px;
-  background: var(--bg-chrome);
-  border: 1px solid var(--line);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.26);
+  padding: 11px 20px;
+  border-radius: var(--r-pill);
+  background: var(--glass);
+  backdrop-filter: blur(30px) saturate(180%);
+  -webkit-backdrop-filter: blur(30px) saturate(180%);
+  border: 0.5px solid var(--hair);
+  box-shadow: var(--shadow-3), inset 0 1px 0 var(--highlight);
+  font-size: 13px;
+  font-weight: 500;
   z-index: 60;
+  transform: translateX(-50%);
+  animation: toast-in var(--med) var(--spring);
 }
 
-/* ------------------------------------------------------- preview pane */
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 14px) scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0) scale(1);
+  }
+}
+
+/* ======================================================== preview pane == */
 
 .body {
   flex: 1;
@@ -821,22 +1465,35 @@ button {
 }
 
 .preview {
-  flex: 0 0 268px;
-  width: 268px;
-  border-left: 1px solid var(--line);
-  background: var(--bg-chrome);
+  flex: 0 0 296px;
+  width: 296px;
+  border-left: 1px solid var(--hair-soft);
+  background: var(--surface-2);
   overflow-y: auto;
-  padding: 18px 16px 20px;
+  padding: 22px 20px 24px;
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 4px;
+  animation: preview-in var(--med) var(--ease);
+}
+
+@keyframes preview-in {
+  from {
+    opacity: 0;
+    transform: translateX(18px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
 
 .preview-none {
   margin: auto;
   color: var(--fg-faint);
   text-align: center;
+  font-size: 13.5px;
 }
 
 .preview-art {
@@ -844,19 +1501,23 @@ button {
   align-items: center;
   justify-content: center;
   width: 100%;
-  min-height: 150px;
-  margin-bottom: 12px;
+  min-height: 200px;
+  margin-bottom: 16px;
 }
 
 .preview-art img {
   max-width: 100%;
-  max-height: 232px;
-  border-radius: 5px;
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.26);
+  max-height: 240px;
+  border-radius: 12px;
+  box-shadow:
+    0 2px 8px rgba(0, 0, 0, 0.14),
+    0 16px 40px rgba(0, 0, 0, 0.2);
 }
 
 .preview-name {
-  font-weight: 600;
+  font-size: 15.5px;
+  font-weight: 620;
+  letter-spacing: -0.015em;
   text-align: center;
   word-break: break-word;
   user-select: text;
@@ -864,37 +1525,48 @@ button {
 
 .preview-kind {
   color: var(--fg-dim);
-  font-size: 11.5px;
+  font-size: 12.5px;
   text-align: center;
+  margin-top: 2px;
 }
 
 .preview-git {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 6px;
-  margin-top: 8px;
-  font-size: 11.5px;
+  gap: 7px;
+  margin-top: 12px;
+  padding: 5px 13px;
+  border-radius: var(--r-pill);
+  background: var(--fill);
+  font-size: 12px;
+  font-weight: 500;
   color: var(--fg-dim);
 }
 
+/* Details read as one card rather than a run of loose label/value pairs. */
 .preview-facts {
   width: 100%;
-  margin: 14px 0 0;
-  padding-top: 12px;
-  border-top: 1px solid var(--line);
+  margin: 20px 0 0;
+  padding: 4px 14px;
+  border-radius: var(--r-lg);
+  background: var(--fill);
   display: flex;
   flex-direction: column;
-  gap: 6px;
 }
 
 .fact {
   display: flex;
-  gap: 10px;
-  font-size: 11.5px;
+  gap: 12px;
+  padding: 9px 0;
+  font-size: 12.5px;
+}
+
+.fact + .fact {
+  border-top: 1px solid var(--hair-soft);
 }
 
 .fact dt {
-  flex: 0 0 66px;
+  flex: 0 0 72px;
   color: var(--fg-faint);
 }
 
@@ -910,14 +1582,13 @@ button {
   width: 100%;
   max-height: 260px;
   margin: 14px 0 0;
-  padding: 9px 10px;
+  padding: 12px 13px;
   overflow: auto;
-  border-radius: 7px;
-  background: var(--bg);
-  border: 1px solid var(--line);
-  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  border-radius: var(--r-md);
+  background: var(--fill);
+  font-family: var(--mono);
   font-size: 10.5px;
-  line-height: 1.5;
+  line-height: 1.55;
   white-space: pre-wrap;
   word-break: break-word;
   color: var(--fg-dim);
@@ -926,9 +1597,20 @@ button {
 
 .preview-path {
   width: 100%;
-  margin-top: 12px;
+  margin-top: 14px;
   font-size: 10.5px;
+  line-height: 1.5;
   color: var(--fg-faint);
   word-break: break-all;
+  text-align: center;
   user-select: text;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
 }

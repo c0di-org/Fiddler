@@ -3,13 +3,17 @@ import { openPath } from "@tauri-apps/plugin-opener";
 
 import { ContextMenu, type MenuItem } from "./components/ContextMenu";
 import { DetailList } from "./components/DetailList";
+import { GlyphDefs } from "./components/FileGlyph";
 import { IconGrid, type GridCell } from "./components/IconGrid";
 import { PreviewPane } from "./components/PreviewPane";
 import { Sidebar } from "./components/Sidebar";
+import { TintPicker } from "./components/TintPicker";
 import { Toolbar } from "./components/Toolbar";
+import { GridIcon } from "./components/icons";
 import { formatSize } from "./format";
 import * as ipc from "./ipc";
 import { TreeStore, type Row } from "./store/tree";
+import { applyTint, hasSystemAccent, loadTint, saveTint, watchTint, type Tint } from "./tint";
 import type { Entry, Place } from "./types";
 
 const store = new TreeStore();
@@ -35,6 +39,8 @@ export default function App() {
   const [filter, setFilter] = useState("");
   const [menu, setMenu] = useState<{ x: number; y: number; items: MenuItem[] } | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+  const [tint, setTint] = useState<Tint>(loadTint);
+  const [systemTint, setSystemTint] = useState(false);
   const anchorRef = useRef<string | null>(null);
   const typeAhead = useRef({ buffer: "", at: 0 });
 
@@ -60,6 +66,17 @@ export default function App() {
       cancelled = true;
     };
   }, []);
+
+  // The accent follows the OS unless overridden, and has to be re-derived when
+  // the appearance flips or the OS accent changes while we're running.
+  useEffect(() => {
+    applyTint(tint);
+    saveTint(tint);
+  }, [tint]);
+
+  const tintRef = useRef(tint);
+  tintRef.current = tint;
+  useEffect(() => watchTint(() => tintRef.current, () => setSystemTint(hasSystemAccent())), []);
 
   useEffect(() => {
     const subs = [
@@ -457,6 +474,7 @@ export default function App() {
 
   return (
     <div className="app">
+      <GlyphDefs />
       <Sidebar places={places} current={store.path} onPick={(p) => void go(p)} />
 
       <main className="main">
@@ -464,7 +482,6 @@ export default function App() {
           path={store.path}
           home={home}
           view={store.view}
-          iconSize={store.iconSize}
           filter={filter}
           showHidden={store.showHidden}
           canBack={store.canBack}
@@ -475,7 +492,6 @@ export default function App() {
           onUp={() => void store.up()}
           onCrumb={(p) => void go(p)}
           onView={(v) => store.setView(v)}
-          onIconSize={(px) => store.setIconSize(px)}
           previewOpen={store.previewOpen}
           onFilter={setFilter}
           onToggleHidden={() => void store.setShowHidden(!store.showHidden)}
@@ -539,7 +555,25 @@ export default function App() {
           )}
         </div>
 
-        <footer className="statusbar">{statusText}</footer>
+        {/* Zoom lives down here, next to the count it changes, rather than
+            competing with navigation for room in the toolbar. */}
+        <footer className="statusbar">
+          <TintPicker tint={tint} systemAvailable={systemTint} onPick={setTint} />
+          <span className="status-text">{statusText}</span>
+          {store.view === "icons" && (
+            <label className="status-zoom" title="Icon size">
+              <GridIcon size={11} />
+              <input
+                type="range"
+                min={56}
+                max={224}
+                step={8}
+                value={store.iconSize}
+                onChange={(e) => store.setIconSize(Number(e.target.value))}
+              />
+            </label>
+          )}
+        </footer>
       </main>
 
       {menu && <ContextMenu {...menu} onClose={() => setMenu(null)} />}

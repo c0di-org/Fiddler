@@ -19,6 +19,9 @@ export const refreshRepo = (root: string) => invoke<void>("refresh_repo", { root
 
 export const sidebarPlaces = () => invoke<Place[]>("sidebar_places");
 
+/** The OS accent colour as sRGB bytes, or null where there isn't one to read. */
+export const systemAccent = () => invoke<[number, number, number] | null>("system_accent");
+
 export const revealInFinder = (path: string) => invoke<void>("reveal_in_finder", { path });
 
 export const openTerminalHere = (path: string) => invoke<void>("open_terminal_here", { path });

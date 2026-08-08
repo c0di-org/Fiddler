@@ -14,7 +14,7 @@ import { GitDot } from "./GitDot";
  * is the thing a plain file browser can never do for you.
  */
 
-const ART = 232;
+const ART = 200;
 
 interface Props {
   entry?: Entry;

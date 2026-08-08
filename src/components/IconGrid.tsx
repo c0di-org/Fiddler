@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import type { Entry, WorktreeInfo } from "../types";
+import { EmptyState } from "./EmptyState";
 import { FolderGlyph } from "./FileGlyph";
 import { GitDot } from "./GitDot";
 import { Thumb } from "./Thumb";
@@ -21,9 +22,18 @@ export interface GridCell {
 /** Rows are either a section heading or a run of cells. */
 type GridRow = { kind: "header"; label: string } | { kind: "cells"; cells: GridCell[] };
 
-const GAP = 8;
-const LABEL_H = 34;
-const HEADER_H = 30;
+/**
+ * The spacing decision that makes the grid read: a cell's own label is tucked
+ * right under its thumbnail (8px, set in CSS), while whole cells are pushed well
+ * apart. Proximity does the grouping, so nothing needs a box around it.
+ */
+const GAP = 24;
+/** Left/right/top breathing room around the whole grid. */
+const EDGE = 20;
+/** Room under the icon for the name. Cells that also carry a branch pill run a
+ *  little taller and lean into the gap, which is why the gap is generous. */
+const LABEL_H = 50;
+const HEADER_H = 46;
 
 interface Props {
   entries: Entry[];
@@ -54,9 +64,16 @@ export function IconGrid(props: Props) {
     return () => ro.disconnect();
   }, []);
 
-  const cellW = iconSize + 34;
   const cellH = iconSize + LABEL_H;
-  const cols = Math.max(1, Math.floor((box.w - GAP) / (cellW + GAP)));
+  const minW = iconSize + 44;
+  const avail = Math.max(minW, box.w - EDGE * 2);
+  const cols = Math.max(1, Math.floor((avail + GAP) / (minW + GAP)));
+  /**
+   * Share the leftover width out over the columns instead of leaving a ragged
+   * strip on the right — capped, so a wide window doesn't end up with a small
+   * icon marooned in an enormous tile.
+   */
+  const cellW = Math.min(minW + 64, Math.floor((avail - GAP * (cols - 1)) / cols));
 
   const rows = useMemo<GridRow[]>(() => {
     const out: GridRow[] = [];
@@ -77,7 +94,7 @@ export function IconGrid(props: Props) {
 
   const offsets = useMemo(() => {
     const tops: number[] = [];
-    let y = GAP;
+    let y = EDGE;
     for (const r of rows) {
       tops.push(y);
       y += r.kind === "header" ? HEADER_H : cellH + GAP;
@@ -172,7 +189,7 @@ export function IconGrid(props: Props) {
             );
           }
           return (
-            <div key={index} className="grid-row" style={{ top, gap: GAP, paddingLeft: GAP }}>
+            <div key={index} className="grid-row" style={{ top, gap: GAP, paddingLeft: EDGE }}>
               {row.cells.map((cell) => (
                 <Cell
                   key={cell.id}
@@ -186,9 +203,7 @@ export function IconGrid(props: Props) {
           );
         })}
       </div>
-      {rows.length === 0 && props.loaded && (
-        <div className="view-empty">{props.emptyMessage}</div>
-      )}
+      {rows.length === 0 && props.loaded && <EmptyState message={props.emptyMessage} />}
     </div>
   );
 }

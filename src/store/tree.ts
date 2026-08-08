@@ -45,7 +45,7 @@ export class TreeStore {
   sortKey: SortKey = "name";
   sortAsc = true;
   view: ViewMode = "icons";
-  iconSize = 96;
+  iconSize = 112;
   previewOpen = false;
 
   private history: string[] = [];
