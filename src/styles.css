@@ -139,7 +139,6 @@ button {
   font: inherit;
   color: inherit;
   cursor: default;
-  -webkit-app-region: no-drag;
 }
 
 ::selection {
@@ -217,7 +216,6 @@ button {
   flex: 0 0 32px;
   padding: 0 6px;
   margin-top: 22px;
-  -webkit-app-region: drag;
 }
 
 .sidebar-mark {

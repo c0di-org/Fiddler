@@ -11,7 +11,7 @@ export function Sidebar({ places, current, onPick }: Props) {
   return (
     <nav className="sidebar">
       {/* Doubles as the drag region under the traffic lights. */}
-      <div className="sidebar-head" data-tauri-drag-region>
+      <div className="sidebar-head" data-tauri-drag-region="deep">
         <span className="sidebar-mark">
           <SparkIcon size={15} />
         </span>

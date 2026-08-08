@@ -36,8 +36,10 @@ interface Props {
 export function Toolbar(p: Props) {
   const crumbs = buildCrumbs(p.path, p.home);
 
+  // "deep" so the gaps between the controls drag the window too; the drag
+  // script still refuses to start a drag from buttons, inputs and labels.
   return (
-    <header className="toolbar" data-tauri-drag-region>
+    <header className="toolbar" data-tauri-drag-region="deep">
       <div className="tb-nav">
         <button className="tb-btn" disabled={!p.canBack} onClick={p.onBack} title="Back (⌘[)">
           <ChevronLeft size={18} />
@@ -81,7 +83,7 @@ export function Toolbar(p: Props) {
         </span>
       )}
 
-      <div className="tb-spacer" data-tauri-drag-region />
+      <div className="tb-spacer" />
 
       <div className="tb-tools">
         <div className="tb-seg" data-at={p.view === "icons" ? 0 : 1}>
