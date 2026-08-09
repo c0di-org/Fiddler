@@ -2061,13 +2061,33 @@ li.md-task {
   font-size: 13px;
 }
 
-.ql-picture {
+.ql-picture,
+.ql-folder {
   flex: 1;
   min-height: 0;
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 24px;
+}
+
+/* A folder gets the room a picture would. The glyph is drawn at 512 and scaled
+   here, so it fills the window instead of sitting small in the middle of it. */
+.ql-folder {
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ql-folder .glyph,
+.ql-folder img {
+  width: auto;
+  height: auto;
+  max-width: min(100%, 520px);
+  max-height: min(62vh, 520px);
+}
+
+.ql-folder img {
+  object-fit: contain;
 }
 
 .ql-picture img {

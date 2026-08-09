@@ -27,7 +27,10 @@ const TEXT_FLOOR = 40;
 export function Thumb({ entry, size }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
   const want = px(size);
-  const worthIt = size >= TEXT_FLOOR || !isTextual(routeOf(entry.name));
+  // Only files are routed by name. A folder called `assets.css` is not a
+  // stylesheet, and whatever it has to show is worth showing at any size.
+  const isFile = entry.kind === "file";
+  const worthIt = !isFile || size >= TEXT_FLOOR || !isTextual(routeOf(entry.name));
   const [src, setSrc] = useState<string | null>(() =>
     worthIt ? (peek(entry.path, want) ?? null) : null
   );

@@ -137,11 +137,7 @@ function Body({
   onPages: (n: number) => void;
 }) {
   if (isDir) {
-    return (
-      <div className="ql-plain">
-        <FolderGlyph size={200} repo={entry.isRepo} />
-      </div>
-    );
+    return <Folder entry={entry} />;
   }
 
   if (route === "pdf") {
@@ -160,6 +156,53 @@ function Body({
     <div className="ql-plain">
       <FileGlyph entry={entry} size={200} />
       <p className="ql-note">No preview for this kind of file</p>
+    </div>
+  );
+}
+
+/**
+ * A folder, at the size the window can give it.
+ *
+ * It asks for a thumbnail the same way everything else does. Today nothing
+ * answers for a directory and it falls through to the glyph — but a folder that
+ * has a cover, whether that's a custom icon or something composed from what's
+ * inside it, will show it here at full size without this needing to change.
+ */
+function Folder({ entry }: { entry: Entry }) {
+  const [cover, setCover] = useState<string | null>(null);
+  const [count, setCount] = useState<number | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    setCover(null);
+    setCount(null);
+    void ipc
+      .thumbnail(entry.path, PICTURE_PX)
+      .then((p) => alive && setCover(p))
+      .catch(() => {});
+    void ipc
+      .inspect(entry.path)
+      .then((i) => alive && setCount(i.childCount))
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [entry.path]);
+
+  return (
+    <div className="ql-folder">
+      {cover ? (
+        <img src={convertFileSrc(cover)} alt="" draggable={false} />
+      ) : (
+        // Drawn big and scaled down by CSS, so it fills whatever the window has
+        // rather than sitting at one fixed size in the middle of it.
+        <FolderGlyph size={512} repo={entry.isRepo} />
+      )}
+      {count !== null && (
+        <p className="ql-note">
+          {count} item{count === 1 ? "" : "s"}
+        </p>
+      )}
     </div>
   );
 }
