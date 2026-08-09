@@ -41,6 +41,7 @@ npx tauri build --debug --bundles app && open src-tauri/target/debug/bundle/maco
 |---|---|
 | `⌘1` / `⌘2` | Icon / List view |
 | `⌘[` `⌘]` `⌘↑` | Back, forward, enclosing folder |
+| `space` | Quick Look — rendered markdown, highlighted source, paged PDFs |
 | `⇧⌘P` | Preview pane |
 | `⇧⌘.` | Show hidden files |
 | type letters | Jump to the first matching name |
@@ -50,7 +51,7 @@ npx tauri build --debug --bundles app && open src-tauri/target/debug/bundle/maco
 
 ## How it stays fast
 
-Performance work concentrated in four places:
+Performance work concentrated in five places:
 
 - **One git pass per repo, not per folder.** `git status --porcelain=v2 -z` runs
   once per repo, is parsed into a path→code map plus per-directory rollups, and
@@ -64,12 +65,23 @@ Performance work concentrated in four places:
   directories and git's own `*.lock` churn are dropped before they can trigger a
   refresh; the rest debounce into one status pass per burst.
 - **Both views are virtualized** over fixed-height rows, and thumbnails are
-  generated off the critical path, capped at 6 concurrent decodes, and cached on
-  disk by (path, mtime, size).
+  generated off the critical path in four lanes, ordered outward from the middle
+  of the viewport, and cached on disk by (path, mtime, size, requested px).
+- **Previews cost what you can see, not what the file is.** A source file is
+  scanned once for a byte a line, and only the sixty lines on screen are ever
+  tokenized — a 200,000-line lockfile scans in about 10ms and highlights the
+  visible window in a third of a millisecond.
 
-Thumbnails come from the `image` crate for raster formats and fall back to
-`qlmanage` for everything macOS can preview but Rust can't decode — PDF, HEIC,
-video, Sketch.
+Each preview takes the cheapest route macOS offers. Raster formats go through
+ImageIO, which decodes straight to thumbnail size and reuses an embedded EXIF
+preview when there is one. Text is laid out as a page by Core Text, and PDF
+pages are rasterised by Core Graphics at the size they'll be shown — both
+in-process, both well under a millisecond, where Quick Look would cost tens and
+a round trip to another process. Quick Look still handles what only it can:
+video, Keynote, Sketch, Office.
+
+That's why `main.rs` and `notes.md` get real thumbnails rather than the same
+grey document glyph Finder gives them.
 
 ## Layout
 
@@ -79,15 +91,26 @@ src-tauri/src/
   git/status.rs     porcelain-v2 parser, rollups        (13 unit tests)
   git/mod.rs        the caches
   fs_scan.rs        directory listing, natural sort
-  thumb.rs          thumbnail cache
+  thumb.rs          thumbnail cache, lane routing
+  thumb_text.rs     text files drawn as a page, via Core Text
+  thumb_pool.rs     four lanes, viewport-ordered              (9 unit tests)
+  page.rs           PDF pages rasterised at any size          (5 unit tests)
   watcher.rs        fsevents, filtered and debounced
   commands.rs       the IPC surface
 src/
   store/tree.ts     navigation, sorting, list flattening
-  components/       IconGrid, DetailList, PreviewPane, Thumb, FileGlyph, GitDot
+  preview/          markdown parser + highlighter            (22 unit tests)
+  components/       IconGrid, DetailList, PreviewPane, QuickLook, CodeView,
+                    MarkdownView, PdfView, Thumb, FileGlyph, GitDot
 ```
+
+Tests: `cargo test` in `src-tauri/`, and `npm test` for the parser and
+highlighter — Node runs those TypeScript files directly, so there's no test
+framework to install.
 
 ## Known gaps
 
-Not built yet: drag and drop, copy/paste/duplicate, Quick Look on space, tabs,
-column view, multi-select rename, custom sidebar favourites.
+Not built yet: drag and drop, copy/paste/duplicate, tabs, column view,
+multi-select rename, custom sidebar favourites. Quick Look renders documents
+itself rather than hosting the system's previews, so formats outside the list
+above show a still image instead.

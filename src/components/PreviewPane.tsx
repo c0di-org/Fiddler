@@ -4,17 +4,27 @@ import { convertFileSrc } from "@tauri-apps/api/core";
 import { formatSize, formatStamp } from "../format";
 import * as ipc from "../ipc";
 import { kindOf } from "../kind";
-import type { Entry, Inspect, WorktreeInfo } from "../types";
+import { isTextual, routeOf } from "../preview/route";
+import type { Entry, Inspect, TextHead, WorktreeInfo } from "../types";
+import { CodeView } from "./CodeView";
 import { FileGlyph, FolderGlyph } from "./FileGlyph";
 import { GitDot } from "./GitDot";
+import { MarkdownView } from "./MarkdownView";
 
 /**
  * Finder's preview pane: a large look at whatever is selected, plus the details
- * you'd otherwise open Get Info for. Text files show their opening lines, which
- * is the thing a plain file browser can never do for you.
+ * you'd otherwise open Get Info for. Text files show their opening lines — a
+ * README rendered, a source file highlighted — which is the thing a plain file
+ * browser can never do for you. Space opens the same content full size.
  */
 
 const ART = 200;
+
+/**
+ * How much of a text file the pane reads. A column this narrow shows a screen or
+ * two whatever we fetch, so fetching more would only cost the scroll a stall.
+ */
+const HEAD_BYTES = 24 * 1024;
 
 interface Props {
   entry?: Entry;
@@ -25,19 +35,32 @@ interface Props {
 
 export function PreviewPane({ entry, worktree, count }: Props) {
   const path = entry?.path ?? worktree?.path ?? null;
+  const route = entry ? routeOf(entry.name) : "none";
+  // Text reads better as text than as a picture of text, so files that have
+  // something to say skip the thumbnail entirely.
+  const asText = !!entry && entry.kind !== "dir" && isTextual(route);
+
   const [thumb, setThumb] = useState<string | null>(null);
   const [info, setInfo] = useState<Inspect | null>(null);
+  const [head, setHead] = useState<TextHead | null>(null);
 
   useEffect(() => {
     setThumb(null);
     setInfo(null);
+    setHead(null);
     if (!path || count !== 1) return;
 
     let alive = true;
-    if (entry?.thumbable) {
+    if (entry?.thumbable && !asText) {
       void ipc
         .thumbnail(path, 512)
         .then((r) => alive && setThumb(r))
+        .catch(() => {});
+    }
+    if (asText) {
+      void ipc
+        .readText(path, HEAD_BYTES)
+        .then((r) => alive && setHead(r))
         .catch(() => {});
     }
     void ipc
@@ -48,7 +71,7 @@ export function PreviewPane({ entry, worktree, count }: Props) {
     return () => {
       alive = false;
     };
-  }, [path, count, entry?.thumbable]);
+  }, [path, count, entry?.thumbable, asText]);
 
   if (count === 0) {
     return (
@@ -71,15 +94,29 @@ export function PreviewPane({ entry, worktree, count }: Props) {
 
   return (
     <aside className="preview">
-      <div className="preview-art">
-        {thumb ? (
-          <img src={convertFileSrc(thumb)} alt="" draggable={false} />
-        ) : entry ? (
-          <FileGlyph entry={entry} size={ART} />
+      {asText && entry && head && !head.binary ? (
+        // Markdown scrolls as one flowed document; code keeps its own scroller
+        // so the virtualization has a viewport it can measure.
+        route === "markdown" ? (
+          <div className="preview-doc">
+            <MarkdownView path={entry.path} source={head.text} dense />
+          </div>
         ) : (
-          <FolderGlyph size={ART} repo />
-        )}
-      </div>
+          <div className="preview-code">
+            <CodeView name={entry.name} text={head.text} wrap={route === "text"} dense />
+          </div>
+        )
+      ) : (
+        <div className="preview-art">
+          {thumb ? (
+            <img src={convertFileSrc(thumb)} alt="" draggable={false} />
+          ) : entry ? (
+            <FileGlyph entry={entry} size={ART} />
+          ) : (
+            <FolderGlyph size={ART} repo />
+          )}
+        </div>
+      )}
 
       <div className="preview-name">{name}</div>
       <div className="preview-kind">
@@ -111,9 +148,9 @@ export function PreviewPane({ entry, worktree, count }: Props) {
         )}
       </dl>
 
-      {info?.text && (
-        <pre className="preview-text">{info.text}</pre>
-      )}
+      {/* Files with no route of their own still show their opening lines, which
+          is how anything text-shaped but unrecognised stays readable. */}
+      {!asText && info?.text && <pre className="preview-text">{info.text}</pre>}
 
       {path && <div className="preview-path">{path}</div>}
     </aside>

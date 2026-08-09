@@ -239,6 +239,103 @@ pub async fn inspect(path: String) -> Result<Inspect, String> {
     .map_err(|e| format!("inspect task failed: {e}"))?
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TextHead {
+    pub text: String,
+    /// The file continues past what we read.
+    pub truncated: bool,
+    /// Size of the whole file, so the reader can say how much it isn't showing.
+    pub bytes: u64,
+    /// Lines in the part we read.
+    pub lines: u32,
+    pub binary: bool,
+}
+
+/// Read the front of a text file for a preview.
+///
+/// Bounded on purpose: a preview of a 400MB log is still just the first screen
+/// of it, and reading the rest would cost a stall the user never asked for. The
+/// cut is made on a character boundary so the tail never arrives as a replacement
+/// glyph.
+#[tauri::command]
+pub async fn read_text(path: String, max_bytes: usize) -> Result<TextHead, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        use std::io::Read;
+
+        let p = PathBuf::from(&path);
+        let meta = std::fs::metadata(&p).map_err(|e| e.to_string())?;
+        if meta.is_dir() {
+            return Err("that is a folder".into());
+        }
+
+        let cap = max_bytes.clamp(1024, 4 * 1024 * 1024);
+        // `take` + `read_to_end` rather than one `read`: a single read is
+        // allowed to come back short, which would silently cut the preview.
+        let mut buf = Vec::with_capacity(cap.min(meta.len() as usize + 1));
+        let f = std::fs::File::open(&p).map_err(|e| e.to_string())?;
+        f.take(cap as u64).read_to_end(&mut buf).map_err(|e| e.to_string())?;
+        let n = buf.len();
+
+        if buf.contains(&0) {
+            return Ok(TextHead {
+                text: String::new(),
+                truncated: false,
+                bytes: meta.len(),
+                lines: 0,
+                binary: true,
+            });
+        }
+
+        // Trim back to the last whole character, so a multi-byte sequence split
+        // by the read boundary is dropped rather than mangled.
+        let text = match std::str::from_utf8(&buf) {
+            Ok(s) => s.to_string(),
+            Err(e) => String::from_utf8_lossy(&buf[..e.valid_up_to()]).into_owned(),
+        };
+
+        Ok(TextHead {
+            lines: text.lines().count() as u32,
+            truncated: (n as u64) < meta.len(),
+            bytes: meta.len(),
+            binary: false,
+            text,
+        })
+    })
+    .await
+    .map_err(|e| format!("read task failed: {e}"))?
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PdfMeta {
+    pub pages: u32,
+    /// First page's width over height, so the viewer can hold the right shape
+    /// open while the render is still in flight.
+    pub aspect: f64,
+}
+
+#[tauri::command]
+pub async fn pdf_meta(path: String) -> Result<PdfMeta, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::page::meta(Path::new(&path)).map(|m| PdfMeta { pages: m.pages, aspect: m.aspect })
+    })
+    .await
+    .map_err(|e| format!("pdf task failed: {e}"))?
+}
+
+/// Rasterise one page of a PDF at `max_px` on its longest side, returning the
+/// cached image's path. Pages already rendered at this size cost a single `stat`.
+#[tauri::command]
+pub async fn pdf_page(path: String, page: u32, max_px: u32) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::page::cached_render(Path::new(&path), page, max_px.clamp(64, 4096))
+            .map(|p| p.to_string_lossy().into_owned())
+    })
+    .await
+    .map_err(|e| format!("pdf task failed: {e}"))?
+}
+
 /// Declare the full set of tiles currently worth rendering, nearest-to-viewport
 /// first. This supersedes the previous set, so anything scrolled past is
 /// abandoned before it costs a decode. Whatever is already cached comes back

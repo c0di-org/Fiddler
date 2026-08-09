@@ -117,3 +117,21 @@ export interface Inspect {
   childCount: number | null;
   binary: boolean;
 }
+
+/** The front of a text file, however much of it we asked for. */
+export interface TextHead {
+  text: string;
+  /** The file continues past what was read. */
+  truncated: boolean;
+  /** Size of the whole file on disk. */
+  bytes: number;
+  /** Lines in the part that was read. */
+  lines: number;
+  binary: boolean;
+}
+
+export interface PdfMeta {
+  pages: number;
+  /** First page's width over height, for holding the shape before it renders. */
+  aspect: number;
+}

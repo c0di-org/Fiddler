@@ -2,8 +2,10 @@ mod commands;
 mod fs_scan;
 mod git;
 mod model;
+mod page;
 mod thumb;
 mod thumb_pool;
+mod thumb_text;
 mod watcher;
 
 use std::sync::Arc;
@@ -35,6 +37,9 @@ pub fn run() {
             commands::thumbnail,
             commands::thumbnails,
             commands::inspect,
+            commands::read_text,
+            commands::pdf_meta,
+            commands::pdf_page,
             commands::reveal_in_finder,
             commands::open_terminal_here,
             commands::create_folder,

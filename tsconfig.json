@@ -16,5 +16,10 @@
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["src"]
+  "include": ["src"],
+  /* Tests run under Node's own runner (`npm test`), which strips the types
+     rather than checking them, and they use `node:*` modules this project has
+     no typings for. Keeping them out of the app's typecheck is what lets the
+     parser have tests without the project gaining a test framework. */
+  "exclude": ["src/**/*.test.ts"]
 }

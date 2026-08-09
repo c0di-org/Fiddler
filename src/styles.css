@@ -72,6 +72,16 @@
 
   --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
   --mono: ui-monospace, "SF Mono", Menlo, monospace;
+
+  /* Syntax, following Xcode's default themes so highlighted code in Fiddler
+     reads the same way it does in the editor the user just left. */
+  --code-cmt: #5d6c79;
+  --code-str: #c0392b;
+  --code-key: #0f68a0;
+  --code-kw: #9b2393;
+  --code-num: #1c00cf;
+  --code-typ: #2c5aa0;
+  --code-pun: rgba(60, 60, 67, 0.55);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -109,6 +119,14 @@
     --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.3), 0 2px 6px rgba(0, 0, 0, 0.24);
     --shadow-2: 0 2px 8px rgba(0, 0, 0, 0.36), 0 12px 32px rgba(0, 0, 0, 0.4);
     --shadow-3: 0 10px 24px rgba(0, 0, 0, 0.45), 0 28px 70px rgba(0, 0, 0, 0.55);
+
+    --code-cmt: #7e8c98;
+    --code-str: #ff8170;
+    --code-key: #6bdfff;
+    --code-kw: #ff7ab2;
+    --code-num: #d9c97c;
+    --code-typ: #dabaff;
+    --code-pun: rgba(235, 235, 245, 0.5);
   }
 }
 
@@ -149,6 +167,8 @@ button {
    their own. Only the inset panels, where an overlay bar would sit on top of
    text, get a thin drawn one. */
 .preview-text::-webkit-scrollbar,
+.code-scroller::-webkit-scrollbar,
+.ql-doc::-webkit-scrollbar,
 .preview::-webkit-scrollbar,
 .sidebar::-webkit-scrollbar {
   width: 10px;
@@ -156,6 +176,8 @@ button {
 }
 
 .preview-text::-webkit-scrollbar-thumb,
+.code-scroller::-webkit-scrollbar-thumb,
+.ql-doc::-webkit-scrollbar-thumb,
 .preview::-webkit-scrollbar-thumb,
 .sidebar::-webkit-scrollbar-thumb {
   border: 3px solid transparent;
@@ -165,12 +187,16 @@ button {
 }
 
 .preview-text::-webkit-scrollbar-thumb:hover,
+.code-scroller::-webkit-scrollbar-thumb:hover,
+.ql-doc::-webkit-scrollbar-thumb:hover,
 .preview::-webkit-scrollbar-thumb:hover,
 .sidebar::-webkit-scrollbar-thumb:hover {
   background-color: rgba(120, 120, 128, 0.5);
 }
 
 .preview-text::-webkit-scrollbar-track,
+.code-scroller::-webkit-scrollbar-track,
+.ql-doc::-webkit-scrollbar-track,
 .preview::-webkit-scrollbar-track,
 .sidebar::-webkit-scrollbar-track {
   background: transparent;
@@ -1602,6 +1628,490 @@ button {
   word-break: break-all;
   text-align: center;
   user-select: text;
+}
+
+/* ============================================================ code view == */
+
+.code-scroller {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  overflow: auto;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 20px;
+  color: var(--fg);
+  user-select: text;
+}
+
+/* The pane's copy of the same view: smaller, boxed, and without the gutter. */
+.code-scroller.dense {
+  flex: none;
+  max-height: 280px;
+  padding: 10px 12px;
+  font-size: 10.5px;
+  line-height: 15px;
+  border-radius: var(--r-md);
+  background: var(--fill);
+}
+
+.code-sizer {
+  position: relative;
+  /* Long lines scroll the container rather than wrapping, so every row is
+     exactly one line tall and the virtualization arithmetic holds. */
+  min-width: max-content;
+}
+
+.code-line {
+  display: flex;
+  align-items: center;
+  white-space: pre;
+  padding-right: 18px;
+}
+
+.code-no {
+  flex: none;
+  margin-right: 14px;
+  padding-left: 16px;
+  text-align: right;
+  color: var(--fg-faint);
+  font-variant-numeric: tabular-nums;
+  user-select: none;
+}
+
+.code-scroller:not(.dense) .code-text {
+  padding-left: 2px;
+}
+
+.code-scroller.dense .code-line {
+  padding-right: 0;
+}
+
+.code-wrapped {
+  margin: 0;
+  padding: 0 18px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: inherit;
+  font-size: inherit;
+  line-height: 1.6;
+}
+
+.code-scroller.dense .code-wrapped {
+  padding: 0;
+}
+
+.t-cmt { color: var(--code-cmt); font-style: italic; }
+.t-str { color: var(--code-str); }
+.t-key { color: var(--code-key); }
+.t-kw  { color: var(--code-kw); }
+.t-num { color: var(--code-num); }
+.t-typ { color: var(--code-typ); }
+.t-pun { color: var(--code-pun); }
+
+/* ============================================================= markdown == */
+
+.md {
+  font-size: 14px;
+  line-height: 1.62;
+  color: var(--fg);
+  user-select: text;
+}
+
+.md-h {
+  margin: 1.6em 0 0.5em;
+  line-height: 1.28;
+  letter-spacing: -0.02em;
+  font-weight: 640;
+}
+
+.md > .md-h:first-child {
+  margin-top: 0;
+}
+
+.md-h1 { font-size: 1.75em; }
+.md-h2 { font-size: 1.35em; }
+.md-h3 { font-size: 1.14em; }
+.md-h4,
+.md-h5,
+.md-h6 { font-size: 1em; color: var(--fg-dim); }
+
+/* The first two levels earn a rule under them; deeper ones would stripe the
+   page. */
+.md-h1,
+.md-h2 {
+  padding-bottom: 0.28em;
+  border-bottom: 1px solid var(--hair-soft);
+}
+
+.md-p {
+  margin: 0.85em 0;
+}
+
+.md-list {
+  margin: 0.7em 0;
+  padding-left: 1.5em;
+}
+
+.md-list .md-p {
+  margin: 0.2em 0;
+}
+
+.md-list li {
+  margin: 0.22em 0;
+}
+
+li.md-task {
+  list-style: none;
+  margin-left: -1.2em;
+}
+
+.md-check {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  margin-right: 8px;
+  vertical-align: -1px;
+  border: 1.5px solid var(--fg-faint);
+  border-radius: 3.5px;
+}
+
+.md-check.done {
+  border-color: var(--accent);
+  background: var(--accent);
+  /* The tick is drawn rather than typed so it can't inherit a text style. */
+  background-image: linear-gradient(
+    45deg,
+    transparent 42%,
+    #fff 42%,
+    #fff 52%,
+    transparent 52%
+  );
+}
+
+.md-quote {
+  margin: 0.9em 0;
+  padding: 0.1em 0 0.1em 14px;
+  border-left: 3px solid var(--fill-strong);
+  color: var(--fg-dim);
+}
+
+.md-hr {
+  margin: 1.6em 0;
+  border: 0;
+  border-top: 1px solid var(--hair);
+}
+
+.md-code {
+  padding: 0.15em 0.4em;
+  border-radius: 5px;
+  background: var(--fill);
+  font-family: var(--mono);
+  font-size: 0.86em;
+}
+
+.md-pre {
+  margin: 1em 0;
+  padding: 12px 14px;
+  overflow-x: auto;
+  border-radius: var(--r-md);
+  background: var(--fill);
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.md-pre code {
+  font: inherit;
+}
+
+.md-link {
+  color: var(--accent-ink);
+  cursor: pointer;
+}
+
+.md-link:hover {
+  text-decoration: underline;
+}
+
+/* A link we won't follow still reads as one, so the document isn't misleading
+   about what it says — it just doesn't pretend to be clickable. */
+.md-link.dead {
+  color: var(--fg-dim);
+  cursor: default;
+}
+
+.md-img {
+  max-width: 100%;
+  border-radius: var(--r-sm);
+}
+
+/* Holds a little room while an image renders, so a document of screenshots
+   doesn't reflow line by line as they land. */
+.md-img-holding {
+  display: block;
+  width: 100%;
+  height: 90px;
+  border-radius: var(--r-sm);
+  background: var(--fill);
+}
+
+.md-img-remote {
+  padding: 0.1em 0.45em;
+  border: 1px dashed var(--hair);
+  border-radius: 5px;
+  color: var(--fg-faint);
+  font-size: 0.85em;
+}
+
+.md-table-wrap {
+  margin: 1em 0;
+  overflow-x: auto;
+}
+
+.md-table {
+  border-collapse: collapse;
+  font-size: 0.92em;
+}
+
+.md-table th,
+.md-table td {
+  padding: 6px 12px;
+  border: 1px solid var(--hair);
+}
+
+.md-table th {
+  background: var(--fill);
+  font-weight: 600;
+}
+
+.md-clipped {
+  margin-top: 1.5em;
+  color: var(--fg-faint);
+  font-size: 12px;
+}
+
+/* The pane's markdown is the same document at reading distance. */
+.md.dense {
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.md.dense .md-h { margin: 1em 0 0.35em; }
+.md.dense .md-h1 { font-size: 1.4em; }
+.md.dense .md-h2 { font-size: 1.2em; }
+.md.dense .md-h3,
+.md.dense .md-h4,
+.md.dense .md-h5,
+.md.dense .md-h6 { font-size: 1.05em; }
+.md.dense .md-pre { padding: 8px 9px; font-size: 9.5px; }
+.md.dense .md-list { padding-left: 1.25em; }
+
+/* ============================================ preview pane, document mode */
+
+.preview-doc,
+.preview-code {
+  width: 100%;
+  margin-bottom: 16px;
+  /* Documents read left-aligned; the rest of the pane is centred. */
+  text-align: left;
+  align-self: stretch;
+}
+
+.preview-doc {
+  max-height: 300px;
+  padding: 12px 13px;
+  overflow: auto;
+  border-radius: var(--r-md);
+  background: var(--fill);
+}
+
+/* ========================================================== quick look == */
+
+.ql-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 44px 40px 40px;
+  background: rgba(0, 0, 0, 0.28);
+  backdrop-filter: blur(20px) saturate(140%);
+  animation: ql-in var(--fast) var(--ease);
+}
+
+@keyframes ql-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.ql {
+  display: flex;
+  flex-direction: column;
+  width: min(1100px, 100%);
+  height: 100%;
+  overflow: hidden;
+  border-radius: var(--r-xl);
+  border: 1px solid var(--hair);
+  background: var(--glass-strong);
+  box-shadow: var(--shadow-3);
+  animation: ql-rise var(--med) var(--spring);
+}
+
+@keyframes ql-rise {
+  from { opacity: 0; transform: translateY(10px) scale(0.985); }
+  to { opacity: 1; transform: none; }
+}
+
+.ql-bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 11px 16px;
+  border-bottom: 1px solid var(--hair-soft);
+}
+
+.ql-title {
+  flex: 1;
+  min-width: 0;
+  text-align: center;
+}
+
+.ql-name {
+  display: block;
+  font-size: 13.5px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ql-sub {
+  display: block;
+  margin-top: 1px;
+  color: var(--fg-dim);
+  font-size: 11px;
+}
+
+.ql-close,
+.ql-open {
+  flex: none;
+  height: 26px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: var(--r-pill);
+  background: var(--fill);
+  color: var(--fg-dim);
+  font-family: inherit;
+  font-size: 12px;
+  cursor: default;
+}
+
+.ql-close {
+  width: 26px;
+  padding: 0;
+  font-size: 11px;
+}
+
+.ql-close:hover,
+.ql-open:hover {
+  background: var(--fill-hover);
+  color: var(--fg);
+}
+
+.ql-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Prose gets a measure it can be read at, rather than the full window width. */
+.ql-doc {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 32px 40px 48px;
+}
+
+.ql-doc > .md {
+  max-width: 74ch;
+  margin: 0 auto;
+}
+
+.ql .code-scroller {
+  padding: 16px 0 20px;
+}
+
+.ql-plain {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+}
+
+.ql-note {
+  margin: 0;
+  color: var(--fg-dim);
+  font-size: 13px;
+}
+
+.ql-picture {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.ql-picture img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  border-radius: var(--r-sm);
+  box-shadow: var(--shadow-2);
+}
+
+.ql-truncated {
+  flex: none;
+  padding: 8px 16px;
+  border-top: 1px solid var(--hair-soft);
+  color: var(--fg-faint);
+  font-size: 11px;
+  text-align: center;
+}
+
+.pdf {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 22px;
+}
+
+.pdf-page,
+.pdf-holding {
+  max-width: 100%;
+  max-height: 100%;
+  border-radius: 4px;
+  box-shadow: var(--shadow-2);
+}
+
+.pdf-page {
+  object-fit: contain;
+}
+
+/* Holds the page's proportions while it rasterises, so nothing jumps. */
+.pdf-holding {
+  height: 100%;
+  background: var(--fill);
 }
 
 @media (prefers-reduced-motion: reduce) {

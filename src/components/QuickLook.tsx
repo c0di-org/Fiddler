@@ -1,0 +1,234 @@
+import { useCallback, useEffect, useState } from "react";
+import { convertFileSrc } from "@tauri-apps/api/core";
+import { openPath } from "@tauri-apps/plugin-opener";
+
+import { formatSize } from "../format";
+import * as ipc from "../ipc";
+import { kindOf } from "../kind";
+import { isTextual, routeOf } from "../preview/route";
+import type { Entry, TextHead } from "../types";
+import { CodeView } from "./CodeView";
+import { FileGlyph, FolderGlyph } from "./FileGlyph";
+import { MarkdownView } from "./MarkdownView";
+import { PdfView } from "./PdfView";
+
+/**
+ * The big look: space bar over a selected file.
+ *
+ * The preview pane answers "what is this?" in a column narrow enough to live
+ * beside the folder. This answers "what's in it?" — a README rendered, a source
+ * file highlighted, a PDF you can page through — without leaving the browser or
+ * waiting for an application to launch.
+ *
+ * Arrow keys move through the folder, so holding one is a way to flip through a
+ * directory of documents. That only works if opening a file is cheap, which is
+ * the whole reason the readers underneath are bounded and cached.
+ */
+
+/** How much of a text file the reader gets. Past this, nobody is reading. */
+const HEAD_BYTES = 512 * 1024;
+
+/**
+ * Longest side for a picture at this size. Everything goes through a render
+ * rather than loading the original: ImageIO decodes a 40-megapixel photo
+ * straight to this size, where handing the file to the webview would make it
+ * expand the whole thing first.
+ */
+const PICTURE_PX = 2048;
+
+interface Props {
+  entry: Entry;
+  /** Position in the folder, for the counter and the arrow keys. */
+  index: number;
+  total: number;
+  onStep: (delta: number) => void;
+  onClose: () => void;
+}
+
+export function QuickLook({ entry, index, total, onStep, onClose }: Props) {
+  const route = routeOf(entry.name);
+  const isDir = entry.kind === "dir" || (entry.kind === "symlink" && entry.linkToDir);
+  const [page, setPage] = useState(1);
+  const [pages, setPages] = useState(1);
+
+  useEffect(() => setPage(1), [entry.path]);
+
+  const step = useCallback(
+    (delta: number) => {
+      // Inside a multi-page PDF the arrows page the document first, and only
+      // move on to the next file once you reach the end of it.
+      if (route === "pdf" && pages > 1) {
+        const next = page + delta;
+        if (next >= 1 && next <= pages) {
+          setPage(next);
+          return;
+        }
+      }
+      onStep(delta);
+    },
+    [route, page, pages, onStep]
+  );
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" || e.key === " ") {
+        e.preventDefault();
+        e.stopPropagation();
+        onClose();
+      } else if (e.key === "ArrowRight" || e.key === "ArrowDown") {
+        e.preventDefault();
+        e.stopPropagation();
+        step(1);
+      } else if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
+        e.preventDefault();
+        e.stopPropagation();
+        step(-1);
+      } else if (e.key === "Enter") {
+        e.preventDefault();
+        e.stopPropagation();
+        void openPath(entry.path);
+      }
+    };
+    // Capture, so the browser's own shortcuts see these last.
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [onClose, step, entry.path]);
+
+  return (
+    <div className="ql-scrim" onClick={onClose}>
+      <div className="ql" onClick={(e) => e.stopPropagation()}>
+        <header className="ql-bar">
+          <button className="ql-close" onClick={onClose} title="Close (space)" aria-label="Close">
+            ✕
+          </button>
+          <div className="ql-title">
+            <span className="ql-name">{entry.name}</span>
+            <span className="ql-sub">
+              {kindOf(entry)}
+              {!isDir && ` · ${formatSize(entry.size, false)}`}
+              {route === "pdf" && pages > 1 && ` · page ${page} of ${pages}`}
+              {total > 1 && ` · ${index + 1} of ${total}`}
+            </span>
+          </div>
+          <button className="ql-open" onClick={() => void openPath(entry.path)}>
+            Open
+          </button>
+        </header>
+
+        <div className="ql-body">
+          <Body entry={entry} route={route} isDir={isDir} page={page} onPages={setPages} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Body({
+  entry,
+  route,
+  isDir,
+  page,
+  onPages,
+}: {
+  entry: Entry;
+  route: ReturnType<typeof routeOf>;
+  isDir: boolean;
+  page: number;
+  onPages: (n: number) => void;
+}) {
+  if (isDir) {
+    return (
+      <div className="ql-plain">
+        <FolderGlyph size={200} repo={entry.isRepo} />
+      </div>
+    );
+  }
+
+  if (route === "pdf") {
+    return <PdfView path={entry.path} page={page} onPages={onPages} />;
+  }
+
+  if (route === "image" || route === "art") {
+    return <Picture entry={entry} />;
+  }
+
+  if (isTextual(route)) {
+    return <Text entry={entry} route={route} />;
+  }
+
+  return (
+    <div className="ql-plain">
+      <FileGlyph entry={entry} size={200} />
+      <p className="ql-note">No preview for this kind of file</p>
+    </div>
+  );
+}
+
+function Picture({ entry }: { entry: Entry }) {
+  const [src, setSrc] = useState<string | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    setSrc(null);
+    void ipc
+      .thumbnail(entry.path, PICTURE_PX)
+      .then((p) => alive && setSrc(p))
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [entry.path]);
+
+  if (!src) return <div className="ql-plain" />;
+  return (
+    <div className="ql-picture">
+      <img src={convertFileSrc(src)} alt="" draggable={false} />
+    </div>
+  );
+}
+
+function Text({ entry, route }: { entry: Entry; route: "markdown" | "code" | "text" }) {
+  const [head, setHead] = useState<TextHead | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    setHead(null);
+    setFailed(false);
+    ipc
+      .readText(entry.path, HEAD_BYTES)
+      .then((h) => alive && setHead(h))
+      .catch(() => alive && setFailed(true));
+    return () => {
+      alive = false;
+    };
+  }, [entry.path]);
+
+  if (failed) return <div className="ql-plain ql-note">This file couldn’t be read</div>;
+  if (!head) return <div className="ql-plain" />;
+  if (head.binary) {
+    return (
+      <div className="ql-plain">
+        <FileGlyph entry={entry} size={200} />
+        <p className="ql-note">This file isn’t text</p>
+      </div>
+    );
+  }
+
+  return (
+    <>
+      {route === "markdown" ? (
+        <div className="ql-doc">
+          <MarkdownView path={entry.path} source={head.text} />
+        </div>
+      ) : (
+        <CodeView name={entry.name} text={head.text} wrap={route === "text"} gutter={route === "code"} />
+      )}
+      {head.truncated && (
+        <div className="ql-truncated">
+          Showing the first {formatSize(HEAD_BYTES, false)} of {formatSize(head.bytes, false)}
+        </div>
+      )}
+    </>
+  );
+}

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 
+import { isTextual, routeOf } from "../preview/route";
 import { peek, subscribe } from "../thumbs";
 import type { Entry } from "../types";
 import { FileGlyph } from "./FileGlyph";
@@ -17,17 +18,26 @@ interface Props {
   size: number;
 }
 
+/**
+ * Below this, a page of text is a grey smudge and the typed glyph says more.
+ * Pictures keep their thumbnail at any size — a photo still reads as a photo.
+ */
+const TEXT_FLOOR = 40;
+
 export function Thumb({ entry, size }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
   const want = px(size);
-  const [src, setSrc] = useState<string | null>(() => peek(entry.path, want) ?? null);
+  const worthIt = size >= TEXT_FLOOR || !isTextual(routeOf(entry.name));
+  const [src, setSrc] = useState<string | null>(() =>
+    worthIt ? (peek(entry.path, want) ?? null) : null
+  );
 
   useEffect(() => {
-    if (!entry.thumbable) return;
+    if (!entry.thumbable || !worthIt) return;
     const el = hostRef.current;
     if (!el) return;
     return subscribe(entry.path, want, el, setSrc);
-  }, [entry.path, entry.thumbable, want]);
+  }, [entry.path, entry.thumbable, want, worthIt]);
 
   return (
     <div className="thumb" ref={hostRef} style={{ width: size, height: size }}>

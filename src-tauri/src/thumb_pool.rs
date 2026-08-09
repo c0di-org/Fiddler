@@ -12,9 +12,11 @@
 //! decode on it, and the queue depth stays bounded by what's on screen rather
 //! than by how far the user has scrolled.
 //!
-//! Two lanes, because the two rendering paths have very different shapes: ImageIO
-//! decodes are CPU-bound and sized to the machine, while Quick Look mostly waits
-//! on another process and would otherwise let a slow PDF block a folder of JPEGs.
+//! Four lanes, because the four rendering paths have very different shapes. A
+//! text page costs microseconds; an ImageIO decode is CPU-bound and sized to the
+//! machine; a PDF page is somewhere between; Quick Look mostly waits on another
+//! process. Sharing one queue would let a single slow Keynote deck sit in front
+//! of a hundred README files that were each a rounding error away from done.
 
 use std::collections::{HashSet, VecDeque};
 use std::path::Path;
@@ -50,7 +52,9 @@ fn key(path: &str, size: u32) -> String {
 
 #[derive(Default)]
 struct Queue {
+    text: VecDeque<ThumbReq>,
     raster: VecDeque<ThumbReq>,
+    page: VecDeque<ThumbReq>,
     quicklook: VecDeque<ThumbReq>,
     /// Keys currently queued or being rendered, so a re-sent batch doesn't
     /// duplicate work that's already under way.
@@ -66,7 +70,9 @@ impl Queue {
         // Anything still queued was wanted for a viewport that has since moved.
         // Drop it — the incoming batch is the current truth. Jobs a worker has
         // already picked up stay claimed, so they aren't started twice.
+        self.text.clear();
         self.raster.clear();
+        self.page.clear();
         self.quicklook.clear();
 
         let mut hits = Vec::new();
@@ -74,11 +80,12 @@ impl Queue {
             let k = key(&req.path, req.size);
             let path = Path::new(&req.path);
 
+            let lane = crate::thumb::lane_of(path);
             let settled = if self.failed.contains(&k) {
                 Some(None)
             } else if let Some(hit) = crate::thumb::cached(path, req.size) {
                 Some(Some(hit.to_string_lossy().into_owned()))
-            } else if !crate::thumb::can_thumbnail(path) {
+            } else if lane == crate::thumb::Lane::None {
                 Some(None)
             } else {
                 None
@@ -91,13 +98,20 @@ impl Queue {
             if !self.claimed.insert(k) {
                 continue;
             }
-            if crate::thumb::is_raster(path) {
-                self.raster.push_back(req);
-            } else {
-                self.quicklook.push_back(req);
+            match lane {
+                crate::thumb::Lane::Text => self.text.push_back(req),
+                crate::thumb::Lane::Raster => self.raster.push_back(req),
+                crate::thumb::Lane::Page => self.page.push_back(req),
+                crate::thumb::Lane::QuickLook | crate::thumb::Lane::None => {
+                    self.quicklook.push_back(req)
+                }
             }
         }
         hits
+    }
+
+    fn depth(&self) -> usize {
+        self.text.len() + self.raster.len() + self.page.len() + self.quicklook.len()
     }
 }
 
@@ -121,12 +135,20 @@ impl ThumbPool {
             app,
         });
 
-        // Raster work is CPU-bound, so it scales with the machine. Quick Look
-        // work is mostly waiting on another process, so a fixed handful of
-        // threads keeps that pipeline full without competing for cores.
-        let raster_workers = num_cpus::get().clamp(2, 8);
-        for _ in 0..raster_workers {
+        // Raster and text work are CPU-bound, so they scale with the machine —
+        // text more narrowly, because each job is so short that the queue drains
+        // faster than a scroll can fill it. Quick Look work is mostly waiting on
+        // another process, so a fixed handful of threads keeps that pipeline full
+        // without competing for cores.
+        let cores = num_cpus::get();
+        for _ in 0..cores.clamp(2, 4) {
+            spawn_worker(pool.clone(), Lane::Text);
+        }
+        for _ in 0..cores.clamp(2, 8) {
             spawn_worker(pool.clone(), Lane::Raster);
+        }
+        for _ in 0..cores.clamp(2, 4) {
+            spawn_worker(pool.clone(), Lane::Page);
         }
         for _ in 0..6 {
             spawn_worker(pool.clone(), Lane::QuickLook);
@@ -142,7 +164,7 @@ impl ThumbPool {
     pub fn request(&self, wanted: Vec<ThumbReq>) -> Vec<ThumbReady> {
         let mut q = self.queue.lock().unwrap();
         let hits = q.admit(wanted);
-        let waiting = q.raster.len() + q.quicklook.len();
+        let waiting = q.depth();
         drop(q);
         if waiting > 0 {
             self.work.notify_all();
@@ -155,7 +177,9 @@ impl ThumbPool {
         let mut q = self.queue.lock().unwrap();
         loop {
             let next = match lane {
+                Lane::Text => q.text.pop_front(),
                 Lane::Raster => q.raster.pop_front(),
+                Lane::Page => q.page.pop_front(),
                 Lane::QuickLook => q.quicklook.pop_front(),
             };
             if let Some(req) = next {
@@ -184,7 +208,9 @@ impl ThumbPool {
 
 #[derive(Clone, Copy)]
 enum Lane {
+    Text,
     Raster,
+    Page,
     QuickLook,
 }
 
@@ -224,11 +250,12 @@ mod tests {
         ThumbReq { path: path.into(), size: 128 }
     }
 
+    fn lane(q: &VecDeque<ThumbReq>) -> Vec<&str> {
+        q.iter().map(|r| r.path.as_str()).collect()
+    }
+
     fn queued(q: &Queue) -> (Vec<&str>, Vec<&str>) {
-        (
-            q.raster.iter().map(|r| r.path.as_str()).collect(),
-            q.quicklook.iter().map(|r| r.path.as_str()).collect(),
-        )
+        (lane(&q.raster), lane(&q.quicklook))
     }
 
     #[test]
@@ -250,21 +277,37 @@ mod tests {
     }
 
     #[test]
-    fn the_two_lanes_are_kept_apart() {
+    fn each_renderer_gets_its_own_lane() {
         let mut q = Queue::default();
-        q.admit(vec![req("/nope/photo.jpg"), req("/nope/paper.pdf"), req("/nope/clip.mov")]);
-        let (raster, ql) = queued(&q);
-        assert_eq!(raster, ["/nope/photo.jpg"]);
-        assert_eq!(ql, ["/nope/paper.pdf", "/nope/clip.mov"]);
+        q.admit(vec![
+            req("/nope/photo.jpg"),
+            req("/nope/paper.pdf"),
+            req("/nope/clip.mov"),
+            req("/nope/notes.md"),
+        ]);
+        assert_eq!(lane(&q.raster), ["/nope/photo.jpg"]);
+        assert_eq!(lane(&q.page), ["/nope/paper.pdf"]);
+        assert_eq!(lane(&q.quicklook), ["/nope/clip.mov"]);
+        assert_eq!(lane(&q.text), ["/nope/notes.md"]);
+    }
+
+    #[test]
+    fn a_slow_deck_never_holds_up_a_folder_of_source() {
+        let mut q = Queue::default();
+        q.admit(vec![req("/nope/huge.key"), req("/nope/main.rs"), req("/nope/lib.rs")]);
+        // The deck is alone in its own queue, so the two source files are first
+        // in line for a worker rather than third.
+        assert_eq!(lane(&q.text), ["/nope/main.rs", "/nope/lib.rs"]);
+        assert_eq!(lane(&q.quicklook), ["/nope/huge.key"]);
     }
 
     #[test]
     fn files_with_no_preview_are_settled_rather_than_queued() {
         let mut q = Queue::default();
-        let hits = q.admit(vec![req("/nope/notes.txt"), req("/nope/Makefile")]);
+        let hits = q.admit(vec![req("/nope/archive.zip"), req("/nope/blob.bin")]);
         assert_eq!(hits.len(), 2);
         assert!(hits.iter().all(|h| h.src.is_none()));
-        assert_eq!(queued(&q).0.len() + queued(&q).1.len(), 0);
+        assert_eq!(q.depth(), 0);
     }
 
     #[test]
@@ -298,7 +341,7 @@ mod tests {
         let hits = q.admit(vec![req("/nope/broken.pdf")]);
         assert_eq!(hits.len(), 1);
         assert!(hits[0].src.is_none());
-        assert!(queued(&q).1.is_empty(), "a known-bad file must not be retried");
+        assert_eq!(q.depth(), 0, "a known-bad file must not be retried");
     }
 
     #[test]

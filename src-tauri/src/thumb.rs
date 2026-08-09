@@ -1,12 +1,15 @@
 //! Thumbnail generation with an on-disk cache.
 //!
-//! Two paths, both of them the ones macOS uses for itself. Raster formats go
+//! Four paths, all of them the ones macOS uses for itself. Raster formats go
 //! through ImageIO, which decodes straight to the size we asked for — reusing the
 //! embedded EXIF preview when there is one, and DCT-scaling when there isn't —
-//! rather than expanding a 24-megapixel JPEG we are about to throw away.
-//! Everything else (PDF, video, Sketch, Keynote, …) goes to
-//! QuickLookThumbnailing, which renders out-of-process and shares the system
-//! thumbnail cache, so files Finder has already previewed come back for free.
+//! rather than expanding a 24-megapixel JPEG we are about to throw away. Text
+//! files are laid out as a page by Core Text, and PDFs are rasterised by Core
+//! Graphics; both are in-process and cost well under a millisecond, where asking
+//! Quick Look for the same thing costs tens and a trip to another process.
+//! Everything left over (video, Sketch, Keynote, …) does go to
+//! QuickLookThumbnailing, which shares the system thumbnail cache, so files
+//! Finder has already previewed come back for free.
 //!
 //! Results are cached by (path, mtime, size, requested px) so scrolling back
 //! through a folder never re-renders.
@@ -21,8 +24,12 @@ use std::time::Duration;
 
 use block2::RcBlock;
 use objc2::AllocAnyThread;
-use objc2_core_foundation::{CFBoolean, CFDictionary, CFNumber, CFString, CFType, CFURL, CGSize};
-use objc2_core_graphics::CGImage;
+use objc2_core_foundation::{
+    CFBoolean, CFDictionary, CFNumber, CFRetained, CFString, CFType, CFURL, CGPoint, CGRect, CGSize,
+};
+use objc2_core_graphics::{
+    CGBitmapContextCreateImage, CGColor, CGColorSpace, CGContext, CGImage,
+};
 use objc2_foundation::{NSError, NSString, NSURL};
 use objc2_image_io::{
     kCGImageSourceCreateThumbnailFromImageAlways, kCGImageSourceCreateThumbnailWithTransform,
@@ -52,24 +59,75 @@ const RASTER: &[&str] = &[
     "orf", "rw2", "srw", "pef",
 ];
 
-/// Types Quick Look renders well and users expect previews for.
+/// Types Quick Look renders well and users expect previews for. PDF is handled
+/// directly instead — see `Lane::Page`.
 const QUICKLOOK: &[&str] = &[
-    "pdf", "svg", "mov", "mp4", "m4v", "avi", "mkv", "webm", "ai", "sketch", "key", "pages",
-    "numbers", "ppt", "pptx", "doc", "docx", "xls", "xlsx", "epub", "usdz", "obj", "stl",
+    "svg", "mov", "mp4", "m4v", "avi", "mkv", "webm", "ai", "sketch", "key", "pages", "numbers",
+    "ppt", "pptx", "doc", "docx", "xls", "xlsx", "epub", "usdz", "obj", "stl",
+];
+
+/// Everything we'll draw as a page of text. Deliberately broad: a source file
+/// the user can recognise by its shape is worth far more than another grey
+/// document glyph, and the render is cheap enough that breadth costs nothing.
+const TEXT: &[&str] = &[
+    "md", "mdx", "markdown", "rst", "txt", "text", "log", "csv", "tsv", "diff", "patch", "tex",
+    "srt", "vtt", "json", "jsonc", "json5", "yaml", "yml", "toml", "ini", "cfg", "conf", "env",
+    "properties", "xml", "plist", "html", "htm", "css", "scss", "sass", "less", "sql", "graphql",
+    "sh", "zsh", "bash", "fish", "ps1", "bat", "rs", "go", "py", "rb", "swift", "java", "kt",
+    "kts", "gradle", "c", "h", "cpp", "cc", "cxx", "hpp", "hh", "cs", "m", "mm", "php", "lua",
+    "pl", "r", "ts", "tsx", "js", "jsx", "mjs", "cjs", "vue", "svelte", "dart", "ex", "exs",
+    "erl", "hs", "scala", "clj", "zig", "nim", "sol", "proto", "cmake", "mk", "lock",
+];
+
+/// Files everyone recognises that carry no extension to key off.
+const TEXT_NAMES: &[&str] = &[
+    "Makefile", "Dockerfile", "Justfile", "Rakefile", "Gemfile", "Procfile", "Brewfile",
+    "CODEOWNERS", "LICENCE", "LICENSE", "README", "CHANGELOG", "AUTHORS", "NOTICE", ".gitignore",
+    ".gitattributes", ".gitmodules", ".env", ".zshrc", ".bashrc", ".profile", ".editorconfig",
+    ".prettierrc", ".eslintrc", ".npmrc",
 ];
 
 pub fn can_thumbnail(path: &Path) -> bool {
-    match ext_of(path) {
-        Some(e) => RASTER.contains(&e.as_str()) || QUICKLOOK.contains(&e.as_str()),
-        None => false,
-    }
+    !matches!(lane_of(path), Lane::None)
 }
 
-/// Whether this file takes the in-process ImageIO path. The scheduler keeps
-/// these in a separate lane from Quick Look, since the two have very different
-/// cost profiles.
-pub fn is_raster(path: &Path) -> bool {
-    ext_of(path).map(|e| RASTER.contains(&e.as_str())).unwrap_or(false)
+/// Which of the four renderers this file belongs to. The scheduler keeps them in
+/// separate queues, because their cost profiles are nothing alike: text is
+/// microseconds, raster is CPU-bound and scales with cores, PDF is somewhere in
+/// between, and Quick Look mostly waits on another process.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Lane {
+    Text,
+    Raster,
+    Page,
+    QuickLook,
+    /// Nothing we can preview.
+    None,
+}
+
+pub fn lane_of(path: &Path) -> Lane {
+    if let Some(e) = ext_of(path) {
+        if RASTER.contains(&e.as_str()) {
+            return Lane::Raster;
+        }
+        if e == "pdf" {
+            return Lane::Page;
+        }
+        if QUICKLOOK.contains(&e.as_str()) {
+            return Lane::QuickLook;
+        }
+        if TEXT.contains(&e.as_str()) {
+            return Lane::Text;
+        }
+    }
+    let named = path
+        .file_name()
+        .map(|n| TEXT_NAMES.contains(&n.to_string_lossy().as_ref()))
+        .unwrap_or(false);
+    if named {
+        return Lane::Text;
+    }
+    Lane::None
 }
 
 fn ext_of(path: &Path) -> Option<String> {
@@ -89,6 +147,12 @@ fn cache_root() -> &'static Path {
 /// Where the thumbnail for this file *would* live. Costs one `stat`, which is
 /// what makes the cache probe cheap enough to run over a whole viewport.
 fn cache_path(path: &Path, max_px: u32) -> Result<PathBuf, String> {
+    keyed(path, max_px, 0)
+}
+
+/// The same, for renders that need a second axis — PDF pages, where one file
+/// produces a different image per page at the same requested size.
+pub fn keyed(path: &Path, max_px: u32, variant: u64) -> Result<PathBuf, String> {
     let meta = std::fs::metadata(path).map_err(|e| e.to_string())?;
     let mtime = meta
         .modified()
@@ -102,6 +166,7 @@ fn cache_path(path: &Path, max_px: u32) -> Result<PathBuf, String> {
     mtime.hash(&mut h);
     meta.len().hash(&mut h);
     max_px.hash(&mut h);
+    variant.hash(&mut h);
 
     Ok(cache_root().join(format!("{:016x}.png", h.finish())))
 }
@@ -120,11 +185,20 @@ pub fn generate(path: &Path, max_px: u32) -> Result<PathBuf, String> {
         return Ok(out);
     }
 
-    let small_enough = std::fs::metadata(path).map(|m| m.len() <= MAX_INLINE_DECODE).unwrap_or(false);
-    if is_raster(path) && small_enough && image_io(path, max_px, &out).is_ok() {
-        return Ok(out);
+    match lane_of(path) {
+        // A text file that turns out to be binary, or a PDF that turns out to be
+        // damaged, still gets Quick Look's opinion before we give up on it.
+        Lane::Text => crate::thumb_text::render(path, max_px, &out).or_else(|_| quicklook(path, max_px, &out))?,
+        Lane::Page => crate::page::render(path, 1, max_px, &out).or_else(|_| quicklook(path, max_px, &out))?,
+        Lane::Raster => {
+            let small_enough =
+                std::fs::metadata(path).map(|m| m.len() <= MAX_INLINE_DECODE).unwrap_or(false);
+            if !(small_enough && image_io(path, max_px, &out).is_ok()) {
+                quicklook(path, max_px, &out)?;
+            }
+        }
+        Lane::QuickLook | Lane::None => quicklook(path, max_px, &out)?,
     }
-    quicklook(path, max_px, &out)?;
     Ok(out)
 }
 
@@ -207,10 +281,62 @@ fn quicklook(path: &Path, max_px: u32, out: &Path) -> Result<(), String> {
     }
 }
 
+/// An RGBA bitmap of `w`×`h` device pixels, ready to draw into. Premultiplied
+/// BGRA is the layout the window server and ImageIO both want, so nothing has to
+/// swizzle the bytes on the way back out.
+pub fn bitmap(w: usize, h: usize) -> Result<CFRetained<CGContext>, String> {
+    const PREMULTIPLIED_FIRST: u32 = 2;
+    const BYTE_ORDER_32_LITTLE: u32 = 2 << 12;
+
+    extern "C-unwind" {
+        fn CGBitmapContextCreate(
+            data: *mut std::ffi::c_void,
+            width: usize,
+            height: usize,
+            bits_per_component: usize,
+            bytes_per_row: usize,
+            space: Option<&CGColorSpace>,
+            bitmap_info: u32,
+        ) -> Option<std::ptr::NonNull<CGContext>>;
+    }
+
+    if w == 0 || h == 0 {
+        return Err("empty bitmap".into());
+    }
+    let space = CGColorSpace::new_device_rgb().ok_or("no device RGB colour space")?;
+    // A zero row stride lets Core Graphics pick its own alignment, which is
+    // faster than any stride we'd compute by hand.
+    let ctx = unsafe {
+        CGBitmapContextCreate(
+            std::ptr::null_mut(),
+            w,
+            h,
+            8,
+            0,
+            Some(&space),
+            PREMULTIPLIED_FIRST | BYTE_ORDER_32_LITTLE,
+        )
+    }
+    .ok_or("could not create a bitmap context")?;
+    Ok(unsafe { CFRetained::from_raw(ctx) })
+}
+
+/// Snapshot a bitmap context and write it to the cache.
+pub fn save(ctx: &CGContext, out: &Path) -> Result<(), String> {
+    let image = CGBitmapContextCreateImage(Some(ctx)).ok_or("could not read back the bitmap")?;
+    write_png(&image, out)
+}
+
+/// Fill the whole context with one colour.
+pub fn wash(ctx: &CGContext, w: f64, h: f64, gray: f64) {
+    CGContext::set_fill_color_with_color(Some(ctx), Some(&CGColor::new_generic_gray(gray, 1.0)));
+    CGContext::fill_rect(Some(ctx), CGRect::new(CGPoint::new(0.0, 0.0), CGSize::new(w, h)));
+}
+
 /// Write a CGImage out as PNG, via a unique temp name so a half-written file is
 /// never visible under the cache key — two workers can race on the same key, and
 /// the webview reads these paths directly.
-fn write_png(image: &CGImage, out: &Path) -> Result<(), String> {
+pub fn write_png(image: &CGImage, out: &Path) -> Result<(), String> {
     static SEQ: AtomicU64 = AtomicU64::new(0);
     let tmp = out.with_extension(format!("{}.part", SEQ.fetch_add(1, Ordering::Relaxed)));
 
@@ -243,16 +369,22 @@ mod tests {
         assert!(can_thumbnail(Path::new("/a/b/photo.JPG")));
         assert!(can_thumbnail(Path::new("/a/b/doc.pdf")));
         assert!(can_thumbnail(Path::new("/a/b/clip.mov")));
-        assert!(!can_thumbnail(Path::new("/a/b/main.rs")));
-        assert!(!can_thumbnail(Path::new("/a/b/Makefile")));
+        assert!(can_thumbnail(Path::new("/a/b/main.rs")));
+        assert!(can_thumbnail(Path::new("/a/b/Makefile")));
+        assert!(!can_thumbnail(Path::new("/a/b/archive.zip")));
+        assert!(!can_thumbnail(Path::new("/a/b/mystery")));
     }
 
     #[test]
-    fn raster_and_quicklook_lanes_are_distinct() {
-        assert!(is_raster(Path::new("/a/IMG_0001.heic")));
-        assert!(is_raster(Path::new("/a/shot.CR2")));
-        assert!(!is_raster(Path::new("/a/deck.key")));
-        assert!(!is_raster(Path::new("/a/notes.txt")));
+    fn every_renderer_gets_its_own_lane() {
+        assert_eq!(lane_of(Path::new("/a/IMG_0001.heic")), Lane::Raster);
+        assert_eq!(lane_of(Path::new("/a/shot.CR2")), Lane::Raster);
+        assert_eq!(lane_of(Path::new("/a/paper.pdf")), Lane::Page);
+        assert_eq!(lane_of(Path::new("/a/deck.key")), Lane::QuickLook);
+        assert_eq!(lane_of(Path::new("/a/notes.txt")), Lane::Text);
+        assert_eq!(lane_of(Path::new("/a/README.md")), Lane::Text);
+        assert_eq!(lane_of(Path::new("/a/.gitignore")), Lane::Text);
+        assert_eq!(lane_of(Path::new("/a/data.bin")), Lane::None);
     }
 
     #[test]

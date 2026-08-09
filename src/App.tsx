@@ -6,6 +6,7 @@ import { DetailList } from "./components/DetailList";
 import { GlyphDefs } from "./components/FileGlyph";
 import { IconGrid, type GridCell } from "./components/IconGrid";
 import { PreviewPane } from "./components/PreviewPane";
+import { QuickLook } from "./components/QuickLook";
 import { Sidebar } from "./components/Sidebar";
 import { TintPicker } from "./components/TintPicker";
 import { Toolbar } from "./components/Toolbar";
@@ -38,6 +39,7 @@ export default function App() {
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [filter, setFilter] = useState("");
   const [menu, setMenu] = useState<{ x: number; y: number; items: MenuItem[] } | null>(null);
+  const [quickLook, setQuickLook] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [tint, setTint] = useState<Tint>(loadTint);
   const [systemTint, setSystemTint] = useState(false);
@@ -154,8 +156,16 @@ export default function App() {
   const go = useCallback(async (path: string) => {
     setSelection(new Set());
     setFilter("");
+    setQuickLook(false);
     await store.navigate(path);
   }, []);
+
+  /** The item Quick Look would show: the most recently selected one. */
+  const lead = useMemo(() => {
+    const id = [...selection].pop();
+    const at = id ? targets.findIndex((t) => t.id === id) : -1;
+    return at >= 0 ? { at, target: targets[at] } : null;
+  }, [selection, targets]);
 
   const openTarget = useCallback(
     async (t: Target) => {
@@ -327,8 +337,8 @@ export default function App() {
     [targets, selection]
   );
 
-  const kb = useRef({ targets, selection, moveCursor, openTarget, trashSelected, newFolder, go, jumpTo });
-  kb.current = { targets, selection, moveCursor, openTarget, trashSelected, newFolder, go, jumpTo };
+  const kb = useRef({ targets, selection, moveCursor, openTarget, trashSelected, newFolder, go, jumpTo, quickLook });
+  kb.current = { targets, selection, moveCursor, openTarget, trashSelected, newFolder, go, jumpTo, quickLook };
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -339,6 +349,9 @@ export default function App() {
       }
 
       const s = kb.current;
+      // The viewer owns the keyboard while it's up: it has already handled the
+      // keys it cares about, and the rest must not reach the folder behind it.
+      if (s.quickLook) return;
       const lead = [...s.selection].pop();
       const target = lead ? s.targets.find((t) => t.id === lead) : undefined;
       const perRow = store.view === "icons" ? iconsPerRow() : 1;
@@ -435,6 +448,13 @@ export default function App() {
           if (e.metaKey && e.shiftKey) {
             e.preventDefault();
             void store.setShowHidden(!store.showHidden);
+          }
+          break;
+        case " ":
+          // Quick Look, as everywhere else on this OS.
+          if (target?.entry && !e.metaKey) {
+            e.preventDefault();
+            setQuickLook(true);
           }
           break;
         case "Escape":
@@ -576,6 +596,15 @@ export default function App() {
         </footer>
       </main>
 
+      {quickLook && lead?.target.entry && (
+        <QuickLook
+          entry={lead.target.entry}
+          index={lead.at}
+          total={targets.length}
+          onStep={(d) => moveCursor(d, false)}
+          onClose={() => setQuickLook(false)}
+        />
+      )}
       {menu && <ContextMenu {...menu} onClose={() => setMenu(null)} />}
       {toast && <div className="toast">{toast}</div>}
     </div>

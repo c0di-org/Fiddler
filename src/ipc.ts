@@ -3,9 +3,11 @@ import { listen } from "@tauri-apps/api/event";
 import type {
   DirListing,
   Inspect,
+  PdfMeta,
   Place,
   RepoInfo,
   RepoStatusPayload,
+  TextHead,
   ThumbReady,
   ThumbReq,
 } from "./types";
@@ -51,3 +53,13 @@ export const onThumbs = (fn: (ready: ThumbReady[]) => void) =>
   listen<ThumbReady[]>("fiddler:thumbs", (e) => fn(e.payload));
 
 export const inspect = (path: string) => invoke<Inspect>("inspect", { path });
+
+/** The front of a text file, bounded by `maxBytes` and cut on a character. */
+export const readText = (path: string, maxBytes: number) =>
+  invoke<TextHead>("read_text", { path, maxBytes });
+
+export const pdfMeta = (path: string) => invoke<PdfMeta>("pdf_meta", { path });
+
+/** One page, rasterised at `maxPx` on its longest side. Returns a cache path. */
+export const pdfPage = (path: string, page: number, maxPx: number) =>
+  invoke<string>("pdf_page", { path, page, maxPx });
