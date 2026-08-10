@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import * as ipc from "../ipc";
+import { locationCaps } from "../location";
 import { MarkdownView } from "./MarkdownView";
 import { NewFileIcon, PanelIcon } from "./icons";
 
@@ -19,6 +20,10 @@ interface Props {
 /**
  * A deliberately small text editor. It does no syntax magic, no accounts, and
  * no hidden autosave: every visible character is the file and Save is explicit.
+ *
+ * A file read off a phone or a nearby device opens here too, as a reader: the
+ * text still arrives, but saving would go out through the local filesystem and
+ * fail, so the editor says so up front rather than at the end of an edit.
  */
 export function TextEditor({ path: initialPath, parent, initialText, onClose, onCreated, onSaved }: Props) {
   const [path, setPath] = useState(initialPath);
@@ -30,6 +35,11 @@ export function TextEditor({ path: initialPath, parent, initialText, onClose, on
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const editorRef = useRef<HTMLTextAreaElement>(null);
+  // A document with a path would be written over itself; one without would be
+  // made in the folder behind the editor. Different questions, different answer
+  // on a device, so ask the one that matches what Save would actually do.
+  const at = locationCaps(path ?? parent);
+  const writable = path ? at.modify : at.create;
   const dirty = text !== savedText;
   const lines = text ? text.split("\n").length : 1;
   const markdown = isMarkdown(path ?? name);
@@ -55,7 +65,7 @@ export function TextEditor({ path: initialPath, parent, initialText, onClose, on
   };
 
   const save = async () => {
-    if (saving) return;
+    if (saving || !writable) return;
     setError(null);
     setSaving(true);
     try {
@@ -97,7 +107,12 @@ export function TextEditor({ path: initialPath, parent, initialText, onClose, on
   };
 
   return (
-    <section className="editor-shell" role="dialog" aria-modal="true" aria-label={path ? `Editing ${basename(path)}` : "New text file"}>
+    <section
+      className="editor-shell"
+      role="dialog"
+      aria-modal="true"
+      aria-label={path ? `${writable ? "Editing" : "Viewing"} ${basename(path)}` : "New text file"}
+    >
       <header className="editor-bar">
         <button className="editor-close" onClick={close} aria-label="Close editor">×</button>
         <div className="editor-title">
@@ -118,9 +133,11 @@ export function TextEditor({ path: initialPath, parent, initialText, onClose, on
               <span>Preview</span>
             </button>
           )}
-          <button className="editor-save" onClick={() => void save()} disabled={saving || (!dirty && !!path)}>
-            {saving ? "Saving…" : path ? "Save" : "Create"}
-          </button>
+          {writable && (
+            <button className="editor-save" onClick={() => void save()} disabled={saving || (!dirty && !!path)}>
+              {saving ? "Saving…" : path ? "Save" : "Create"}
+            </button>
+          )}
         </div>
       </header>
 
@@ -156,10 +173,11 @@ export function TextEditor({ path: initialPath, parent, initialText, onClose, on
             className="editor-text"
             value={text}
             onChange={(e) => setText(e.target.value)}
+            readOnly={!writable}
             spellCheck={false}
             placeholder="Start typing…"
             onKeyDown={(e) => {
-              if (e.key !== "Tab") return;
+              if (e.key !== "Tab" || !writable) return;
               e.preventDefault();
               const node = e.currentTarget;
               const start = node.selectionStart;
@@ -178,7 +196,11 @@ export function TextEditor({ path: initialPath, parent, initialText, onClose, on
       </div>
       <footer className="editor-foot">
         <span>{lines} {lines === 1 ? "line" : "lines"}</span>
-        {error ? <span className="editor-error">{error}</span> : <span>{dirty ? "Unsaved" : "Saved"}</span>}
+        {error ? (
+          <span className="editor-error">{error}</span>
+        ) : (
+          <span>{writable ? (dirty ? "Unsaved" : "Saved") : `Read-only — Fiddler can’t save to ${at.where} yet`}</span>
+        )}
       </footer>
     </section>
   );
