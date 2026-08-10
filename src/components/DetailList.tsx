@@ -85,6 +85,7 @@ export function DetailList(props: Props) {
   const [columnPrefs, setColumnPrefs] = useState(savedColumnPrefs);
   const draggedColumn = useRef<ColumnKey | null>(null);
   const suppressSort = useRef(false);
+  const resizeCleanup = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     localStorage.setItem(COLUMN_PREFS_KEY, JSON.stringify(columnPrefs));
@@ -113,22 +114,56 @@ export function DetailList(props: Props) {
   }, []);
 
   const beginResize = useCallback((key: ColumnKey, event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0) return;
     event.preventDefault();
     event.stopPropagation();
+    resizeCleanup.current?.();
     suppressSort.current = true;
+
+    const resizer = event.currentTarget;
+    const pointerId = event.pointerId;
     const startX = event.clientX;
     const startWidth = columnPrefs.widths[key];
-    const move = (moveEvent: PointerEvent) => resizeColumn(key, startWidth + moveEvent.clientX - startX);
+    let stopped = false;
+
+    // Capturing the active pointer keeps the resize alive when it crosses into
+    // a neighbouring header, whose reorder grip is also draggable.
+    resizer.setPointerCapture(pointerId);
+    document.body.classList.add("column-resizing");
+
+    const move = (moveEvent: PointerEvent) => {
+      if (moveEvent.pointerId !== pointerId) return;
+      moveEvent.preventDefault();
+      resizeColumn(key, startWidth + moveEvent.clientX - startX);
+    };
     const stop = () => {
+      if (stopped) return;
+      stopped = true;
       window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", stop);
+      window.removeEventListener("pointerup", end);
+      window.removeEventListener("pointercancel", end);
+      window.removeEventListener("blur", stop);
+      resizer.removeEventListener("lostpointercapture", stop);
+      if (resizer.hasPointerCapture(pointerId)) resizer.releasePointerCapture(pointerId);
+      if (resizeCleanup.current === stop) resizeCleanup.current = null;
+      document.body.classList.remove("column-resizing");
       window.setTimeout(() => {
         suppressSort.current = false;
       }, 0);
     };
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", stop, { once: true });
+    const end = (endEvent: PointerEvent) => {
+      if (endEvent.pointerId === pointerId) stop();
+    };
+
+    resizeCleanup.current = stop;
+    window.addEventListener("pointermove", move, { passive: false });
+    window.addEventListener("pointerup", end);
+    window.addEventListener("pointercancel", end);
+    window.addEventListener("blur", stop);
+    resizer.addEventListener("lostpointercapture", stop);
   }, [columnPrefs.widths, resizeColumn]);
+
+  useEffect(() => () => resizeCleanup.current?.(), []);
 
   const reorderColumn = useCallback((target: ColumnKey) => {
     const source = draggedColumn.current;
@@ -235,6 +270,8 @@ export function DetailList(props: Props) {
               role="separator"
               aria-orientation="vertical"
               aria-label={`Resize ${c.label} column`}
+              title="Drag to resize column"
+              onDragStart={(event) => event.preventDefault()}
               onPointerDown={(event) => beginResize(c.key, event)}
             />
           </div>

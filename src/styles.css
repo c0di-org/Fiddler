@@ -1052,7 +1052,7 @@ button {
 .column-drag {
   position: absolute;
   top: 0;
-  right: 5px;
+  right: 12px;
   bottom: 0;
   display: grid;
   place-items: center;
@@ -1078,16 +1078,38 @@ button {
 .column-resizer {
   position: absolute;
   z-index: 2;
-  top: 4px;
-  right: -3px;
-  bottom: 4px;
-  width: 7px;
+  top: 2px;
+  right: -6px;
+  bottom: 2px;
+  display: grid;
+  width: 12px;
+  place-items: center;
   cursor: col-resize;
+  touch-action: none;
 }
 
-.column-resizer:hover,
-.column-resizer:active {
-  background: color-mix(in srgb, var(--accent) 55%, transparent);
+.column-resizer::before {
+  width: 2px;
+  height: 18px;
+  border-radius: 2px;
+  background: var(--hair-soft);
+  content: "";
+  transition:
+    background var(--fast) var(--ease),
+    box-shadow var(--fast) var(--ease);
+}
+
+.column-resizer:hover::before,
+.column-resizer:active::before,
+.column-resizing .column-resizer::before {
+  background: var(--accent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 28%, transparent);
+}
+
+body.column-resizing,
+body.column-resizing * {
+  cursor: col-resize !important;
+  user-select: none;
 }
 
 .lh:hover {
@@ -2523,6 +2545,27 @@ li.md-task {
 /* Phone and tablet WebViews do not have a hover state or a reliable keyboard;
    give the viewer's exit/open controls a proper touch target. */
 @media (pointer: coarse) {
+  /* Native HTML dragging fights Pointer Events in mobile WebViews, and this
+     control is otherwise invisible without hover. Keep reordering desktop-only
+     so the column boundary has one unambiguous touch gesture. */
+  .column-drag {
+    display: none;
+  }
+
+  /* A 24px hit area straddles the divider without making the visual divider
+     heavy. Touching anywhere else in the header or list continues to scroll. */
+  .column-resizer {
+    top: 0;
+    right: -12px;
+    bottom: 0;
+    width: 24px;
+  }
+
+  .column-resizer::before {
+    width: 3px;
+    height: 22px;
+  }
+
   .ql-bar {
     min-height: 58px;
     padding: 7px 12px;
