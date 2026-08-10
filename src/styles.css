@@ -1546,6 +1546,163 @@ button {
   min-width: 0;
 }
 
+/* ========================================================= text editor == */
+
+.editor-shell {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  background: var(--glass-strong);
+  backdrop-filter: blur(34px) saturate(150%);
+  -webkit-backdrop-filter: blur(34px) saturate(150%);
+  animation: editor-in var(--med) var(--ease);
+}
+
+@keyframes editor-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
+}
+
+.editor-bar {
+  height: 54px;
+  flex: 0 0 54px;
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--hair-soft);
+}
+
+.editor-close,
+.editor-save {
+  border: 0;
+  font: inherit;
+}
+
+.editor-close {
+  width: 34px;
+  height: 34px;
+  padding: 0 0 3px;
+  border-radius: var(--r-md);
+  background: transparent;
+  color: var(--fg-dim);
+  font-size: 28px;
+  font-weight: 300;
+  line-height: 1;
+}
+
+.editor-close:hover { background: var(--fill); color: var(--fg); }
+
+.editor-title {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-width: 0;
+  color: var(--fg);
+  font-size: 14px;
+  font-weight: 630;
+}
+
+.editor-title > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.editor-title > svg { flex: 0 0 auto; color: var(--accent-ink); }
+.editor-title i { width: 6px; height: 6px; flex: 0 0 auto; border-radius: 50%; background: var(--accent); }
+
+.editor-save {
+  min-width: 58px;
+  height: 32px;
+  padding: 0 12px;
+  border-radius: var(--r-md);
+  background: linear-gradient(180deg, var(--accent), color-mix(in srgb, var(--accent) 86%, #000));
+  color: var(--sel-fg);
+  font-size: 13px;
+  font-weight: 650;
+  box-shadow: var(--shadow-1), inset 0 1px 0 rgba(255,255,255,.3);
+}
+
+.editor-save:disabled { opacity: .42; }
+
+.editor-file-meta {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--hair-soft);
+  background: var(--surface-2);
+}
+
+.editor-file-meta label { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.editor-file-meta label > span { color: var(--fg-dim); font-size: 12px; font-weight: 600; white-space: nowrap; }
+.editor-file-meta input {
+  width: min(320px, 44vw);
+  min-width: 120px;
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--hair);
+  border-radius: var(--r-sm);
+  background: var(--glass-strong);
+  color: var(--fg);
+  outline: 0;
+  font: 13px var(--mono);
+  user-select: text;
+}
+.editor-file-meta input:focus { border-color: transparent; box-shadow: 0 0 0 3px var(--focus-ring); }
+.editor-types { display: flex; gap: 4px; overflow-x: auto; }
+.editor-types button {
+  height: 27px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--r-pill);
+  background: var(--fill);
+  color: var(--fg-dim);
+  font: 11px var(--mono);
+}
+.editor-types button.on { background: var(--sel-cell); color: var(--accent-ink); font-weight: 700; }
+
+.editor-body { flex: 1; min-height: 0; padding: clamp(14px, 3vw, 36px); }
+.editor-text {
+  display: block;
+  width: 100%;
+  height: 100%;
+  resize: none;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--fg);
+  font: 14px/1.65 var(--mono);
+  letter-spacing: 0;
+  tab-size: 2;
+  user-select: text;
+}
+.editor-text::placeholder { color: var(--fg-faint); }
+.editor-foot {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 32px;
+  padding: 8px 18px;
+  border-top: 1px solid var(--hair-soft);
+  color: var(--fg-faint);
+  font: 11px var(--mono);
+}
+.editor-error { color: var(--git-conflict); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+@media (max-width: 640px) {
+  .editor-bar { height: 56px; flex-basis: 56px; padding: 0 8px; }
+  .editor-file-meta { display: block; padding: 12px; }
+  .editor-file-meta label { display: grid; grid-template-columns: 72px minmax(0, 1fr); }
+  .editor-file-meta input { width: 100%; }
+  .editor-types { margin-top: 10px; }
+  .editor-types button { flex: 0 0 auto; min-height: 30px; }
+  .editor-body { padding: 14px; }
+  .editor-text { font-size: 15px; line-height: 1.62; }
+  .editor-foot { min-height: 38px; padding: 10px 14px; }
+}
+
 .preview {
   flex: 0 0 296px;
   width: 296px;

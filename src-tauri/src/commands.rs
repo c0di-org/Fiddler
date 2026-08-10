@@ -507,6 +507,76 @@ pub fn create_folder(
     Ok(target.to_string_lossy().into_owned())
 }
 
+/// Create a UTF-8 text file without ever overwriting an existing item. Keeping
+/// this separate from `write_text_file` makes the first save conservative: a
+/// typo in a new filename cannot erase a neighbouring document.
+#[tauri::command]
+pub fn create_text_file(
+    state: State<'_, AppState>,
+    parent: String,
+    name: String,
+    text: String,
+) -> Result<String, String> {
+    let target = safe_child(&parent, &name)?;
+    match std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&target)
+    {
+        Ok(mut file) => {
+            use std::io::Write;
+            file.write_all(text.as_bytes()).map_err(|e| e.to_string())?;
+            file.sync_all().map_err(|e| e.to_string())?;
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+            return Err(format!("“{name}” already exists here"));
+        }
+        Err(e) => return Err(e.to_string()),
+    }
+    state.cache.forget_discovery_under(Path::new(&parent));
+    state.watcher.poke(Path::new(&parent));
+    Ok(target.to_string_lossy().into_owned())
+}
+
+/// Replace a text file through a sibling temporary file, then rename it into
+/// place. Both Android's shared storage and desktop filesystems see either the
+/// old complete document or the new complete document, never a partial save.
+#[tauri::command]
+pub fn write_text_file(state: State<'_, AppState>, path: String, text: String) -> Result<(), String> {
+    use std::io::Write;
+
+    let target = PathBuf::from(&path);
+    let meta = std::fs::metadata(&target).map_err(|e| e.to_string())?;
+    if !meta.is_file() {
+        return Err("that is not a regular file".into());
+    }
+    let parent = target.parent().ok_or("cannot write the filesystem root")?;
+    let file_name = target.file_name().and_then(|n| n.to_str()).ok_or("invalid file name")?;
+    let temp = parent.join(format!(".{file_name}.fiddler-save-{}", std::process::id()));
+    if temp.exists() {
+        return Err("a previous save is still being finalized; please try again".into());
+    }
+
+    let result = (|| -> Result<(), String> {
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temp)
+            .map_err(|e| e.to_string())?;
+        file.write_all(text.as_bytes()).map_err(|e| e.to_string())?;
+        file.sync_all().map_err(|e| e.to_string())?;
+        std::fs::rename(&temp, &target).map_err(|e| e.to_string())?;
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&temp);
+    }
+    result?;
+    state.cache.forget_discovery_under(parent);
+    state.watcher.poke(parent);
+    Ok(())
+}
+
 #[tauri::command]
 pub fn rename_path(
     state: State<'_, AppState>,

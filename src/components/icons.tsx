@@ -100,6 +100,14 @@ export const UpIcon = stroked(
   </>
 );
 
+export const NewFileIcon = stroked(
+  <>
+    <path d="M3.5 2.5h5l4 4v7A1.5 1.5 0 0 1 11 15H3.5A1.5 1.5 0 0 1 2 13.5V4A1.5 1.5 0 0 1 3.5 2.5Z" />
+    <path d="M8.5 2.5v4h4" />
+    <path d="M7.25 9v4M5.25 11h4" />
+  </>
+);
+
 const HomeIcon = stroked(<path d="M2.5 7 8 2.5 13.5 7v6a.75.75 0 0 1-.75.75h-9A.75.75 0 0 1 3 13z" />);
 const CodeIcon = stroked(
   <>

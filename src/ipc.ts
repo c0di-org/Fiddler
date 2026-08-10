@@ -31,6 +31,15 @@ export const openTerminalHere = (path: string) => invoke<void>("open_terminal_he
 export const createFolder = (parent: string, name: string) =>
   invoke<string>("create_folder", { parent, name });
 
+/** Creates a UTF-8 text file. The name is deliberately passed through whole so
+ * callers can choose any normal extension: `.txt`, `.md`, `.json`, and so on. */
+export const createTextFile = (parent: string, name: string, text: string) =>
+  invoke<string>("create_text_file", { parent, name, text });
+
+/** Writes a text file atomically, so a save never leaves a half-written file. */
+export const writeTextFile = (path: string, text: string) =>
+  invoke<void>("write_text_file", { path, text });
+
 export const renamePath = (path: string, newName: string) =>
   invoke<string>("rename_path", { path, newName });
 

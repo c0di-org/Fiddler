@@ -56,6 +56,8 @@ pub fn run() {
             commands::reveal_in_finder,
             commands::open_terminal_here,
             commands::create_folder,
+            commands::create_text_file,
+            commands::write_text_file,
             commands::rename_path,
             commands::trash_paths,
         ])

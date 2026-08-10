@@ -8,6 +8,7 @@ import {
   GridIcon,
   ListIcon,
   PanelIcon,
+  NewFileIcon,
   SearchIcon,
   UpIcon,
 } from "./icons";
@@ -31,6 +32,7 @@ interface Props {
   onFilter: (v: string) => void;
   onToggleHidden: () => void;
   onTogglePreview: () => void;
+  onNewFile: () => void;
 }
 
 export function Toolbar(p: Props) {
@@ -86,6 +88,9 @@ export function Toolbar(p: Props) {
       <div className="tb-spacer" />
 
       <div className="tb-tools">
+        <button className="tb-btn tb-new-file" onClick={p.onNewFile} title="New text file (⌘N)">
+          <NewFileIcon size={17} />
+        </button>
         <div className="tb-seg" data-at={p.view === "icons" ? 0 : 1}>
           <button
             className={p.view === "icons" ? "on" : ""}

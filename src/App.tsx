@@ -9,6 +9,7 @@ import { PreviewPane } from "./components/PreviewPane";
 import { QuickLook } from "./components/QuickLook";
 import { Sidebar } from "./components/Sidebar";
 import { TintPicker } from "./components/TintPicker";
+import { TextEditor } from "./components/TextEditor";
 import { Toolbar } from "./components/Toolbar";
 import { GridIcon } from "./components/icons";
 import { formatSize } from "./format";
@@ -32,6 +33,11 @@ interface Target {
   entry?: Entry;
 }
 
+interface EditorState {
+  path?: string;
+  text: string;
+}
+
 export default function App() {
   useSyncExternalStore(store.subscribe, store.getSnapshot);
 
@@ -45,6 +51,7 @@ export default function App() {
   const [toast, setToast] = useState<string | null>(null);
   const [tint, setTint] = useState<Tint>(loadTint);
   const [systemTint, setSystemTint] = useState(false);
+  const [editor, setEditor] = useState<EditorState | null>(null);
   const anchorRef = useRef<string | null>(null);
   const typeAhead = useRef({ buffer: "", at: 0 });
 
@@ -179,6 +186,11 @@ export default function App() {
         return;
       }
       try {
+        const text = await ipc.readText(t.path, 2 * 1024 * 1024);
+        if (!text.binary && !text.truncated) {
+          setEditor({ path: t.path, text: text.text });
+          return;
+        }
         await openPath(t.path);
       } catch {
         flash(`Could not open “${t.name}”`);
@@ -253,6 +265,10 @@ export default function App() {
     }
   }, [flash]);
 
+  const newTextFile = useCallback(() => {
+    if (store.path) setEditor({ text: "" });
+  }, []);
+
   const commitRename = useCallback(
     async (row: Row, name: string) => {
       setRenamingId(null);
@@ -275,6 +291,7 @@ export default function App() {
 
       if (t) {
         items.push({ label: t.isDir ? "Open" : "Open", onPick: () => void openTarget(t) });
+        if (!t.isDir) items.push({ label: "Edit Text File", onPick: () => void openTarget(t) });
         if (!isAndroid) {
           items.push({ label: "Reveal in Finder", onPick: () => void ipc.revealInFinder(t.path) });
           items.push({ label: "Open in Terminal", onPick: () => void ipc.openTerminalHere(t.path) });
@@ -296,6 +313,7 @@ export default function App() {
           }
         }
       } else {
+        items.push({ label: "New Text File", onPick: newTextFile });
         items.push({ label: "New Folder", onPick: () => void newFolder() });
         if (!isAndroid) items.push({ label: "Open in Terminal", onPick: () => void ipc.openTerminalHere(store.path) });
         const root = store.listing?.repoRoot;
@@ -310,7 +328,7 @@ export default function App() {
 
       setMenu({ x, y, items });
     },
-    [openTarget, selected.length, trashSelected, newFolder]
+    [openTarget, selected.length, trashSelected, newFolder, newTextFile]
   );
 
   // ------------------------------------------------------------- keyboard
@@ -348,13 +366,13 @@ export default function App() {
     [targets, selection, revealCursor]
   );
 
-  const kb = useRef({ targets, selection, moveCursor, openTarget, trashSelected, newFolder, go, jumpTo, quickLook });
-  kb.current = { targets, selection, moveCursor, openTarget, trashSelected, newFolder, go, jumpTo, quickLook };
+  const kb = useRef({ targets, selection, moveCursor, openTarget, trashSelected, newFolder, newTextFile, go, jumpTo, quickLook });
+  kb.current = { targets, selection, moveCursor, openTarget, trashSelected, newFolder, newTextFile, go, jumpTo, quickLook };
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const el = e.target as HTMLElement;
-      if (el.tagName === "INPUT" || el.isContentEditable) {
+      if (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable) {
         if (e.key === "Escape") (el as HTMLInputElement).blur();
         return;
       }
@@ -423,6 +441,10 @@ export default function App() {
           }
           break;
         case "n":
+          if (modifier && !e.shiftKey) {
+            e.preventDefault();
+            s.newTextFile();
+          }
           if (modifier && e.shiftKey) {
             e.preventDefault();
             void s.newFolder();
@@ -529,6 +551,7 @@ export default function App() {
           onView={(v) => store.setView(v)}
           previewOpen={store.previewOpen}
           onFilter={setFilter}
+          onNewFile={newTextFile}
           onToggleHidden={() => void store.setShowHidden(!store.showHidden)}
           onTogglePreview={() => store.togglePreview()}
         />
@@ -624,6 +647,19 @@ export default function App() {
       )}
       {menu && <ContextMenu {...menu} onClose={() => setMenu(null)} />}
       {toast && <div className="toast">{toast}</div>}
+      {editor && (
+        <TextEditor
+          path={editor.path}
+          parent={store.path}
+          initialText={editor.text}
+          onClose={() => setEditor(null)}
+          onCreated={(path) => {
+            setSelection(new Set([path]));
+            void store.navigate(store.path, false);
+          }}
+          onSaved={(name) => flash(`${name} saved`)}
+        />
+      )}
     </div>
   );
 }

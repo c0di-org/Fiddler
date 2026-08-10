@@ -53,9 +53,11 @@ existing shortcuts.
 
 The Android build keeps browsing, Git status, folder creation, rename, bounded
 text previews, image previews, cached in-app PDF pages, and streaming audio/video
-previews for formats Android can decode. Other binary formats still open in their
-installed Android apps. System Trash, terminal launching, and macOS Quick Look
-thumbnails are not available on Android.
+previews for formats Android can decode. It also has a full-screen text editor:
+tap the new-file button, name a `.txt`, `.md`, `.json` (or any other) file, then
+write and save it in place. Existing text files open in that editor; large or
+binary files still open in their installed Android app. System Trash, terminal
+launching, and macOS Quick Look thumbnails are not available on Android.
 
 ## Keys
 
@@ -70,6 +72,7 @@ thumbnails are not available on Android.
 | `↵` / `⌘↵` | Rename / open |
 | `⌘⌫` | Move to Trash |
 | `⇧⌘N` | New folder |
+| `⌘N` | New text file |
 
 ## How it stays fast
 
