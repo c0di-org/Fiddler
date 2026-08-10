@@ -101,9 +101,9 @@ export function Toolbar(p: Props) {
             about as you walk into a phone would be worse than a dead key. */}
         <button
           className="tb-btn tb-new-file"
-          disabled={!here.write}
+          disabled={!here.create}
           onClick={p.onNewFile}
-          title={here.write ? "New text file (⌘N)" : `Fiddler can’t create files on ${here.where} yet`}
+          title={here.create ? "New text file (⌘N)" : `Fiddler can’t create files on ${here.where} yet`}
         >
           <NewFileIcon size={17} />
         </button>

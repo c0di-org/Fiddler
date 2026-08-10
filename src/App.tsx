@@ -715,7 +715,7 @@ export default function App() {
     if (paths.length === 0) return;
     // Deleting part of a mixed selection would be the worst of both answers, so
     // one unsupported item refuses the lot.
-    const off = paths.map(locationCaps).find((at) => !at.write);
+    const off = paths.map(locationCaps).find((at) => !at.modify);
     if (off) {
       flash(`Fiddler can’t delete items on ${off.where} yet`);
       return;
@@ -746,13 +746,23 @@ export default function App() {
 
   const paste = useCallback(async () => {
     if (copiedPaths.length === 0 || !store.path) return;
-    const here = locationCaps(store.path);
-    if (!here.write) {
+    const destination = store.path;
+    const here = locationCaps(destination);
+    if (!here.paste) {
       flash(`Fiddler can’t put items on ${here.where} yet`);
       return;
     }
+    // A cable is slow enough that silence reads as nothing happening: a video
+    // onto a phone over USB 2.0 is tens of seconds.
+    const device = destination.startsWith("mtp://");
+    if (device) {
+      flash(`Copying ${copiedPaths.length} item${copiedPaths.length === 1 ? "" : "s"} to the device…`);
+    }
     try {
-      const copied = await ipc.copyPaths(copiedPaths, store.path);
+      const copied = await ipc.copyPaths(copiedPaths, destination);
+      // Nothing watches a folder on a device, so the listing only shows what
+      // just arrived if we go and ask again.
+      if (device) await store.invalidateDirs([destination]);
       setSelection(new Set(copied));
       flash(`Pasted ${copied.length} item${copied.length === 1 ? "" : "s"}`);
     } catch (error) {
@@ -762,7 +772,7 @@ export default function App() {
 
   const newFolder = useCallback(async () => {
     const here = locationCaps(store.path);
-    if (!here.write) {
+    if (!here.create) {
       flash(`Fiddler can’t create folders on ${here.where} yet`);
       return;
     }
@@ -781,7 +791,7 @@ export default function App() {
     // The editor's first save creates the file in the folder behind it, so the
     // question is the same one New Folder asks.
     const here = locationCaps(store.path);
-    if (!here.write) {
+    if (!here.create) {
       flash(`Fiddler can’t create files on ${here.where} yet`);
       return;
     }
@@ -795,7 +805,7 @@ export default function App() {
       const current = row.kind === "entry" ? row.entry.name : row.kind === "worktree" ? row.wt.name : "";
       if (!path || name === current) return;
       const at = locationCaps(path);
-      if (!at.write) {
+      if (!at.modify) {
         flash(`Fiddler can’t rename items on ${at.where} yet`);
         return;
       }
@@ -814,8 +824,8 @@ export default function App() {
       const items: MenuItem[] = [];
 
       // Two different questions: what this build can do, and what the address
-      // under the pointer can do. A file on a phone is readable and nothing
-      // more, so the items that would fail are left out rather than shown.
+      // under the pointer can do. A folder on a phone takes a paste and nothing
+      // else, so the items that would fail are left out rather than shown.
       const at = locationCaps(t ? t.path : store.path);
 
       if (t) {
@@ -835,7 +845,7 @@ export default function App() {
           separatorBefore: true,
           onPick: () => void navigator.clipboard.writeText(t.path),
         });
-        if (t.entry && at.write) {
+        if (t.entry && at.modify) {
           items.push({ label: "Rename…", onPick: () => setRenamingId(t.id) });
           items.push({
             label: caps.trash
@@ -851,8 +861,8 @@ export default function App() {
           });
         }
       } else {
-        if (copiedPaths.length > 0 && at.write) items.push({ label: "Paste", onPick: () => void paste() });
-        if (at.write) {
+        if (copiedPaths.length > 0 && at.paste) items.push({ label: "Paste", onPick: () => void paste() });
+        if (at.create) {
           items.push({ label: "New Text File", onPick: newTextFile });
           items.push({ label: "New Folder", onPick: () => void newFolder() });
         }
@@ -976,7 +986,7 @@ export default function App() {
             // Don't open a rename field that has nowhere to commit to: on a
             // device the name is the one thing that can't be edited.
             if (modifier) void s.openTarget(target);
-            else if (locationCaps(target.path).write) setRenamingId(target.id);
+            else if (locationCaps(target.path).modify) setRenamingId(target.id);
           }
           break;
         case "o":
