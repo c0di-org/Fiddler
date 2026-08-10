@@ -23,6 +23,8 @@ export interface Entry {
   linkToDir: boolean;
   size: number;
   mtime: number;
+  /** Unix seconds when the item was created, or its modified time as a fallback. */
+  added: number;
   hidden: boolean;
   /** A preview can be produced for this file. */
   thumbable: boolean;

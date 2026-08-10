@@ -27,6 +27,11 @@ const stroked = (path: React.ReactNode) =>
 
 export const Chevron = stroked(<path d="M6 3.5 10.5 8 6 12.5" />);
 export const ChevronLeft = stroked(<path d="M10 3.5 5.5 8 10 12.5" />);
+export const GripIcon = stroked(
+  <>
+    <path d="M5.5 4h.01M10.5 4h.01M5.5 8h.01M10.5 8h.01M5.5 12h.01M10.5 12h.01" strokeWidth="2.5" />
+  </>
+);
 
 export const FolderIcon = stroked(
   <path d="M1.75 4.25A1.25 1.25 0 0 1 3 3h3l1.5 1.75H13a1.25 1.25 0 0 1 1.25 1.25v6A1.25 1.25 0 0 1 13 13.25H3A1.25 1.25 0 0 1 1.75 12z" />

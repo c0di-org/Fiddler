@@ -73,6 +73,9 @@ pub struct Entry {
     pub size: u64,
     /// Unix seconds. 0 when unavailable.
     pub mtime: i64,
+    /// Unix seconds when the item was created. Falls back to `mtime` on filesystems
+    /// which do not expose a creation time.
+    pub added: i64,
     pub hidden: bool,
     /// A preview can be produced for this file, so the UI can request one instead
     /// of asking about every file it draws.

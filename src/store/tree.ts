@@ -3,7 +3,7 @@ import { kindOf } from "../kind";
 import { natural } from "../sort";
 import type { DirListing, Entry, RepoStatusPayload, Rollup, WorktreeInfo } from "../types";
 
-export type SortKey = "name" | "kind" | "size" | "modified";
+export type SortKey = "name" | "kind" | "size" | "modified" | "added";
 export type ViewMode = "icons" | "list";
 
 /** One line in the list view. The grid consumes `items()` instead. */
@@ -142,6 +142,8 @@ export class TreeStore {
         return (a, b) => dir * (a.size - b.size || natural(a.name, b.name));
       case "modified":
         return (a, b) => dir * (a.mtime - b.mtime || natural(a.name, b.name));
+      case "added":
+        return (a, b) => dir * (a.added - b.added || natural(a.name, b.name));
       case "kind":
         return (a, b) => dir * (kindOf(a).localeCompare(kindOf(b)) || natural(a.name, b.name));
       default:

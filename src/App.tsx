@@ -1037,6 +1037,7 @@ function entryFromNearby(candidate: NearbyEntry): Entry {
     linkToDir: candidate.linkToDir,
     size: 0,
     mtime: 0,
+    added: 0,
     hidden: candidate.hidden,
     thumbable: false,
     isRepo: false,

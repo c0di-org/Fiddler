@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 
 import { formatSize, formatStamp } from "../format";
 import { kindOf } from "../kind";
@@ -6,7 +6,7 @@ import type { Row, SortKey } from "../store/tree";
 import { Thumb } from "./Thumb";
 import { GitDot } from "./GitDot";
 import { EmptyState } from "./EmptyState";
-import { Chevron, ForkIcon, LockIcon, WarnIcon } from "./icons";
+import { Chevron, ForkIcon, GripIcon, LockIcon, WarnIcon } from "./icons";
 import { beginFolderDrag, endFolderDrag, FOLDER_DRAG_TYPE } from "../favorites";
 import { type FolderTouchDragHandlers, useFolderTouchDrag } from "./folder-touch-drag";
 
@@ -15,12 +15,41 @@ import { type FolderTouchDragHandlers, useFolderTouchDrag } from "./folder-touch
 export const ROW_H = 34;
 const OVERSCAN = 12;
 
-const COLUMNS: { key: SortKey; label: string; cls: string }[] = [
-  { key: "name", label: "Name", cls: "c-name" },
-  { key: "modified", label: "Date Modified", cls: "c-when" },
-  { key: "size", label: "Size", cls: "c-size" },
-  { key: "kind", label: "Kind", cls: "c-kind" },
+const COLUMNS: { key: SortKey; label: string; min: number; width: number }[] = [
+  { key: "name", label: "Name", min: 180, width: 300 },
+  { key: "added", label: "Date Added", min: 130, width: 150 },
+  { key: "modified", label: "Date Modified", min: 130, width: 150 },
+  { key: "size", label: "Size", min: 64, width: 82 },
+  { key: "kind", label: "Kind", min: 92, width: 132 },
 ];
+
+type ColumnKey = (typeof COLUMNS)[number]["key"];
+type ColumnWidths = Record<ColumnKey, number>;
+const COLUMN_PREFS_KEY = "fiddler:list-columns:v1";
+
+function defaultWidths(): ColumnWidths {
+  return Object.fromEntries(COLUMNS.map((column) => [column.key, column.width])) as ColumnWidths;
+}
+
+function savedColumnPrefs(): { order: ColumnKey[]; widths: ColumnWidths } {
+  const widths = defaultWidths();
+  try {
+    const raw = localStorage.getItem(COLUMN_PREFS_KEY);
+    if (!raw) return { order: COLUMNS.map((column) => column.key), widths };
+    const saved = JSON.parse(raw) as { order?: unknown; widths?: Record<string, unknown> };
+    const order = Array.isArray(saved.order)
+      ? saved.order.filter((key): key is ColumnKey => COLUMNS.some((column) => column.key === key))
+      : [];
+    for (const column of COLUMNS) {
+      const width = saved.widths?.[column.key];
+      if (typeof width === "number" && Number.isFinite(width)) widths[column.key] = Math.max(column.min, width);
+      if (!order.includes(column.key)) order.push(column.key);
+    }
+    return { order, widths };
+  } catch {
+    return { order: COLUMNS.map((column) => column.key), widths };
+  }
+}
 
 interface Props {
   rows: Row[];
@@ -53,6 +82,64 @@ export function DetailList(props: Props) {
   const revealed = useRef(0);
   const [scrollTop, setScrollTop] = useState(0);
   const [viewport, setViewport] = useState(600);
+  const [columnPrefs, setColumnPrefs] = useState(savedColumnPrefs);
+  const draggedColumn = useRef<ColumnKey | null>(null);
+  const suppressSort = useRef(false);
+
+  useEffect(() => {
+    localStorage.setItem(COLUMN_PREFS_KEY, JSON.stringify(columnPrefs));
+  }, [columnPrefs]);
+
+  const columns = useMemo(
+    () => columnPrefs.order.map((key) => COLUMNS.find((column) => column.key === key)!).filter(Boolean),
+    [columnPrefs.order],
+  );
+  const columnStyle = useMemo<CSSProperties>(() => ({
+    gridTemplateColumns: columns
+      .map((column) =>
+        column.key === "name"
+          ? `minmax(${columnPrefs.widths[column.key]}px, 1fr)`
+          : `${columnPrefs.widths[column.key]}px`,
+      )
+      .join(" "),
+  }), [columns, columnPrefs.widths]);
+
+  const resizeColumn = useCallback((key: ColumnKey, clientX: number) => {
+    const column = COLUMNS.find((candidate) => candidate.key === key)!;
+    setColumnPrefs((current) => ({
+      ...current,
+      widths: { ...current.widths, [key]: Math.max(column.min, Math.round(clientX)) },
+    }));
+  }, []);
+
+  const beginResize = useCallback((key: ColumnKey, event: React.PointerEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    suppressSort.current = true;
+    const startX = event.clientX;
+    const startWidth = columnPrefs.widths[key];
+    const move = (moveEvent: PointerEvent) => resizeColumn(key, startWidth + moveEvent.clientX - startX);
+    const stop = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", stop);
+      window.setTimeout(() => {
+        suppressSort.current = false;
+      }, 0);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", stop, { once: true });
+  }, [columnPrefs.widths, resizeColumn]);
+
+  const reorderColumn = useCallback((target: ColumnKey) => {
+    const source = draggedColumn.current;
+    if (!source || source === target) return;
+    suppressSort.current = true;
+    setColumnPrefs((current) => {
+      const order = current.order.filter((key) => key !== source);
+      order.splice(order.indexOf(target), 0, source);
+      return { ...current, order };
+    });
+  }, []);
 
   useLayoutEffect(() => {
     const el = scrollerRef.current;
@@ -104,16 +191,53 @@ export function DetailList(props: Props) {
 
   return (
     <div className="list-view">
-      <div className="list-header">
-        {COLUMNS.map((c) => (
-          <button
+      <div className="list-header" style={columnStyle}>
+        {columns.map((c) => (
+          <div
             key={c.key}
-            className={`lh ${c.cls} ${props.sortKey === c.key ? "sorted" : ""}`}
-            onClick={() => props.onSort(c.key)}
+            className={`column-header column-${c.key}`}
+            onDragOver={(event) => event.preventDefault()}
+            onDrop={(event) => {
+              event.preventDefault();
+              reorderColumn(c.key);
+            }}
           >
-            {c.label}
-            {props.sortKey === c.key && <i className={props.sortAsc ? "asc" : "desc"} />}
-          </button>
+            <button
+              className={`lh ${props.sortKey === c.key ? "sorted" : ""}`}
+              onClick={() => {
+                if (!suppressSort.current) props.onSort(c.key);
+              }}
+            >
+              {c.label}
+              {props.sortKey === c.key && <i className={props.sortAsc ? "asc" : "desc"} />}
+            </button>
+            <button
+              className="column-drag"
+              draggable
+              aria-label={`Reorder ${c.label} column`}
+              title="Drag to reorder column"
+              onDragStart={(event) => {
+                draggedColumn.current = c.key;
+                event.dataTransfer.effectAllowed = "move";
+                event.dataTransfer.setData("text/plain", c.key);
+              }}
+              onDragEnd={() => {
+                draggedColumn.current = null;
+                window.setTimeout(() => {
+                  suppressSort.current = false;
+                }, 0);
+              }}
+            >
+              <GripIcon size={12} />
+            </button>
+            <div
+              className="column-resizer"
+              role="separator"
+              aria-orientation="vertical"
+              aria-label={`Resize ${c.label} column`}
+              onPointerDown={(event) => beginResize(c.key, event)}
+            />
+          </div>
         ))}
       </div>
 
@@ -150,6 +274,8 @@ export function DetailList(props: Props) {
                 selected={selection.has(row.id)}
                 renaming={row.id === renamingId}
                 searching={searching}
+                columnStyle={columnStyle}
+                columnOrder={columnPrefs.order}
                 onRenameCommit={props.onRenameCommit}
                 onRenameCancel={props.onRenameCancel}
                 touchFolderDrag={props.touchFolderDrag}
@@ -170,6 +296,8 @@ function RowView({
   searching,
   onRenameCommit,
   onRenameCancel,
+  columnStyle,
+  columnOrder,
   touchFolderDrag,
 }: {
   row: Row;
@@ -178,6 +306,8 @@ function RowView({
   searching: boolean;
   onRenameCommit: (row: Row, name: string) => void;
   onRenameCancel: () => void;
+  columnStyle: CSSProperties;
+  columnOrder: ColumnKey[];
   touchFolderDrag?: FolderTouchDragHandlers;
 }) {
   const expandable = !searching && (row.kind === "wt-group" || row.dirPath !== null);
@@ -201,7 +331,7 @@ function RowView({
         row.kind === "wt-group" ? "section" : ""
       }`}
       data-row-id={row.id}
-      style={{ height: ROW_H }}
+      style={{ height: ROW_H, ...columnStyle }}
       draggable={isFolder}
       onDragStart={(event) => {
         if (!isFolder || !path) return;
@@ -216,7 +346,7 @@ function RowView({
       onPointerUp={touchDrag.onPointerUp}
       onPointerCancel={touchDrag.onPointerCancel}
     >
-      <div className="c-name" style={{ paddingLeft: 6 + row.depth * 17 }}>
+      <div className="c-name" style={{ paddingLeft: 6 + row.depth * 17, order: columnOrder.indexOf("name") }}>
         <span
           className={`twisty ${expandable ? "" : "hidden"} ${row.expanded ? "open" : ""}`}
           data-twisty
@@ -272,9 +402,18 @@ function RowView({
         )}
       </div>
 
-      <div className="c-when">{e && !e.nearby ? formatStamp(e.mtime) : ""}</div>
-      <div className="c-size">{e && !e.nearby ? formatSize(e.size, e.kind === "dir") : ""}</div>
-      <div className="c-kind">{e ? kindOf(e) : row.kind === "worktree" ? "Worktree" : ""}</div>
+      <div className="c-added" style={{ order: columnOrder.indexOf("added") }}>
+        {e && !e.nearby ? formatStamp(e.added) : ""}
+      </div>
+      <div className="c-when" style={{ order: columnOrder.indexOf("modified") }}>
+        {e && !e.nearby ? formatStamp(e.mtime) : ""}
+      </div>
+      <div className="c-size" style={{ order: columnOrder.indexOf("size") }}>
+        {e && !e.nearby ? formatSize(e.size, e.kind === "dir") : ""}
+      </div>
+      <div className="c-kind" style={{ order: columnOrder.indexOf("kind") }}>
+        {e ? kindOf(e) : row.kind === "worktree" ? "Worktree" : ""}
+      </div>
     </div>
   );
 }

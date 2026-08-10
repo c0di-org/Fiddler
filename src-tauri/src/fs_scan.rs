@@ -43,16 +43,23 @@ pub fn scan(dir: &Path, opts: &ScanOpts, cache: &GitCache) -> Result<Vec<Entry>,
             (Kind::File, false)
         };
 
-        let (size, mtime) = match ent.metadata() {
-            Ok(m) => (
-                m.len(),
-                m.modified()
+        let (size, mtime, added) = match ent.metadata() {
+            Ok(m) => {
+                let mtime = m
+                    .modified()
                     .ok()
                     .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
                     .map(|d| d.as_secs() as i64)
-                    .unwrap_or(0),
-            ),
-            Err(_) => (0, 0),
+                    .unwrap_or(0);
+                let added = m
+                    .created()
+                    .ok()
+                    .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+                    .map(|d| d.as_secs() as i64)
+                    .unwrap_or(mtime);
+                (m.len(), mtime, added)
+            }
+            Err(_) => (0, 0, 0),
         };
 
         // Only real directories can be repo roots; probing symlinks would follow
@@ -78,6 +85,7 @@ pub fn scan(dir: &Path, opts: &ScanOpts, cache: &GitCache) -> Result<Vec<Entry>,
             link_to_dir,
             size,
             mtime,
+            added,
             hidden,
             thumbable: matches!(kind, Kind::File) && crate::thumb::can_thumbnail(&path),
             is_repo,
