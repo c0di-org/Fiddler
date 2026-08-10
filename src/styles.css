@@ -864,6 +864,24 @@ button {
   stroke-linecap: round;
 }
 
+/* Familiar folders carry a graphite imprint, not a badge. The two tiny inset
+   shadows let the mark borrow the folder's own surface and stay restrained. */
+.folder-name-mark {
+  fill: none;
+  stroke: rgba(21, 82, 143, 0.58);
+  stroke-width: 1.1;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  filter:
+    drop-shadow(0 0.7px 0 rgba(7, 57, 110, 0.5))
+    drop-shadow(0 -0.55px 0 rgba(255, 255, 255, 0.2));
+}
+
+.folder-name-mark .folder-name-fill {
+  fill: rgba(21, 82, 143, 0.58);
+  stroke: none;
+}
+
 /* ============================================================ list view == */
 
 .list-view {

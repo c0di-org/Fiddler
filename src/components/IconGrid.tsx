@@ -230,7 +230,7 @@ function Cell({
       title={cell.path}
     >
       <div className="cell-art" style={{ height: iconSize }}>
-        {e ? <Thumb entry={e} size={iconSize} /> : <FolderGlyph size={iconSize} repo />}
+        {e ? <Thumb entry={e} size={iconSize} /> : <FolderGlyph size={iconSize} repo name={cell.name} />}
         <span className="cell-badge">
           <GitDot code={e?.code} rollup={e?.rollup} />
         </span>
