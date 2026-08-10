@@ -38,10 +38,14 @@
   --sel-ring: rgba(10, 132, 255, 0.38);
   --focus-ring: rgba(10, 132, 255, 0.28);
 
-  /* file glyph palette */
+  /* file glyph palette — the folder ramp is re-derived from the accent by
+     applyTint(); these are the blue it lands on before the first read. */
   --folder-1: #7cc0fb;
   --folder-2: #2b8cf0;
   --folder-3: #1c6fd4;
+  --folder-mark: rgba(21, 82, 143, 0.58);
+  --folder-mark-shade: rgba(7, 57, 110, 0.5);
+  --folder-ink: rgba(255, 255, 255, 0.92);
   --sheet-1: #ffffff;
   --sheet-2: #eceef3;
   --sheet-edge: rgba(0, 0, 0, 0.1);
@@ -1144,11 +1148,11 @@ button {
 }
 
 .folder-repo-mark circle {
-  fill: rgba(255, 255, 255, 0.92);
+  fill: var(--folder-ink);
 }
 
 .folder-repo-mark path {
-  stroke: rgba(255, 255, 255, 0.92);
+  stroke: var(--folder-ink);
   fill: none;
   stroke-linecap: round;
 }
@@ -1157,17 +1161,17 @@ button {
    shadows let the mark borrow the folder's own surface and stay restrained. */
 .folder-name-mark {
   fill: none;
-  stroke: rgba(21, 82, 143, 0.58);
+  stroke: var(--folder-mark);
   stroke-width: 1.1;
   stroke-linecap: round;
   stroke-linejoin: round;
   filter:
-    drop-shadow(0 0.7px 0 rgba(7, 57, 110, 0.5))
+    drop-shadow(0 0.7px 0 var(--folder-mark-shade))
     drop-shadow(0 -0.55px 0 rgba(255, 255, 255, 0.2));
 }
 
 .folder-name-mark .folder-name-fill {
-  fill: rgba(21, 82, 143, 0.58);
+  fill: var(--folder-mark);
   stroke: none;
 }
 
