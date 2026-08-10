@@ -54,7 +54,9 @@ export function ContextMenu({ x, y, items, onClose }: Props) {
     >
       {items.map((it, i) => (
         <div key={i}>
-          {it.separatorBefore && <div className="ctx-sep" />}
+          {/* Never as the first thing in the menu: whichever item a separator
+              was meant to follow can now be absent. */}
+          {it.separatorBefore && i > 0 && <div className="ctx-sep" />}
           <button
             className={`ctx-item ${it.danger ? "danger" : ""}`}
             onClick={() => {

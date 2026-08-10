@@ -694,6 +694,7 @@ pub fn create_folder(
     parent: String,
     name: String,
 ) -> Result<String, String> {
+    local_only(&parent)?;
     let target = safe_child(&parent, &name)?;
     std::fs::create_dir(&target).map_err(|e| e.to_string())?;
     state.cache.forget_discovery_under(Path::new(&parent));
@@ -711,6 +712,7 @@ pub fn create_text_file(
     name: String,
     text: String,
 ) -> Result<String, String> {
+    local_only(&parent)?;
     let target = safe_child(&parent, &name)?;
     match std::fs::OpenOptions::new()
         .write(true)
@@ -784,6 +786,7 @@ pub fn rename_path(
     path: String,
     new_name: String,
 ) -> Result<String, String> {
+    local_only(&path)?;
     let src = PathBuf::from(&path);
     let parent = src.parent().ok_or("cannot rename the filesystem root")?;
     let dst = safe_child(&parent.to_string_lossy(), &new_name)?;
@@ -868,6 +871,9 @@ fn copy_name(parent: &Path, name: &str) -> PathBuf {
 #[tauri::command]
 #[cfg(not(target_os = "android"))]
 pub fn trash_paths(state: State<'_, AppState>, paths: Vec<String>) -> Result<(), String> {
+    for path in &paths {
+        local_only(path)?;
+    }
     // Always the Trash, never `remove_file` — a file browser must not make deletions
     // that the user cannot walk back.
     trash::delete_all(&paths).map_err(|e| e.to_string())?;
@@ -893,6 +899,7 @@ pub fn trash_paths(state: State<'_, AppState>, paths: Vec<String>) -> Result<(),
 
     let mut parents = Vec::with_capacity(paths.len());
     for path in &paths {
+        local_only(path)?;
         let target = Path::new(path);
         let parent = target.parent().ok_or("cannot delete the filesystem root")?;
         // Check every target before making any change. This avoids a stale
@@ -979,6 +986,25 @@ fn channel(v: f64) -> u8 {
     (v.clamp(0.0, 1.0) * 255.0).round() as u8
 }
 
+/// Where the mutating commands stop.
+///
+/// `create_folder`, `create_text_file`, `rename_path` and `trash_paths` are
+/// `std::fs` calls, and neither `mtp://RFCY71NMVTA/65537/DCIM` nor
+/// `fiddler://abc/Documents` is a path — `Path` reads them as relative, so they
+/// resolve against the process's working directory and fail somewhere the
+/// message can only confuse. The renderer already leaves those menu items out
+/// on a device; this is what makes that a rule rather than an observation.
+fn local_only(path: &str) -> Result<(), String> {
+    let space = if path.starts_with("mtp://") {
+        "a connected device"
+    } else if path.starts_with("fiddler://") {
+        "a nearby device"
+    } else {
+        return Ok(());
+    };
+    Err(format!("Fiddler cannot change files on {space} yet"))
+}
+
 /// Join `name` onto `parent`, rejecting anything that would escape it.
 fn safe_child(parent: &str, name: &str) -> Result<PathBuf, String> {
     let trimmed = name.trim();
@@ -994,6 +1020,21 @@ fn safe_child(parent: &str, name: &str) -> Result<PathBuf, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_mutating_commands_only_accept_real_paths() {
+        assert!(local_only("/Users/codi/Developer").is_ok());
+        // A local file is not disqualified by what it happens to be called.
+        assert!(local_only("/Users/codi/notes on mtp://.txt").is_ok());
+        assert_eq!(
+            local_only("mtp://RFCY71NMVTA/65537/DCIM"),
+            Err("Fiddler cannot change files on a connected device yet".into())
+        );
+        assert_eq!(
+            local_only("fiddler://abc123/Documents"),
+            Err("Fiddler cannot change files on a nearby device yet".into())
+        );
+    }
 
     #[test]
     fn safe_child_rejects_traversal() {
