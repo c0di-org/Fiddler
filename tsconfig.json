@@ -10,6 +10,10 @@
     "resolveJsonModule": true,
     "isolatedModules": true,
     "noEmit": true,
+    /* Vite swaps this for `src/backend/web.ts` when building for the browser.
+       Pointing the typechecker at the Tauri one is arbitrary — both are in
+       `include`, so both are checked against `Backend` either way. */
+    "paths": { "@backend": ["./src/backend/tauri.ts"] },
     "jsx": "react-jsx",
     "strict": true,
     "noUnusedLocals": true,

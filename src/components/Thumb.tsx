@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import { convertFileSrc } from "@tauri-apps/api/core";
 
+import * as ipc from "../ipc";
 import { isTextual, routeOf } from "../preview/route";
-import { peek, subscribe } from "../thumbs";
+import { peek, subscribe, thumbPx } from "../thumbs";
 import type { Entry } from "../types";
 import { FileGlyph } from "./FileGlyph";
 
@@ -26,11 +26,15 @@ const TEXT_FLOOR = 40;
 
 export function Thumb({ entry, size }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
-  const want = px(size);
+  const want = thumbPx(size);
   // Only files are routed by name. A folder called `assets.css` is not a
   // stylesheet, and whatever it has to show is worth showing at any size.
   const isFile = entry.kind === "file";
-  const worthIt = !isFile || size >= TEXT_FLOOR || !isTextual(routeOf(entry.name));
+  const route = routeOf(entry.name);
+  const worthIt = !isFile || size >= TEXT_FLOOR || !isTextual(route);
+  // A shortcut's thumbnail is a rounded icon on transparency, not a rectangular
+  // picture. It has to carry its own corners and its own shadow.
+  const alpha = isFile && route === "link";
   const [src, setSrc] = useState<string | null>(() =>
     worthIt ? (peek(entry.path, want) ?? null) : null
   );
@@ -46,8 +50,8 @@ export function Thumb({ entry, size }: Props) {
     <div className="thumb" ref={hostRef} style={{ width: size, height: size }}>
       {src ? (
         <img
-          className="thumb-img"
-          src={convertFileSrc(src)}
+          className={`thumb-img${alpha ? " art-alpha" : ""}`}
+          src={ipc.fileSrc(src)}
           alt=""
           draggable={false}
           // Keep image decoding off the thread that's handling the scroll.
@@ -58,10 +62,4 @@ export function Thumb({ entry, size }: Props) {
       )}
     </div>
   );
-}
-
-/** Ask for a device-pixel-accurate thumbnail, snapped so the cache stays shared. */
-function px(size: number) {
-  const want = size * Math.min(2, window.devicePixelRatio || 1);
-  return want <= 64 ? 64 : want <= 128 ? 128 : want <= 256 ? 256 : 512;
 }

@@ -3,7 +3,7 @@ import { useState } from "react";
 import { FAVORITE_DRAG_TYPE, FOLDER_DRAG_TYPE, currentFolderDrag } from "../favorites";
 import type { Favorite, PeerDevice, Place, UsbDevice } from "../types";
 import { connectionNotice } from "../usb";
-import { BoltIcon, CableIcon, CloseIcon, DeviceIcon, FolderIcon, HeartIcon, LaptopIcon, LockIcon, SparkIcon, placeIcon } from "./icons";
+import { BoltIcon, CableIcon, CloseIcon, DeviceIcon, FolderIcon, FolderPlusIcon, HeartIcon, LaptopIcon, LockIcon, SparkIcon, placeIcon } from "./icons";
 import { UsbStorageRow } from "./UsbPanel";
 
 interface Props {
@@ -22,6 +22,9 @@ interface Props {
   /** Devices on the end of a cable. No pairing, so these need no lock state. */
   usb: UsbDevice[];
   onOpenUsb: (device: UsbDevice) => void;
+  /** Present only where a folder can be mounted — the web build, in a browser
+   * that has the File System Access API. */
+  onOpenFolder?: () => void;
 }
 
 type DragKind = "folder" | "favorite";
@@ -63,6 +66,7 @@ export function Sidebar({
   selfDeviceName,
   usb,
   onOpenUsb,
+  onOpenFolder,
 }: Props) {
   const [dropIndex, setDropIndex] = useState<number | null>(null);
   const [draggingFavorite, setDraggingFavorite] = useState(false);
@@ -104,6 +108,14 @@ export function Sidebar({
       {places.map((place) => (
         <PlaceButton key={place.path} place={place} active={place.path === current} onPick={onPick} />
       ))}
+      {onOpenFolder && (
+        <button className="place place-action" onClick={onOpenFolder} title="Browse a folder from this computer">
+          <span className="place-icon">
+            <FolderPlusIcon size={18} />
+          </span>
+          <span className="place-label">Open Folder…</span>
+        </button>
+      )}
 
       {usb.length > 0 && (
         <div className="sidebar-devices">

@@ -6,7 +6,12 @@
 /** The routes that are read rather than looked at. */
 export type TextRoute = "markdown" | "code" | "text";
 
-export type Route = TextRoute | "pdf" | "image" | "audio" | "video" | "art" | "none";
+export type Route = TextRoute | "pdf" | "image" | "audio" | "video" | "art" | "link" | "none";
+
+/** Shortcut files, which hold one destination and nothing else. Ahead of
+ * `CODE` deliberately: a `.webloc` is XML and a `.url` is INI, and showing
+ * either as source would be technically true and completely useless. */
+const LINK = new Set(["url", "webloc"]);
 
 const IMAGE = new Set([
   "png", "jpg", "jpeg", "jpe", "gif", "bmp", "ico", "tif", "tiff", "webp", "avif", "heic", "heif",
@@ -82,6 +87,7 @@ export function routeOf(nameOrPath: string): Route {
   if (dot <= 0) return "none";
   const ext = name.slice(dot + 1).toLowerCase();
 
+  if (LINK.has(ext)) return "link";
   if (MARKDOWN.has(ext)) return "markdown";
   if (ext === "pdf") return "pdf";
   if (IMAGE.has(ext)) return "image";

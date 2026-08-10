@@ -1,0 +1,23 @@
+<!-- The app icon, as vectors: the same white folder wearing the same branch
+     mark that src-tauri/icons carries to macOS, Windows and Android. Drawn in
+     the icon's own 128-unit space so the two stay in step. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#5ba4fd" />
+      <stop offset="1" stop-color="#1b63d8" />
+    </linearGradient>
+  </defs>
+  <rect width="128" height="128" rx="29" fill="url(#tile)" />
+  <!-- Back panel, peeking above the front: the part that reads as "folder". -->
+  <path d="M16 40a8 8 0 0 1 8-8h20a6 6 0 0 1 4.2 1.7L55.5 44H104a8 8 0 0 1 8 8v8H16Z" fill="#fff" />
+  <path d="M16 52a8 8 0 0 1 8-8h80a8 8 0 0 1 8 8v39a8 8 0 0 1-8 8H24a8 8 0 0 1-8-8Z" fill="#fff" />
+  <!-- The branch: the whole reason this is a file browser worth having. -->
+  <g fill="none" stroke="#2878e8" stroke-width="3.4" stroke-linecap="round">
+    <path d="M50 63.5h24" />
+    <path d="M50 63.5v23" />
+    <circle cx="50" cy="63.5" r="4.3" fill="#2878e8" />
+    <circle cx="50" cy="86.5" r="4.3" fill="#2878e8" />
+    <circle cx="79.5" cy="63.5" r="5" stroke-width="3.2" />
+  </g>
+</svg>

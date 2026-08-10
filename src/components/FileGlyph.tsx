@@ -1,5 +1,12 @@
-import type { Entry } from "../types";
+import { useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
+
+import * as ipc from "../ipc";
+import type { Entry, PeekItem } from "../types";
+import { PEEK_LIMIT, peek, subscribe as subscribePeek } from "../folder-peek";
+import { categoryOf } from "../glyph-category";
 import { folderIconForName, type FolderIcon } from "../folder-icon";
+import { isTextual, routeOf } from "../preview/route";
+import { peek as peekThumb, subscribe as subscribeThumb, thumbPx } from "../thumbs";
 
 /**
  * The icon shown when there's no image preview. Scales from a 20px list row up to
@@ -10,57 +17,60 @@ import { folderIconForName, type FolderIcon } from "../folder-icon";
  * of 40,000 files doesn't ship 40,000 copies of the same <linearGradient>.
  */
 
-type Category = "code" | "image" | "media" | "doc" | "archive" | "config" | "plain";
-
-const CATEGORY: Record<string, Category> = {
-  ts: "code", tsx: "code", js: "code", jsx: "code", mjs: "code", cjs: "code",
-  rs: "code", go: "code", py: "code", rb: "code", swift: "code", java: "code",
-  kt: "code", c: "code", h: "code", cpp: "code", hpp: "code", cs: "code",
-  php: "code", lua: "code", sh: "code", zsh: "code", bash: "code", sql: "code",
-  html: "code", css: "code", scss: "code", vue: "code", svelte: "code",
-
-  json: "config", jsonc: "config", toml: "config", yaml: "config", yml: "config",
-  xml: "config", ini: "config", conf: "config", lock: "config", env: "config",
-
-  png: "image", jpg: "image", jpeg: "image", gif: "image", webp: "image",
-  svg: "image", heic: "image", ico: "image", icns: "image", bmp: "image", tiff: "image",
-
-  mp4: "media", mov: "media", webm: "media", avi: "media", mkv: "media",
-  mp3: "media", wav: "media", m4a: "media", flac: "media", aac: "media",
-
-  pdf: "doc", md: "doc", mdx: "doc", txt: "doc", rtf: "doc", doc: "doc",
-  docx: "doc", pages: "doc", key: "doc", csv: "doc", xlsx: "doc",
-
-  zip: "archive", gz: "archive", tar: "archive", rar: "archive", "7z": "archive",
-  dmg: "archive", pkg: "archive",
-};
-
 /** Below this the glyph is a list-row icon; above it, artwork worth a shadow. */
 const LARGE = 40;
 
 export function FileGlyph({ entry, size }: { entry: Entry; size: number }) {
   const isDir = entry.kind === "dir" || (entry.kind === "symlink" && entry.linkToDir);
 
-  if (isDir) return <FolderGlyph size={size} repo={entry.isRepo} name={entry.name} />;
-
-  const dot = entry.name.lastIndexOf(".");
-  const ext = dot > 0 ? entry.name.slice(dot + 1).toLowerCase() : "";
-  const category = CATEGORY[ext] ?? "plain";
-  // The band is the only thing telling one file from another in a list row, so
-  // it survives all the way down; only its lettering needs room to be legible.
-  const showBand = ext.length > 0 && ext.length <= 6;
-  const showText = showBand && size >= 44;
-  // Shrink the type text rather than truncating it — "SWIF" reads as a typo.
-  const labelSize = ext.length <= 3 ? 9.4 : ext.length === 4 ? 8 : 6.6;
+  if (isDir) {
+    return <FolderGlyph size={size} repo={entry.isRepo} name={entry.name} path={entry.path} />;
+  }
 
   return (
     <svg
       viewBox="0 0 48 48"
       width={size}
       height={size}
-      className={`glyph glyph-file cat-${category} ${size >= LARGE ? "glyph-lg" : ""}`}
+      className={`${fileClass(entry.name)} glyph ${size >= LARGE ? "glyph-lg" : ""}`}
       aria-hidden="true"
     >
+      <FileArt name={entry.name} size={size} />
+    </svg>
+  );
+}
+
+/** The classes the sheet's own paint hangs off, wherever it is drawn. */
+const fileClass = (name: string) => `glyph-file cat-${categoryOf(name)}`;
+
+/**
+ * The document sheet, in the 48-unit space of whatever `<svg>` holds it. `size`
+ * is the width it will actually occupy on screen, which is what decides how much
+ * detail is worth drawing.
+ */
+function FileArt({
+  name,
+  size,
+  tucked,
+}: {
+  name: string;
+  size: number;
+  /** The foot of the sheet is hidden, so the lettering down there is dropped
+   *  rather than sliced in half by whatever covers it. */
+  tucked?: boolean;
+}) {
+  const dot = name.lastIndexOf(".");
+  const ext = dot > 0 ? name.slice(dot + 1).toLowerCase() : "";
+  // The band is the only thing telling one file from another in a list row, so
+  // it survives all the way down; only its lettering needs room to be legible.
+  const showBand = ext.length > 0 && ext.length <= 6;
+  const showLines = showBand && size >= 44;
+  const showText = showLines && !tucked;
+  // Shrink the type text rather than truncating it — "SWIF" reads as a typo.
+  const labelSize = ext.length <= 3 ? 9.4 : ext.length === 4 ? 8 : 6.6;
+
+  return (
+    <>
       {/* Sheet: rounded on three corners, folded on the fourth. */}
       <path
         d="M12 4h17.5L39 13.5V41a3 3 0 0 1-3 3H12a3 3 0 0 1-3-3V7a3 3 0 0 1 3-3Z"
@@ -72,23 +82,22 @@ export function FileGlyph({ entry, size }: { entry: Entry; size: number }) {
           glance across a grid, and the thing carrying the file's type. */}
       {showBand && <path d="M9 29h30v12a3 3 0 0 1-3 3H12a3 3 0 0 1-3-3Z" className="band" />}
 
+      {showLines && <path d="M15 17h18M15 23h12" className="lines" />}
+
       {showText && (
-        <>
-          <path d="M15 17h18M15 23h12" className="lines" />
-          <text
-            x="24"
-            y="39.4"
-            textAnchor="middle"
-            className="band-text"
-            style={{ fontSize: labelSize }}
-          >
-            {ext.toUpperCase()}
-          </text>
-        </>
+        <text
+          x="24"
+          y="39.4"
+          textAnchor="middle"
+          className="band-text"
+          style={{ fontSize: labelSize }}
+        >
+          {ext.toUpperCase()}
+        </text>
       )}
 
       {!showBand && size >= 44 && <path d="M15 22h18M15 29h18M15 36h11" className="lines" />}
-    </svg>
+    </>
   );
 }
 
@@ -96,21 +105,56 @@ export function FolderGlyph({
   size,
   repo,
   name,
+  path,
 }: {
   size: number;
   repo?: boolean;
   /** The folder's leaf name, used for familiar system-folder marks. */
   name?: string;
+  /**
+   * The folder itself. Given one, the icon fans the first few things inside it
+   * out of its mouth; without one it stays a plain folder, which is what the
+   * preview pane and Quick Look want — they show the contents themselves.
+   */
+  path?: string;
 }) {
-  const icon = name ? folderIconForName(name) : null;
+  const svgRef = useRef<SVGSVGElement>(null);
   return (
     <svg
+      ref={svgRef}
       viewBox="0 0 48 48"
       width={size}
       height={size}
       className={`glyph glyph-folder ${size >= LARGE ? "glyph-lg" : ""}`}
       aria-hidden="true"
     >
+      <FolderArt size={size} repo={repo} name={name}>
+        {/* Between the panels, so the fan rises out of the pocket rather than
+            sitting on the front of it. */}
+        {path && size >= PEEK_MIN && <FolderPeek path={path} size={size} glyph={svgRef} />}
+      </FolderArt>
+    </svg>
+  );
+}
+
+/**
+ * The folder itself, in the 48-unit space of whatever `<svg>` holds it.
+ * `children` are drawn inside the pocket — between the two panels.
+ */
+function FolderArt({
+  size,
+  repo,
+  name,
+  children,
+}: {
+  size: number;
+  repo?: boolean;
+  name?: string;
+  children?: ReactNode;
+}) {
+  const icon = name ? folderIconForName(name) : null;
+  return (
+    <>
       {/* Back panel peeking above the front, which is what reads as "folder".
           The body runs y=13→43 against a x=3→45 width: a squatter box than that
           reads as an envelope. */}
@@ -118,6 +162,7 @@ export function FolderGlyph({
         d="M3 11.5A4.5 4.5 0 0 1 7.5 7h10.2a3 3 0 0 1 2.2.96l3.9 4.29H40.5A4.5 4.5 0 0 1 45 16.75V20H3Z"
         fill="url(#g-folder-back)"
       />
+      {children}
       <path
         d="M3 17.5A4.5 4.5 0 0 1 7.5 13h33a4.5 4.5 0 0 1 4.5 4.5v21a4.5 4.5 0 0 1-4.5 4.5h-33A4.5 4.5 0 0 1 3 38.5Z"
         fill="url(#g-folder-front)"
@@ -143,8 +188,161 @@ export function FolderGlyph({
           <path d="M12.4 3H8a5 5 0 0 0-5 5v1.6" strokeWidth="2.4" fill="none" />
         </g>
       )}
-    </svg>
+    </>
   );
+}
+
+/* ------------------------------------------------------------ folder peek */
+
+/**
+ * The first few things inside a folder, fanned out of its mouth and tucked
+ * behind the front flap — so a folder says what it holds before you open it.
+ *
+ * Each one is drawn as the very thing it is: its own thumbnail if it has one,
+ * otherwise the same glyph it wears in the grid, mini folders included. A folder
+ * drawn here never fans out its own contents: one level is a glimpse, two is a
+ * hall of mirrors in a 128px icon.
+ */
+
+/** Below this the items are three specks; the plain folder says more. */
+const PEEK_MIN = 48;
+
+/** A thumbnail's print, in folder units. Its lower half is behind the flap. */
+const PEEK_CARD = { x: 16.5, y: 2.5, w: 15, h: 18 } as const;
+/**
+ * An icon is square and needs no crop, so it stands in the same slot without the
+ * print's extra height. It rides high in it on purpose: a sheet carries its type
+ * colour across the bottom third, and tucked any deeper every file in the fan
+ * would come out the same blank white.
+ */
+const PEEK_ICON = { x: 16.5, y: 0.5, size: 15 } as const;
+/** The pivot the fan swings around, well below the flap's top edge. */
+const PIVOT = { x: 24, y: 30 } as const;
+
+/**
+ * Where each item sits, by how many there are. The first takes the middle and is
+ * drawn last, so what's at the front of the folder is on top of the stack.
+ */
+const FAN: readonly (readonly number[])[] = [[0], [-13, 13], [0, -24, 24]];
+
+/** The folder's own `<svg>`, whose parent anchors the previews' requests. */
+type GlyphRef = RefObject<SVGSVGElement | null>;
+
+function FolderPeek({ path, size, glyph }: { path: string; size: number; glyph: GlyphRef }) {
+  const items = useFolderPeek(path);
+  const angles = FAN[items.length - 1];
+  if (!angles) return null;
+
+  return (
+    <g className="folder-peek" aria-hidden="true">
+      {items
+        .map((item, i) => (
+          <PeekItemArt key={item.path} item={item} angle={angles[i]} size={size} glyph={glyph} />
+        ))
+        .reverse()}
+    </g>
+  );
+}
+
+function PeekItemArt({
+  item,
+  angle,
+  size,
+  glyph,
+}: {
+  item: PeekItem;
+  angle: number;
+  size: number;
+  glyph: GlyphRef;
+}) {
+  const src = usePeekThumb(item, size, glyph);
+
+  return (
+    <g transform={`rotate(${angle} ${PIVOT.x} ${PIVOT.y})`}>
+      {src ? (
+        <>
+          <image
+            href={ipc.fileSrc(src)}
+            x={PEEK_CARD.x}
+            y={PEEK_CARD.y}
+            width={PEEK_CARD.w}
+            height={PEEK_CARD.h}
+            // Fill the print and crop, the way one photo in a stack is cropped
+            // by the next. Letterboxing would show the folder through it.
+            preserveAspectRatio="xMidYMid slice"
+            clipPath="url(#g-peek-card)"
+          />
+          <rect
+            className="peek-edge"
+            x={PEEK_CARD.x}
+            y={PEEK_CARD.y}
+            width={PEEK_CARD.w}
+            height={PEEK_CARD.h}
+            rx="2"
+          />
+        </>
+      ) : (
+        // A nested <svg> gives the art its own 48-unit space, so the drawing the
+        // grid uses lands in this slot unchanged, at the right scale.
+        <svg
+          x={PEEK_ICON.x}
+          y={PEEK_ICON.y}
+          width={PEEK_ICON.size}
+          height={PEEK_ICON.size}
+          viewBox="0 0 48 48"
+          className={item.isDir ? "glyph-folder" : fileClass(item.name)}
+        >
+          {item.isDir ? (
+            <FolderArt size={peekPx(size)} name={item.name} />
+          ) : (
+            <FileArt name={item.name} size={peekPx(size)} tucked />
+          )}
+        </svg>
+      )}
+    </g>
+  );
+}
+
+/** What one fanned item actually measures on screen. */
+const peekPx = (size: number) => (size * PEEK_ICON.size) / 48;
+
+/** The folder's leading children, once the scheduler gets to them. */
+function useFolderPeek(path: string): PeekItem[] {
+  const [items, setItems] = useState<PeekItem[]>(() => peek(path) ?? []);
+
+  useEffect(() => {
+    setItems(peek(path) ?? []);
+    return subscribePeek(path, setItems);
+  }, [path]);
+
+  return items.slice(0, PEEK_LIMIT);
+}
+
+/**
+ * A fanned item's picture, if it has one worth showing this small.
+ *
+ * The request rides the same scheduler as the grid's own tiles, anchored to the
+ * element hosting the folder icon: an item is on screen exactly when the folder
+ * it fans out of is, and an SVG node is not something an IntersectionObserver
+ * can measure.
+ */
+function usePeekThumb(item: PeekItem, size: number, glyph: GlyphRef): string | null {
+  const want = thumbPx((size * PEEK_CARD.w) / 48);
+  // A page of text renders to a grey smudge this small; its sheet says more.
+  const worthIt = item.thumbable && !isTextual(routeOf(item.name));
+  const [src, setSrc] = useState<string | null>(() =>
+    worthIt ? peekThumb(item.path, want) ?? null : null
+  );
+
+  useEffect(() => {
+    if (!worthIt) return;
+    setSrc(peekThumb(item.path, want) ?? null);
+    const host = glyph.current?.parentElement;
+    if (!host) return;
+    return subscribeThumb(item.path, want, host, setSrc);
+  }, [item.path, want, worthIt, glyph]);
+
+  return src;
 }
 
 /** A familiar, debossed mark on the face of named folders. */
@@ -210,6 +408,13 @@ export function GlyphDefs() {
           <stop offset="0" stopColor="var(--sheet-1)" />
           <stop offset="1" stopColor="var(--sheet-2)" />
         </linearGradient>
+
+        {/* Every peek card is the same rectangle before its own rotation, so one
+            clip serves all of them: a clip path is read in the user space of the
+            element referencing it, and so turns with the card it crops. */}
+        <clipPath id="g-peek-card">
+          <rect x={PEEK_CARD.x} y={PEEK_CARD.y} width={PEEK_CARD.w} height={PEEK_CARD.h} rx="2" />
+        </clipPath>
 
         <CatGradient id="g-code" from="#a78bfa" to="#6d28d9" />
         <CatGradient id="g-config" from="#a1a1aa" to="#5f5f68" />

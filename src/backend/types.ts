@@ -1,0 +1,136 @@
+/** The whole surface the UI needs from whatever is underneath it.
+ *
+ * Fiddler runs against two of these: a Tauri build talking to Rust over IPC,
+ * and a browser build talking to a virtual filesystem in the tab. Vite picks
+ * one at build time (see `@backend` in `vite.config.ts`); nothing above this
+ * file knows which it got.
+ *
+ * Keeping the seam this narrow is what makes the web build possible at all —
+ * the markdown parser, the highlighter, the sort and search code, and the
+ * thumbnail scheduler are all plain TypeScript that never learns the
+ * difference. */
+
+import type {
+  ContentSearch,
+  DirListing,
+  EntryBatch,
+  Inspect,
+  NearbySearch,
+  PairingInfo,
+  PdfMeta,
+  PeekItem,
+  PeerDevice,
+  Place,
+  RepoInfo,
+  RepoStatusPayload,
+  TextHead,
+  ThumbReady,
+  ThumbReq,
+  UsbDevice,
+} from "../types";
+
+/** Stops a subscription. Matches Tauri's `UnlistenFn` so the Tauri backend can
+ * pass its own through untouched. */
+export type Unlisten = () => void;
+
+export interface Backend {
+  // ------------------------------------------------------------- browsing
+
+  listDir(path: string, showHidden: boolean): Promise<DirListing>;
+  /** A hard-capped, no-symlink fallback used only after local search finds nothing. */
+  nearbyEntries(path: string, showHidden: boolean, maxDepth?: number): Promise<NearbySearch>;
+  searchContents(path: string, names: string[], terms: string[]): Promise<ContentSearch>;
+  inspect(path: string): Promise<Inspect>;
+  /** The leading children of a folder, for the fan of cards on its icon. */
+  folderPeek(path: string, showHidden: boolean, limit: number): Promise<PeekItem[]>;
+  /** The front of a text file, bounded by `maxBytes` and cut on a character. */
+  readText(path: string, maxBytes: number): Promise<TextHead>;
+
+  // ------------------------------------------------------------------ git
+
+  repoInfo(path: string): Promise<RepoInfo | null>;
+  refreshRepo(root: string): Promise<void>;
+  onRepoStatus(fn: (p: RepoStatusPayload) => void): Promise<Unlisten>;
+
+  // -------------------------------------------------------------- places
+
+  sidebarPlaces(): Promise<Place[]>;
+  nearbyDevices(): Promise<PeerDevice[]>;
+  nearbyPairingInfo(): Promise<PairingInfo>;
+  pairNearbyDevice(id: string, code: string): Promise<void>;
+
+  /** Devices attached by cable, each with the stage it has reached. Always
+   * empty where there is no USB host to speak MTP with — a browser tab, or the
+   * Android build, which is the thing on the other end of the cable. */
+  usbDevices(): Promise<UsbDevice[]>;
+  /** Fires when a device's stage changes: plugged in, unlocked, granted,
+   * unplugged. What lets the sidebar advance while someone is looking at their
+   * phone rather than at Fiddler. */
+  onUsbDevices(fn: (devices: UsbDevice[]) => void): Promise<Unlisten>;
+  /** The rest of a device folder, after `listDir` returned its first screenful.
+   * MTP costs a round trip per object, so a big folder is drawn as it is read. */
+  onUsbEntries(fn: (batch: EntryBatch) => void): Promise<Unlisten>;
+
+  // ------------------------------------------------------------ mutation
+
+  createFolder(parent: string, name: string): Promise<string>;
+  /** Creates a UTF-8 text file. The name is deliberately passed through whole so
+   * callers can choose any normal extension: `.txt`, `.md`, `.json`, and so on. */
+  createTextFile(parent: string, name: string, text: string): Promise<string>;
+  /** Writes a text file atomically, so a save never leaves a half-written file. */
+  writeTextFile(path: string, text: string): Promise<void>;
+  renamePath(path: string, newName: string): Promise<string>;
+  copyPaths(paths: string[], destination: string): Promise<string[]>;
+  trashPaths(paths: string[]): Promise<void>;
+  /** Fires with the directories whose contents changed. Every mutation above is
+   * expected to produce one of these — the UI does not refresh itself. */
+  onDirsChanged(fn: (dirs: string[]) => void): Promise<Unlisten>;
+
+  // ---------------------------------------------------------- previewing
+
+  thumbnail(path: string, size: number): Promise<string | null>;
+  /** Declare everything worth rendering right now; returns whatever was cached.
+   * Each call *replaces* the outstanding set rather than adding to it. */
+  thumbnails(wanted: ThumbReq[]): Promise<ThumbReady[]>;
+  onThumbs(fn: (ready: ThumbReady[]) => void): Promise<Unlisten>;
+  pdfMeta(path: string): Promise<PdfMeta>;
+  /** One page, rasterised at `maxPx` on its longest side. Returns a cache path. */
+  pdfPage(path: string, page: number, maxPx: number): Promise<string>;
+
+  /** Turns a path the backend just handed us — a thumbnail, a rendered PDF page
+   * — into something an `<img>` can load. Synchronous because the backend has
+   * already done the work; this only re-labels the result. */
+  fileSrc(path: string): string;
+
+  /** A URL for streaming a real file the user chose, for `<audio>` and
+   * `<video>`. Separate from `fileSrc` because it is the one case where nothing
+   * has been materialised yet: on the web this has to read the file before it
+   * can hand back a URL, so it cannot be synchronous. */
+  mediaUrl(path: string): Promise<string>;
+
+  // -------------------------------------------------------------- system
+
+  /** The OS accent colour as sRGB bytes, or null where there isn't one to read. */
+  systemAccent(): Promise<[number, number, number] | null>;
+  revealInFinder(path: string): Promise<void>;
+  openTerminalHere(path: string): Promise<void>;
+  /** Hand a path or URL to whatever handles it outside Fiddler. */
+  openExternal(target: string): Promise<void>;
+  /** Launch Android's package installer for a selected APK. */
+  installApk(path: string): Promise<void>;
+
+  // --------------------------------------------------- browser-only additions
+  //
+  // Optional on purpose: their presence *is* the capability. The Tauri backend
+  // simply doesn't have them, so `ipc.openFolder` is `undefined` there and the
+  // UI that offers them never renders.
+
+  /** Mount a folder the user picks, and return the path to navigate to. Null
+   * when they cancelled. */
+  openFolder?(): Promise<string | null>;
+
+  /** Take in files and folders dropped onto the window, returning a path to
+   * navigate to, or null if the drop held nothing usable. Must claim the
+   * transfer's items synchronously — they don't survive the event. */
+  importDropped?(transfer: DataTransfer): Promise<string | null>;
+}

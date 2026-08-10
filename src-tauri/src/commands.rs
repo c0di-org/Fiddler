@@ -1,3 +1,4 @@
+use std::cmp::Ordering;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -331,6 +332,85 @@ pub async fn inspect(path: String) -> Result<Inspect, String> {
     })
     .await
     .map_err(|e| format!("inspect task failed: {e}"))?
+}
+
+/// One child worth showing on the face of a folder's icon.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PeekItem {
+    pub name: String,
+    pub path: String,
+    pub is_dir: bool,
+    /// A preview can be produced for this file.
+    pub thumbable: bool,
+}
+
+/// The first few children of a folder, in the order the browser would show them.
+///
+/// Deliberately not `list_dir`: this runs for every folder icon on screen, so it
+/// does one `read_dir`, no per-entry `stat`, no git probing, and keeps only the
+/// `limit` leading names rather than materialising a listing of tens of
+/// thousands of entries to throw all but three of them away.
+#[tauri::command]
+pub async fn folder_peek(
+    path: String,
+    show_hidden: bool,
+    limit: usize,
+) -> Result<Vec<PeekItem>, String> {
+    // Peeking into a paired device's folder would cost a network round trip per
+    // icon on screen. Remote folders keep the plain glyph.
+    if peers::parse_remote_path(&path).is_some() {
+        return Ok(Vec::new());
+    }
+    let limit = limit.clamp(1, 4);
+
+    tauri::async_runtime::spawn_blocking(move || {
+        // Enough to order any folder a person assembled by hand. Past this the
+        // leading names are a guess either way, and an icon is not worth the walk.
+        const MAX_SCAN: usize = 4096;
+
+        let rd = std::fs::read_dir(&path).map_err(|e| format!("{path}: {e}"))?;
+        let mut best: Vec<PeekItem> = Vec::with_capacity(limit + 1);
+
+        for ent in rd.flatten().take(MAX_SCAN) {
+            let name = ent.file_name().to_string_lossy().into_owned();
+            if name == ".DS_Store" || (!show_hidden && name.starts_with('.')) {
+                continue;
+            }
+            let Ok(ft) = ent.file_type() else { continue };
+            let child = ent.path();
+            // `is_dir()` on the path is a `stat`, so it is spent only on symlinks.
+            let is_dir = ft.is_dir() || (ft.is_symlink() && child.is_dir());
+
+            // An insertion sort into a list of at most `limit`: the folder is
+            // walked once and never held in memory beyond these few entries.
+            if best.len() == limit && !precedes((is_dir, &name), &best[limit - 1]) {
+                continue;
+            }
+            let at = best
+                .iter()
+                .position(|held| precedes((is_dir, &name), held))
+                .unwrap_or(best.len());
+            best.insert(
+                at,
+                PeekItem {
+                    thumbable: !is_dir && crate::thumb::can_thumbnail(&child),
+                    path: child.to_string_lossy().into_owned(),
+                    name,
+                    is_dir,
+                },
+            );
+            best.truncate(limit);
+        }
+
+        Ok(best)
+    })
+    .await
+    .map_err(|e| format!("folder peek task failed: {e}"))?
+}
+
+fn precedes(candidate: (bool, &str), held: &PeekItem) -> bool {
+    fs_scan::display_cmp(candidate, (held.is_dir, &held.name)) == Ordering::Less
 }
 
 #[derive(Debug, Clone, Serialize, serde::Deserialize)]

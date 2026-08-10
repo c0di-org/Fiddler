@@ -1,4 +1,6 @@
 node_modules
 dist
+dist-web
+.wrangler
 src-tauri/target
 .DS_Store
