@@ -274,7 +274,11 @@ function Cell({
       onPointerCancel={touchDrag.onPointerCancel}
     >
       <div className="cell-art" style={{ height: iconSize }}>
-        {e ? <Thumb entry={e} size={iconSize} /> : <FolderGlyph size={iconSize} repo name={cell.name} />}
+        {e ? (
+          <Thumb entry={e} size={iconSize} />
+        ) : (
+          <FolderGlyph size={iconSize} repo name={cell.name} path={cell.path} />
+        )}
         <span className="cell-badge">
           <GitDot code={e?.code} rollup={e?.rollup} />
         </span>

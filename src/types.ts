@@ -168,6 +168,15 @@ export interface ThumbReady extends ThumbReq {
   src: string | null;
 }
 
+/** One child shown on the face of a folder's icon. */
+export interface PeekItem {
+  name: string;
+  path: string;
+  isDir: boolean;
+  /** A preview can be produced for this file. */
+  thumbable: boolean;
+}
+
 export interface Inspect {
   /** Leading text of a small, textual file. */
   text: string | null;
