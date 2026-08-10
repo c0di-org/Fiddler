@@ -11,11 +11,12 @@ import { Sidebar } from "./components/Sidebar";
 import { TintPicker } from "./components/TintPicker";
 import { Toolbar } from "./components/Toolbar";
 import { GridIcon } from "./components/icons";
+import { addFavorite, loadFavorites, moveFavorite, saveFavorites } from "./favorites";
 import { formatSize } from "./format";
 import * as ipc from "./ipc";
 import { TreeStore, type Row } from "./store/tree";
 import { applyTint, hasSystemAccent, loadTint, saveTint, watchTint, type Tint } from "./tint";
-import type { Entry, Place } from "./types";
+import type { Entry, Favorite, Place } from "./types";
 
 const store = new TreeStore();
 const isAndroid = /Android/i.test(navigator.userAgent);
@@ -36,6 +37,7 @@ export default function App() {
   useSyncExternalStore(store.subscribe, store.getSnapshot);
 
   const [places, setPlaces] = useState<Place[]>([]);
+  const [favorites, setFavorites] = useState<Favorite[]>(loadFavorites);
   const [selection, setSelection] = useState<Set<string>>(new Set());
   const [revealSelection, setRevealSelection] = useState(0);
   const [renamingId, setRenamingId] = useState<string | null>(null);
@@ -80,6 +82,8 @@ export default function App() {
     applyTint(tint);
     saveTint(tint);
   }, [tint]);
+
+  useEffect(() => saveFavorites(favorites), [favorites]);
 
   const tintRef = useRef(tint);
   tintRef.current = tint;
@@ -163,6 +167,18 @@ export default function App() {
     setFilter("");
     setQuickLook(false);
     await store.navigate(path);
+  }, []);
+
+  const favorite = useCallback((item: Favorite, at?: number) => {
+    setFavorites((current) => addFavorite(current, item, at));
+  }, []);
+
+  const unfavorite = useCallback((path: string) => {
+    setFavorites((current) => current.filter((item) => item.path !== path));
+  }, []);
+
+  const reorderFavorite = useCallback((path: string, at: number) => {
+    setFavorites((current) => moveFavorite(current, path, at));
   }, []);
 
   /** The item Quick Look would show: the most recently selected one. */
@@ -510,7 +526,15 @@ export default function App() {
   return (
     <div className="app">
       <GlyphDefs />
-      <Sidebar places={places} current={store.path} onPick={(p) => void go(p)} />
+      <Sidebar
+        places={places}
+        favorites={favorites}
+        current={store.path}
+        onPick={(p) => void go(p)}
+        onAddFavorite={favorite}
+        onRemoveFavorite={unfavorite}
+        onMoveFavorite={reorderFavorite}
+      />
 
       <main className="main">
         <Toolbar

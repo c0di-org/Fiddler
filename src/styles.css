@@ -302,12 +302,103 @@ button {
 }
 
 .sidebar-title {
+  display: flex;
+  align-items: center;
+  gap: 5px;
   font-size: 11px;
   font-weight: 620;
   letter-spacing: 0.045em;
   text-transform: uppercase;
   color: var(--fg-faint);
   padding: 12px 10px 6px;
+}
+
+.sidebar-favorites {
+  margin-top: 6px;
+}
+
+.favorites-list {
+  position: relative;
+  min-height: 16px;
+  border-radius: var(--r-md);
+}
+
+.favorites-empty {
+  margin: 1px 0 3px;
+  padding: 9px 10px;
+  border: 1px dashed var(--hair-soft);
+  border-radius: var(--r-md);
+  color: var(--fg-faint);
+  font-size: 12px;
+}
+
+.favorite-slot {
+  position: relative;
+}
+
+.favorites-list.drop-before::before,
+.favorite-slot.drop-before::before,
+.favorite-slot.drop-after::after {
+  position: absolute;
+  right: 8px;
+  left: 8px;
+  z-index: 2;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 18%, transparent);
+  content: "";
+  pointer-events: none;
+}
+
+.favorites-list.drop-before::before,
+.favorite-slot.drop-before::before {
+  top: -1px;
+}
+
+.favorite-slot.drop-after::after {
+  bottom: -1px;
+}
+
+.favorite-remove-button {
+  position: absolute;
+  top: 8px;
+  right: 6px;
+  display: grid;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--fg-faint);
+  opacity: 0;
+  transition: opacity var(--fast) var(--ease), background var(--fast) var(--ease);
+}
+
+.favorite-slot:hover .favorite-remove-button,
+.favorite-remove-button:focus-visible {
+  opacity: 1;
+}
+
+.favorite-remove-button:hover {
+  background: var(--fill-strong);
+  color: var(--fg);
+}
+
+.favorite-remove-button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.favorite-remove {
+  margin: 8px 0 3px;
+  padding: 8px 10px;
+  border: 1px dashed color-mix(in srgb, var(--accent) 55%, var(--hair-soft));
+  border-radius: var(--r-md);
+  color: var(--accent-ink);
+  font-size: 12px;
+  text-align: center;
 }
 
 .place {
