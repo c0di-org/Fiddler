@@ -1,7 +1,7 @@
 import { useState } from "react";
 
 import { FAVORITE_DRAG_TYPE, FOLDER_DRAG_TYPE } from "../favorites";
-import type { Favorite, PairingInfo, PeerDevice, Place } from "../types";
+import type { Favorite, PeerDevice, Place } from "../types";
 import { CloseIcon, DeviceIcon, FolderIcon, HeartIcon, LockIcon, SparkIcon, placeIcon } from "./icons";
 
 interface Props {
@@ -15,7 +15,6 @@ interface Props {
   /** The current Android touch drag, if it is over a Favorites drop target. */
   touchFolderDropIndex?: number | null;
   devices: PeerDevice[];
-  pairingInfo: PairingInfo | null;
   onOpenDevice: (device: PeerDevice) => void;
 }
 
@@ -55,7 +54,6 @@ export function Sidebar({
   onMoveFavorite,
   touchFolderDropIndex = null,
   devices,
-  pairingInfo,
   onOpenDevice,
 }: Props) {
   const [dropIndex, setDropIndex] = useState<number | null>(null);
@@ -99,18 +97,16 @@ export function Sidebar({
         <PlaceButton key={place.path} place={place} active={place.path === current} onPick={onPick} />
       ))}
 
-      <div className="sidebar-devices">
+      {devices.length > 0 && <div className="sidebar-devices">
         <SidebarHeading icon={<DeviceIcon size={13} />}>Devices</SidebarHeading>
         {devices.map((device) => (
-          <button className="place device" key={device.id} onClick={() => onOpenDevice(device)} title={device.paired ? "Browse this device" : "Pair before browsing"}>
+          <button className="place device" key={device.id} onClick={() => onOpenDevice(device)} title={device.paired ? "Browse this device" : "Pair with this device"}>
             <span className="place-icon"><DeviceIcon size={18} /></span>
             <span className="place-label">{device.name}</span>
             {!device.paired && <LockIcon size={12} className="device-lock" />}
           </button>
         ))}
-        {devices.length === 0 && <div className="devices-empty">Open Fiddler on a nearby device</div>}
-        {pairingInfo && <div className="pairing-code" title="Enter this code on the device that wants to browse this one"><span>Pairing code</span><strong>{pairingInfo.code}</strong></div>}
-      </div>
+      </div>}
 
       <div className="sidebar-favorites">
         <SidebarHeading icon={<HeartIcon size={13} />}>Favorites</SidebarHeading>

@@ -49,6 +49,8 @@ struct Discovery {
     id: String,
     name: String,
     port: u16,
+    #[serde(default)]
+    visible: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -90,6 +92,7 @@ struct SeenPeer {
     host: String,
     port: u16,
     seen_at: u64,
+    mutual: bool,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -149,7 +152,7 @@ impl PeerService {
         let seen = st.seen.clone();
         let mut devices = Vec::new();
         for (id, peer) in seen {
-            if id == st.id || now.saturating_sub(peer.seen_at) >= 8 { continue; }
+            if id == st.id || !peer.mutual || now.saturating_sub(peer.seen_at) >= 8 { continue; }
             // A phone can get a new DHCP address, and the listener intentionally
             // chooses a fresh port at every launch. Discovery refreshes a trusted
             // device's route before anyone tries to open it.
@@ -321,7 +324,11 @@ impl PeerService {
             let now = now_secs();
             if now.saturating_sub(last_sent) >= 2 {
                 let st = self.state.lock().unwrap();
-                let packet = serde_json::to_vec(&Discovery { id: st.id.clone(), name: st.name.clone(), port: st.port }).unwrap_or_default();
+                // Do not surface a device merely because a broadcast reached us.
+                // A peer must explicitly advertise that it sees our ID too; that
+                // makes discovery quiet on busy Wi-Fi and avoids false locations.
+                let visible = st.seen.iter().filter_map(|(id, peer)| (now.saturating_sub(peer.seen_at) < 8).then_some(id.clone())).collect();
+                let packet = serde_json::to_vec(&Discovery { id: st.id.clone(), name: st.name.clone(), port: st.port, visible }).unwrap_or_default();
                 drop(st);
                 let _ = socket.send_to(&packet, SocketAddr::new(IpAddr::V4(Ipv4Addr::BROADCAST), DISCOVERY_PORT));
                 last_sent = now;
@@ -329,7 +336,10 @@ impl PeerService {
             match socket.recv_from(&mut buffer) {
                 Ok((count, from)) => if let Ok(packet) = serde_json::from_slice::<Discovery>(&buffer[..count]) {
                     let mut st = self.state.lock().unwrap();
-                    if packet.id != st.id && packet.port != 0 { st.seen.insert(packet.id, SeenPeer { name: packet.name, host: from.ip().to_string(), port: packet.port, seen_at: now }); }
+                    if packet.id != st.id && packet.port != 0 {
+                        let mutual = packet.visible.iter().any(|id| id == &st.id);
+                        st.seen.insert(packet.id, SeenPeer { name: packet.name, host: from.ip().to_string(), port: packet.port, seen_at: now, mutual });
+                    }
                 },
                 Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => thread::sleep(Duration::from_millis(120)),
                 Err(_) => thread::sleep(Duration::from_millis(400)),

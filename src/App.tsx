@@ -19,7 +19,7 @@ import * as ipc from "./ipc";
 import { contentTerms, prepareSearch, search, type SearchKind, type SearchRecord } from "./search";
 import { TreeStore, type Row } from "./store/tree";
 import { applyTint, hasSystemAccent, loadTint, saveTint, watchTint, type Tint } from "./tint";
-import type { ContentSearch, Entry, Favorite, NearbyEntry, NearbySearch, PairingInfo, PeerDevice, Place, WorktreeInfo } from "./types";
+import type { ContentSearch, Entry, Favorite, NearbyEntry, NearbySearch, PeerDevice, Place, WorktreeInfo } from "./types";
 
 const store = new TreeStore();
 const isAndroid = /Android/i.test(navigator.userAgent);
@@ -63,7 +63,6 @@ export default function App() {
 
   const [places, setPlaces] = useState<Place[]>([]);
   const [devices, setDevices] = useState<PeerDevice[]>([]);
-  const [pairingInfo, setPairingInfo] = useState<PairingInfo | null>(null);
   const [favorites, setFavorites] = useState<Favorite[]>(loadFavorites);
   const [folderTouchDrag, setFolderTouchDrag] = useState<FolderTouchDrag | null>(null);
   const folderTouchDragRef = useRef<FolderTouchDrag | null>(null);
@@ -121,7 +120,6 @@ export default function App() {
     const refresh = () => void ipc.nearbyDevices().then((found) => alive && setDevices(found)).catch(() => {});
     refresh();
     const timer = window.setInterval(refresh, 2500);
-    void ipc.nearbyPairingInfo().then((info) => alive && setPairingInfo(info)).catch(() => {});
     return () => { alive = false; window.clearInterval(timer); };
   }, []);
 
@@ -909,7 +907,6 @@ export default function App() {
       <Sidebar
         places={places}
         devices={devices}
-        pairingInfo={pairingInfo}
         favorites={favorites}
         current={store.path}
         onPick={(p) => void go(p)}
