@@ -164,6 +164,32 @@ pub fn nearby_devices(state: State<'_, AppState>) -> Vec<PeerDevice> { state.pee
 #[tauri::command]
 pub fn usb_devices(state: State<'_, AppState>) -> Vec<UsbDevice> { state.usb.devices() }
 
+/// Quit the process holding a USB device, when Fiddler recognises it.
+///
+/// macOS launches `ptpcamerad` at every phone that appears, and it holds the
+/// device without being able to transfer a file from it — so the usual state of
+/// a plugged-in Android is "claimed by something that cannot use it". The poll
+/// loop reconnects on its own once it lets go, so this is the whole fix.
+#[cfg(not(target_os = "android"))]
+#[tauri::command]
+pub fn release_usb_device(state: State<'_, AppState>, serial: String) -> Result<String, String> {
+    let device = state
+        .usb
+        .devices()
+        .into_iter()
+        .find(|device| device.serial == serial)
+        .ok_or("That device is no longer attached")?;
+    match device.stage {
+        mtp::Stage::Blocked { owner: Some(owner), owner_pid: Some(pid) } => {
+            mtp::release(&owner, pid)
+        }
+        mtp::Stage::Blocked { .. } => {
+            Err("Something is holding this device, but macOS didn't say what".into())
+        }
+        _ => Err("Nothing is holding this device".into()),
+    }
+}
+
 /// Show this short code on the device that is being browsed for the first time.
 #[tauri::command]
 pub fn nearby_pairing_info(state: State<'_, AppState>) -> PairingInfo { state.peers.pairing_info() }

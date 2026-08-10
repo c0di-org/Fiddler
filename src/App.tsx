@@ -462,6 +462,19 @@ export default function App() {
     await go(only ? `mtp://${device.serial}/${only.id}` : `mtp://${device.serial}/`);
   }, [go]);
 
+  // Nothing to refresh afterwards: the backend's poll loop notices the device
+  // came free and moves the row on by itself, which is the same path an unlock
+  // takes. All this has to do is report a refusal.
+  const releaseUsb = useCallback(
+    (device: UsbDevice) => {
+      void ipc
+        .releaseUsbDevice(device.serial)
+        .then((owner) => flash(`Quit ${owner} — reconnecting`))
+        .catch((error) => flash(String(error).replace(/^Error:\s*/, "")));
+    },
+    [flash]
+  );
+
   /** The USB device the current path belongs to, if any. */
   const currentUsb = useMemo(
     () => usb.find((device) => store.path.startsWith(`mtp://${device.serial}/`)) ?? null,
@@ -1101,7 +1114,7 @@ export default function App() {
           {/* A device that isn't browsable yet takes over the content area
               instead of showing an empty folder that looks like a failure. */}
           {currentUsb && currentUsb.stage !== "ready" ? (
-            <UsbConnecting device={currentUsb} />
+            <UsbConnecting device={currentUsb} onRelease={releaseUsb} />
           ) : store.view === "icons" ? (
             <IconGrid
               emptyMessage={emptyMessage}

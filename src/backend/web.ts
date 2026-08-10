@@ -150,6 +150,7 @@ const backend: Backend = {
   usbDevices: async () => [],
   onUsbDevices: async () => () => {},
   onUsbEntries: async () => () => {},
+  releaseUsbDevice: unavailable("USB devices"),
 
   // ------------------------------------------------------------ mutation
 

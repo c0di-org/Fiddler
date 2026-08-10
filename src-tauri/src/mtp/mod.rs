@@ -169,6 +169,13 @@ enum Request {
         len: u32,
         reply: Sender<Result<Vec<u8>, String>>,
     },
+    /// Ask the device to draw the picture itself, via MTP's `GetThumb`.
+    Thumbnail {
+        serial: String,
+        storage: u64,
+        rel: String,
+        reply: Sender<Result<Vec<u8>, String>>,
+    },
 }
 
 /// Size and modification time for one object, remembered from its listing.
@@ -319,6 +326,30 @@ impl MtpService {
             .map_err(|_| "The USB service is not running")?;
         rx.recv().map_err(|_| "The USB service stopped responding")?
     }
+
+    /// The device's own thumbnail for an object, via MTP's `GetThumb`.
+    ///
+    /// The route of last resort, and the only one that works for video: an mp4
+    /// keeps nothing an image decoder can use near the front of the file, so
+    /// reading its head buys nothing. The phone can decode a frame, and does.
+    ///
+    /// Measured on a Galaxy Z Fold 7: 85-138ms for a video against 7-15ms for a
+    /// still, because the device is decoding video to answer. Ten times the cost
+    /// of the head route, which is why this is a fallback and not the default.
+    pub fn device_thumbnail(&self, path: &str) -> Result<Vec<u8>, String> {
+        let parsed = path::parse(path).ok_or("Not a device path")?;
+        let storage = parsed.storage.ok_or("That path has no storage")?;
+        let (tx, rx) = channel();
+        self.jobs
+            .send(Request::Thumbnail {
+                serial: parsed.serial,
+                storage,
+                rel: parsed.rel,
+                reply: tx,
+            })
+            .map_err(|_| "The USB service is not running")?;
+        rx.recv().map_err(|_| "The USB service stopped responding")?
+    }
 }
 
 /// One attached device, as the worker sees it.
@@ -452,6 +483,13 @@ impl Worker {
             Request::ReadRange { serial, storage, rel, offset, len, reply } => {
                 let result = match self.slots.get_mut(&serial) {
                     Some(slot) => read_range(slot, storage, &rel, offset, len).await,
+                    None => Err("That device is not connected".into()),
+                };
+                let _ = reply.send(result);
+            }
+            Request::Thumbnail { serial, storage, rel, reply } => {
+                let result = match self.slots.get_mut(&serial) {
+                    Some(slot) => device_thumbnail(slot, storage, &rel).await,
                     None => Err("That device is not connected".into()),
                 };
                 let _ = reply.send(result);
@@ -610,6 +648,27 @@ async fn read_range(
         .ok_or("That storage is no longer attached")?;
     let handle = resolve(store, handles, storage_id, rel).await?;
     store.read_range(handle, offset, len).await.map_err(describe)
+}
+
+/// Ask the device for its own thumbnail. See [`MtpService::device_thumbnail`].
+async fn device_thumbnail(
+    slot: &mut Slot,
+    storage_id: u64,
+    rel: &str,
+) -> Result<Vec<u8>, String> {
+    let Slot { storages, handles, .. } = slot;
+    let store = storages
+        .iter()
+        .find(|s| s.id().0 == storage_id)
+        .ok_or("That storage is no longer attached")?;
+    let handle = resolve(store, handles, storage_id, rel).await?;
+    let bytes = store.thumbnail(handle).await.map_err(describe)?;
+    // Plenty of objects have no thumbnail to give, and a device that answers
+    // with nothing has answered. Treat it as a miss rather than as data.
+    if bytes.is_empty() {
+        return Err("the device has no thumbnail for this file".into());
+    }
+    Ok(bytes)
 }
 
 /// Move one device forward: open it, ask for storages, and decide which stage
@@ -802,38 +861,76 @@ fn describe(error: mtp_rs::Error) -> String {
 /// an exclusively-held USB device, which turns "something else has it" into a
 /// name a person can act on.
 #[cfg(target_os = "macos")]
-fn exclusive_owner(vendor: u16, product: u16) -> (Option<String>, Option<u32>) {
+fn exclusive_owner(_vendor: u16, _product: u16) -> (Option<String>, Option<u32>) {
     let output = std::process::Command::new("ioreg")
-        .args(["-p", "IOUSB", "-w0", "-l"])
+        .args(["-c", "IOUSBHostDevice", "-w0", "-l"])
         .output()
         .ok();
     let Some(output) = output else { return (None, None) };
     let text = String::from_utf8_lossy(&output.stdout);
-
-    // Walk to the stanza for this device, then take the owner recorded under it.
-    let mut in_device = false;
-    for line in text.lines() {
-        if line.contains("idVendor") && line.contains(&vendor.to_string()) {
-            in_device = true;
-        }
-        if in_device && line.contains("UsbExclusiveOwner") {
-            let owner = line.split('=').nth(1).map(|v| v.trim().trim_matches('"').to_string());
-            let pid = owner
-                .as_deref()
-                .and_then(|o| o.rsplit_once(','))
-                .and_then(|(_, pid)| pid.trim().parse().ok());
-            return (owner, pid);
-        }
-        if line.contains("idProduct") && !line.contains(&product.to_string()) {
-            in_device = false;
-        }
-    }
-    (None, None)
+    let owners: Vec<&str> = text
+        .lines()
+        .filter(|line| line.contains("UsbExclusiveOwner"))
+        .filter_map(|line| line.split('=').nth(1))
+        .map(|value| value.trim().trim_matches('"'))
+        .collect();
+    pick_claimant(&owners)
 }
 
 #[cfg(not(target_os = "macos"))]
 fn exclusive_owner(_vendor: u16, _product: u16) -> (Option<String>, Option<u32>) {
     (None, None)
+}
+
+/// Processes known to take an MTP device and not give it back.
+///
+/// `ptpcamerad` is macOS's own: it claims PTP/MTP devices on connection and
+/// then cannot serve an Android phone, so it holds the device purely to deny
+/// it. Android File Transfer does the same while it is running.
+const CLAIMANTS: &[&str] = &["ptpcamerad", "Android File Transfer", "AndroidFileTransfer"];
+
+/// Which of the recorded owners is actually standing in our way.
+///
+/// A phone with USB debugging on has several interfaces claimed at once — `adb`
+/// holds its own, and macOS holds a serial one — and none of those block MTP.
+/// Naming the wrong process would send someone to quit something irrelevant, so
+/// only a known claimant counts.
+fn pick_claimant(owners: &[&str]) -> (Option<String>, Option<u32>) {
+    let found = owners
+        .iter()
+        .find(|owner| CLAIMANTS.iter().any(|name| owner.contains(name)));
+    let Some(owner) = found else { return (None, None) };
+    // The value reads "pid 5118, ptpcamerad".
+    let pid = owner
+        .split_once("pid ")
+        .and_then(|(_, rest)| rest.split(',').next())
+        .and_then(|digits| digits.trim().parse().ok());
+    let name = owner
+        .rsplit_once(',')
+        .map(|(_, name)| name.trim().to_string())
+        .unwrap_or_else(|| owner.to_string());
+    (Some(name), pid)
+}
+
+/// Quit whatever is holding the device, when it is something we recognise.
+///
+/// Deliberately narrow. It will end `ptpcamerad` — a system daemon that launchd
+/// brings straight back when something actually needs it — or Android File
+/// Transfer, and nothing else. Fiddler should not be in the business of killing
+/// arbitrary processes because they happen to be in the way.
+pub fn release(owner: &str, pid: u32) -> Result<String, String> {
+    if !CLAIMANTS.iter().any(|name| owner.contains(name)) {
+        return Err(format!("Fiddler won't quit {owner} for you — quit it yourself to continue"));
+    }
+    let ended = std::process::Command::new("kill")
+        .args(["-9", &pid.to_string()])
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false);
+    if !ended {
+        return Err(format!("Couldn't quit {owner}"));
+    }
+    Ok(owner.to_string())
 }
 
 #[cfg(test)]
@@ -1177,6 +1274,42 @@ mod tests {
         // ...but a link the OS never reported must not produce a warning we
         // cannot back up.
         assert_eq!(describe_link(None), (None, None, false));
+    }
+
+    #[test]
+    fn the_process_named_is_the_one_actually_in_the_way() {
+        // Real output from a Galaxy with USB debugging on. Three interfaces are
+        // claimed at once and only one of them blocks MTP — an earlier version
+        // took the first line and would have told people to quit adb.
+        let owners = [
+            "pid 5492, adb",
+            "pid 5118, ptpcamerad",
+            "AppleUSBACMControl",
+        ];
+        assert_eq!(pick_claimant(&owners), (Some("ptpcamerad".into()), Some(5118)));
+
+        // Order must not matter.
+        let reversed = ["AppleUSBACMControl", "pid 5118, ptpcamerad", "pid 5492, adb"];
+        assert_eq!(pick_claimant(&reversed), (Some("ptpcamerad".into()), Some(5118)));
+
+        // Nothing we recognise: say nothing rather than accuse a bystander.
+        assert_eq!(pick_claimant(&["pid 5492, adb"]), (None, None));
+        assert_eq!(pick_claimant(&[]), (None, None));
+
+        // An owner with no parseable pid still names the process, so the panel
+        // can explain even when it cannot offer the button.
+        let (name, pid) = pick_claimant(&["ptpcamerad"]);
+        assert_eq!(name.as_deref(), Some("ptpcamerad"));
+        assert_eq!(pid, None);
+    }
+
+    #[test]
+    fn only_known_claimants_are_ever_quit() {
+        // The button ends a system daemon that launchd restarts. It must never
+        // become a way to kill whatever happens to hold a device.
+        let refused = release("Final Cut Pro", 999_999).unwrap_err();
+        assert!(refused.contains("won't quit Final Cut Pro"), "{refused}");
+        assert!(refused.contains("quit it yourself"), "{refused}");
     }
 
     #[test]

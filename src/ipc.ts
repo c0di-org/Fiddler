@@ -27,6 +27,7 @@ export const {
   usbDevices,
   onUsbDevices,
   onUsbEntries,
+  releaseUsbDevice,
   createFolder,
   createTextFile,
   writeTextFile,

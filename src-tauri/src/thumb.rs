@@ -363,32 +363,26 @@ fn usb_thumbnail(path: &Path, max_px: u32, out: PathBuf) -> Result<PathBuf, Stri
     if out.is_file() {
         return Ok(out);
     }
-    // Raster and text both render from the head alone. A PDF does not — its page
-    // objects can live anywhere in the file, so page one is not reliably in the
-    // first 256 KB, and pulling a whole document per tile is not worth it.
-    let lane = lane_of(path);
-    if !matches!(lane, Lane::Raster | Lane::Text) {
-        return Err("no device preview for this kind of file".into());
-    }
     let service = crate::mtp::service().ok_or("the USB service is not running")?;
     let text = path.to_str().ok_or("unrepresentable path")?;
-    let head = service.read_range(text, 0, USB_HEAD_BYTES)?;
+    let lane = lane_of(path);
 
-    // Decide what we actually have before drawing anything.
+    // Work out where the pixels can come from before fetching anything.
     //
-    // A truncated image must never be rendered. ImageIO will cheerfully decode
-    // the fraction of a photo that arrived and produce a picture that fades to
-    // blank part way down, which looks like a broken app rather than a missing
-    // preview. So either the file arrived whole, or its EXIF thumbnail did, or
-    // we decline and the tile keeps its glyph.
-    let whole = (head.len() as u32) < USB_HEAD_BYTES;
-    let source = if matches!(lane, Lane::Text) || whole {
-        Source::Whole
-    } else if embedded_thumbnail(&head).is_some() {
-        Source::Embedded
-    } else {
-        return Err("only part of this file arrived and it carries no thumbnail".into());
+    // Text and images can usually be drawn from the front of the file, which is
+    // one cheap read. Video cannot: an mp4 keeps nothing an image decoder can
+    // use up there, so reading its head would cost 256 KB and buy a glyph. The
+    // device can decode a frame, so ask it directly and skip the read.
+    //
+    // A truncated image must never be rendered either way. ImageIO will
+    // cheerfully decode the fraction of a photo that arrived and produce a
+    // picture that fades to blank part way down, which looks like a broken app
+    // rather than a missing preview.
+    let head = match lane {
+        Lane::Text | Lane::Raster => Some(service.read_range(text, 0, USB_HEAD_BYTES)?),
+        _ => None,
     };
+    let source = plan_source(lane, head.as_deref());
 
     // The scratch file keeps the real extension: `thumb_text` picks its syntax
     // highlighting from it, and ImageIO uses it as a decoding hint.
@@ -401,11 +395,23 @@ fn usb_thumbnail(path: &Path, max_px: u32, out: PathBuf) -> Result<PathBuf, Stri
     let result = match source {
         // Whole file, or text drawn from its first bytes: the ordinary paths.
         Source::Whole => {
-            std::fs::write(&scratch, &head).map_err(|e| e.to_string())?;
+            let head = head.as_deref().ok_or("nothing was read")?;
+            std::fs::write(&scratch, head).map_err(|e| e.to_string())?;
             match lane {
                 Lane::Text => crate::thumb_text::render(&scratch, max_px, &out),
                 _ => image_io_opts(&scratch, max_px, &out, false),
             }
+        }
+        // The device draws it. The only route that works for video, and the
+        // last resort for anything else whose front held nothing usable.
+        //
+        // A device thumbnail is generated for display, so it arrives the right
+        // way up — but it is still a JPEG that may carry its own orientation
+        // tag, and honouring one costs nothing.
+        Source::Device => {
+            let bytes = service.device_thumbnail(text)?;
+            std::fs::write(&scratch, &bytes).map_err(|e| e.to_string())?;
+            decode_upright(&scratch, max_px, &out, exif_orientation(&bytes))
         }
         // Only the front of a photo arrived.
         //
@@ -419,9 +425,10 @@ fn usb_thumbnail(path: &Path, max_px: u32, out: PathBuf) -> Result<PathBuf, Stri
         // here. It carries no EXIF of its own, so the parent's orientation has
         // to be read and applied by hand or portrait photos come back sideways.
         Source::Embedded => {
-            let thumbnail = embedded_thumbnail(&head).ok_or("no embedded thumbnail")?;
+            let head = head.as_deref().ok_or("nothing was read")?;
+            let thumbnail = embedded_thumbnail(head).ok_or("no embedded thumbnail")?;
             std::fs::write(&scratch, thumbnail).map_err(|e| e.to_string())?;
-            decode_upright(&scratch, max_px, &out, exif_orientation(&head))
+            decode_upright(&scratch, max_px, &out, exif_orientation(head))
         }
     };
     let _ = std::fs::remove_file(&scratch);
@@ -439,13 +446,34 @@ fn decode_upright(src: &Path, max_px: u32, out: &Path, orientation: u16) -> Resu
     write_png(&upright, out)
 }
 
+/// Decide where a device thumbnail's pixels will come from.
+///
+/// Split out from the fetching so the routing is testable on its own: which
+/// kind of file takes which route is the part that keeps being got wrong.
+#[cfg(not(target_os = "android"))]
+fn plan_source(lane: Lane, head: Option<&[u8]>) -> Source {
+    match head {
+        // Text is drawn from its first lines, so a partial read is the point.
+        Some(_) if matches!(lane, Lane::Text) => Source::Whole,
+        // A read that came back short covered the whole file: nothing was cut.
+        Some(head) if (head.len() as u32) < USB_HEAD_BYTES => Source::Whole,
+        Some(head) if embedded_thumbnail(head).is_some() => Source::Embedded,
+        // Either there was no head worth having (video, PDF), or the head we
+        // got holds no complete thumbnail. Both are the device's problem now.
+        _ => Source::Device,
+    }
+}
+
 /// Where a device thumbnail's pixels come from.
 #[cfg(not(target_os = "android"))]
+#[derive(Debug, PartialEq, Eq)]
 enum Source {
     /// The read covered the entire file, so it can be decoded like any other.
     Whole,
     /// Only the front arrived, but it contains a complete EXIF thumbnail.
     Embedded,
+    /// Nothing we can read cheaply will draw this, so the device draws it.
+    Device,
 }
 
 #[cfg(not(target_os = "android"))]
@@ -902,6 +930,46 @@ mod tests {
         // A half turn keeps them.
         let flipped = oriented(&wide, 3).unwrap();
         assert_eq!(CGImage::width(Some(&flipped)), 40);
+    }
+
+    #[test]
+    fn a_video_asks_the_device_rather_than_reading_its_head() {
+        // An mp4 keeps nothing an image decoder can use near the front, so the
+        // head is never even fetched: `plan_source` is handed None for it and
+        // must route to the device. Getting this wrong costs 256 KB per tile
+        // and still draws a glyph.
+        assert_eq!(plan_source(Lane::QuickLook, None), Source::Device);
+        // A PDF is the same story: its page objects can sit anywhere in the file.
+        assert_eq!(plan_source(Lane::Page, None), Source::Device);
+    }
+
+    #[test]
+    fn a_photo_takes_the_cheap_route_and_falls_back_when_it_cannot() {
+        // A short read means the whole file arrived, so decode it directly.
+        assert_eq!(plan_source(Lane::Raster, Some(&[0xFF, 0xD8, 0x11])), Source::Whole);
+
+        // A full-length read means the file was cut. Drawable only if the head
+        // carries a complete embedded thumbnail...
+        let mut with_thumb = vec![0xFF, 0xD8, 0xFF, 0xE1];
+        with_thumb.extend_from_slice(&[0xFF, 0xD8]);
+        with_thumb.extend_from_slice(b"thumb");
+        with_thumb.extend_from_slice(&[0xFF, 0xD9]);
+        with_thumb.resize(USB_HEAD_BYTES as usize, 0x42);
+        assert_eq!(plan_source(Lane::Raster, Some(&with_thumb)), Source::Embedded);
+
+        // ...and otherwise the device is the last resort, rather than rendering
+        // the fragment that arrived.
+        let no_thumb = vec![0x42; USB_HEAD_BYTES as usize];
+        assert_eq!(plan_source(Lane::Raster, Some(&no_thumb)), Source::Device);
+    }
+
+    #[test]
+    fn text_is_drawn_from_its_head_however_long_the_file_is() {
+        // A source file is a page of its first lines by design, so a truncated
+        // read is not a problem to route around — it is the whole idea.
+        let long = vec![b'x'; USB_HEAD_BYTES as usize];
+        assert_eq!(plan_source(Lane::Text, Some(&long)), Source::Whole);
+        assert_eq!(plan_source(Lane::Text, Some(b"short file")), Source::Whole);
     }
 
     #[test]
