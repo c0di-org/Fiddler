@@ -1,4 +1,5 @@
 import { tildify } from "../format";
+import { locationCaps } from "../location";
 import type { ViewMode } from "../store/tree";
 import {
   BranchIcon,
@@ -42,6 +43,7 @@ interface Props {
 export function Toolbar(p: Props) {
   const remote = p.device && p.path.startsWith(`fiddler://${p.device.id}/`);
   const crumbs = remote ? buildRemoteCrumbs(p.path, p.device!) : buildCrumbs(p.path, p.home);
+  const here = locationCaps(p.path);
 
   // "deep" so the gaps between the controls drag the window too; the drag
   // script still refuses to start a drag from buttons, inputs and labels.
@@ -94,7 +96,15 @@ export function Toolbar(p: Props) {
       <div className="tb-spacer" />
 
       <div className="tb-tools">
-        <button className="tb-btn tb-new-file" onClick={p.onNewFile} title="New text file (⌘N)">
+        {/* Greyed rather than gone on a device, like Back and Forward: the
+            button is a fixture of the toolbar, and moving the view controls
+            about as you walk into a phone would be worse than a dead key. */}
+        <button
+          className="tb-btn tb-new-file"
+          disabled={!here.create}
+          onClick={p.onNewFile}
+          title={here.create ? "New text file (⌘N)" : `Fiddler can’t create files on ${here.where} yet`}
+        >
           <NewFileIcon size={17} />
         </button>
         <div className="tb-seg" data-at={p.view === "icons" ? 0 : 1}>

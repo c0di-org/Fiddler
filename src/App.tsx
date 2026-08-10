@@ -17,6 +17,7 @@ import { addFavorite, loadFavorites, moveFavorite, saveFavorites } from "./favor
 import { invalidate as peekChanged, setShowHidden as setPeekHidden } from "./folder-peek";
 import { formatSize } from "./format";
 import * as ipc from "./ipc";
+import { locationCaps } from "./location";
 import { caps, permissionHelp } from "./platform";
 import { parseShortcut } from "./preview/link";
 import { routeOf } from "./preview/route";
@@ -712,6 +713,13 @@ export default function App() {
   const trashSelected = useCallback(async () => {
     const paths = selected.filter((t) => t.entry).map((t) => t.path);
     if (paths.length === 0) return;
+    // Deleting part of a mixed selection would be the worst of both answers, so
+    // one unsupported item refuses the lot.
+    const off = paths.map(locationCaps).find((at) => !at.modify);
+    if (off) {
+      flash(`Fiddler can’t delete items on ${off.where} yet`);
+      return;
+    }
     if (!caps.trash) {
       const noun = paths.length === 1 ? "this item" : `these ${paths.length} items`;
       if (!window.confirm(`Permanently delete ${noun}? This cannot be undone.`)) return;
@@ -727,6 +735,11 @@ export default function App() {
   const copySelected = useCallback(() => {
     const paths = selected.map((target) => target.path);
     if (paths.length === 0) return;
+    const off = paths.map(locationCaps).find((at) => !at.copy);
+    if (off) {
+      flash(`Fiddler can’t copy items off ${off.where} yet`);
+      return;
+    }
     setCopiedPaths(paths);
     flash(`Copied ${paths.length} item${paths.length === 1 ? "" : "s"}`);
   }, [selected, flash]);
@@ -734,6 +747,11 @@ export default function App() {
   const paste = useCallback(async () => {
     if (copiedPaths.length === 0 || !store.path) return;
     const destination = store.path;
+    const here = locationCaps(destination);
+    if (!here.paste) {
+      flash(`Fiddler can’t put items on ${here.where} yet`);
+      return;
+    }
     // A cable is slow enough that silence reads as nothing happening: a video
     // onto a phone over USB 2.0 is tens of seconds.
     const device = destination.startsWith("mtp://");
@@ -753,6 +771,11 @@ export default function App() {
   }, [copiedPaths, flash]);
 
   const newFolder = useCallback(async () => {
+    const here = locationCaps(store.path);
+    if (!here.create) {
+      flash(`Fiddler can’t create folders on ${here.where} yet`);
+      return;
+    }
     try {
       const created = await ipc.createFolder(store.path, "untitled folder");
       setSelection(new Set([created]));
@@ -764,8 +787,16 @@ export default function App() {
   }, [flash]);
 
   const newTextFile = useCallback(() => {
-    if (store.path) setEditor({ text: "" });
-  }, []);
+    if (!store.path) return;
+    // The editor's first save creates the file in the folder behind it, so the
+    // question is the same one New Folder asks.
+    const here = locationCaps(store.path);
+    if (!here.create) {
+      flash(`Fiddler can’t create files on ${here.where} yet`);
+      return;
+    }
+    setEditor({ text: "" });
+  }, [flash]);
 
   const commitRename = useCallback(
     async (row: Row, name: string) => {
@@ -773,6 +804,11 @@ export default function App() {
       const path = row.kind === "entry" ? row.entry.path : row.kind === "worktree" ? row.wt.path : null;
       const current = row.kind === "entry" ? row.entry.name : row.kind === "worktree" ? row.wt.name : "";
       if (!path || name === current) return;
+      const at = locationCaps(path);
+      if (!at.modify) {
+        flash(`Fiddler can’t rename items on ${at.where} yet`);
+        return;
+      }
       try {
         const moved = await ipc.renamePath(path, name);
         setSelection(new Set([moved]));
@@ -787,14 +823,21 @@ export default function App() {
     (t: Target | null, x: number, y: number) => {
       const items: MenuItem[] = [];
 
+      // Two different questions: what this build can do, and what the address
+      // under the pointer can do. A folder on a phone takes a paste and nothing
+      // else, so the items that would fail are left out rather than shown.
+      const at = locationCaps(t ? t.path : store.path);
+
       if (t) {
         items.push({ label: t.isDir ? "Open" : "Open", onPick: () => void openTarget(t) });
-        items.push({ label: selected.length > 1 ? `Copy ${selected.length} Items` : "Copy", onPick: copySelected });
+        if (at.copy) {
+          items.push({ label: selected.length > 1 ? `Copy ${selected.length} Items` : "Copy", onPick: copySelected });
+        }
         if (!t.isDir) items.push({ label: "Edit Text File", onPick: () => void openTarget(t) });
-        if (caps.reveal) {
+        if (caps.reveal && at.shell) {
           items.push({ label: "Reveal in Finder", onPick: () => void ipc.revealInFinder(t.path) });
         }
-        if (caps.terminal) {
+        if (caps.terminal && at.shell) {
           items.push({ label: "Open in Terminal", onPick: () => void ipc.openTerminalHere(t.path) });
         }
         items.push({
@@ -802,7 +845,7 @@ export default function App() {
           separatorBefore: true,
           onPick: () => void navigator.clipboard.writeText(t.path),
         });
-        if (t.entry) {
+        if (t.entry && at.modify) {
           items.push({ label: "Rename…", onPick: () => setRenamingId(t.id) });
           items.push({
             label: caps.trash
@@ -818,10 +861,12 @@ export default function App() {
           });
         }
       } else {
-        if (copiedPaths.length > 0) items.push({ label: "Paste", onPick: () => void paste() });
-        items.push({ label: "New Text File", onPick: newTextFile });
-        items.push({ label: "New Folder", onPick: () => void newFolder() });
-        if (caps.terminal) items.push({ label: "Open in Terminal", onPick: () => void ipc.openTerminalHere(store.path) });
+        if (copiedPaths.length > 0 && at.paste) items.push({ label: "Paste", onPick: () => void paste() });
+        if (at.create) {
+          items.push({ label: "New Text File", onPick: newTextFile });
+          items.push({ label: "New Folder", onPick: () => void newFolder() });
+        }
+        if (caps.terminal && at.shell) items.push({ label: "Open in Terminal", onPick: () => void ipc.openTerminalHere(store.path) });
         if (mountFolder) items.push({ label: "Open Folder…", separatorBefore: true, onPick: mountFolder });
         const root = store.listing?.repoRoot;
         if (root) {
@@ -833,7 +878,9 @@ export default function App() {
         }
       }
 
-      setMenu({ x, y, items });
+      // The empty space of a device folder has nothing left to offer, and an
+      // empty menu is a blank box that has to be dismissed.
+      if (items.length > 0) setMenu({ x, y, items });
     },
     [openTarget, selected.length, copySelected, trashSelected, copiedPaths.length, paste, newFolder, newTextFile, mountFolder]
   );
@@ -936,8 +983,10 @@ export default function App() {
         case "Enter":
           if (target) {
             e.preventDefault();
+            // Don't open a rename field that has nowhere to commit to: on a
+            // device the name is the one thing that can't be edited.
             if (modifier) void s.openTarget(target);
-            else setRenamingId(target.id);
+            else if (locationCaps(target.path).modify) setRenamingId(target.id);
           }
           break;
         case "o":
