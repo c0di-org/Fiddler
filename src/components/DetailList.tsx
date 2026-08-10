@@ -8,7 +8,9 @@ import { GitDot } from "./GitDot";
 import { EmptyState } from "./EmptyState";
 import { Chevron, ForkIcon, GripIcon, LockIcon, WarnIcon } from "./icons";
 import { beginFolderDrag, endFolderDrag, FOLDER_DRAG_TYPE } from "../favorites";
+import { beginItemDrag, endItemDrag, ITEM_DRAG_TYPE, type DragItems } from "../drag.ts";
 import { type FolderTouchDragHandlers, useFolderTouchDrag } from "./folder-touch-drag";
+import { dropProps, useDropTarget, type DropItems } from "./use-drop-target.ts";
 
 /** Finder's list view: dense, sortable, with disclosure triangles. */
 
@@ -90,6 +92,11 @@ interface Props {
   touchFolderDrag?: FolderTouchDragHandlers;
   /** Touch gets direct open/preview actions; mouse keeps selection behavior. */
   directTouch?: boolean;
+  /** What a drag starting on this row carries — the whole selection when the
+   * row is part of it. Null where the row isn't a drag source. */
+  dragItems?: (id: string) => DragItems | null;
+  /** Where a drop landed and what it should do. */
+  onDropItems?: DropItems;
 }
 
 export function DetailList(props: Props) {
@@ -356,6 +363,8 @@ export function DetailList(props: Props) {
                 onRenameCommit={props.onRenameCommit}
                 onRenameCancel={props.onRenameCancel}
                 touchFolderDrag={props.touchFolderDrag}
+                dragItems={props.dragItems}
+                onDropItems={props.onDropItems}
               />
             ))}
           </div>
@@ -377,6 +386,8 @@ function RowView({
   columnOrder,
   narrow,
   touchFolderDrag,
+  dragItems,
+  onDropItems,
 }: {
   row: Row;
   selected: boolean;
@@ -391,6 +402,8 @@ function RowView({
    *  row height the virtual scroller measures with. */
   narrow: boolean;
   touchFolderDrag?: FolderTouchDragHandlers;
+  dragItems?: (id: string) => DragItems | null;
+  onDropItems?: DropItems;
 }) {
   const expandable = !searching && (row.kind === "wt-group" || row.dirPath !== null);
   const e = row.kind === "entry" ? row.entry : null;
@@ -406,23 +419,38 @@ function RowView({
   const path = row.kind === "entry" ? row.entry.path : row.kind === "worktree" ? row.wt.path : null;
   const isFolder = row.dirPath !== null;
   const touchDrag = useFolderTouchDrag(isFolder && path ? { name, path } : null, touchFolderDrag);
+  const drop = useDropTarget(row.dirPath, onDropItems);
+  const { className: dropClass, ...dropHandlers } = dropProps(drop);
 
   return (
     <div
       className={`lrow ${selected ? "selected" : ""} ${muted ? "muted" : ""} ${touchDrag.dragging ? "touch-dragging" : ""} ${
         row.kind === "wt-group" ? "section" : ""
-      }`}
+      } ${dropClass}`}
       data-row-id={row.id}
       style={{ height: ROW_H, ...columnStyle }}
-      draggable={isFolder}
+      {...dropHandlers}
+      draggable={!!path}
       onDragStart={(event) => {
-        if (!isFolder || !path) return;
-        beginFolderDrag({ name, path });
-        event.dataTransfer.effectAllowed = "copy";
-        event.dataTransfer.setData(FOLDER_DRAG_TYPE, JSON.stringify({ name, path }));
+        if (!path) return;
+        // A folder keeps its own drag type so Favorites, which is the one drop
+        // target that wants a bookmark rather than the bytes, still works.
+        if (isFolder) {
+          beginFolderDrag({ name, path });
+          event.dataTransfer.setData(FOLDER_DRAG_TYPE, JSON.stringify({ name, path }));
+        }
+        const items = dragItems?.(row.id) ?? null;
+        if (items) {
+          beginItemDrag(items);
+          event.dataTransfer.setData(ITEM_DRAG_TYPE, JSON.stringify(items.paths));
+        }
+        event.dataTransfer.effectAllowed = items ? "copyMove" : "copy";
         event.dataTransfer.setData("text/plain", path);
       }}
-      onDragEnd={endFolderDrag}
+      onDragEnd={() => {
+        endFolderDrag();
+        endItemDrag();
+      }}
       onPointerDown={touchDrag.onPointerDown}
       onPointerMove={touchDrag.onPointerMove}
       onPointerUp={touchDrag.onPointerUp}

@@ -93,6 +93,11 @@ export interface Backend {
   writeTextFile(path: string, text: string): Promise<void>;
   renamePath(path: string, newName: string): Promise<string>;
   copyPaths(paths: string[], destination: string): Promise<string[]>;
+  /** The same transfer, without leaving the originals behind. Separate from
+   * `copyPaths` because within one volume it is an entry rewrite rather than a
+   * copy, and because it must never overwrite: a name already taken at the
+   * destination refuses the whole batch rather than moving part of it. */
+  movePaths(paths: string[], destination: string): Promise<string[]>;
   trashPaths(paths: string[]): Promise<void>;
   /** Fires with the directories whose contents changed. Every mutation above is
    * expected to produce one of these — the UI does not refresh itself. */

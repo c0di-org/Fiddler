@@ -35,6 +35,7 @@ export const {
   writeTextFile,
   renamePath,
   copyPaths,
+  movePaths,
   trashPaths,
   onDirsChanged,
   thumbnail,

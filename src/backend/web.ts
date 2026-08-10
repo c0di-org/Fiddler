@@ -184,6 +184,14 @@ const backend: Backend = {
 
   copyPaths: (paths, destination) => vfs.copyInto(paths, destination),
 
+  async movePaths(paths, destination) {
+    const moved = await vfs.moveInto(paths, destination);
+    // The originals are gone, so anything cached against those paths is now
+    // about a file that isn't there — the same reason trashing forgets them.
+    for (const path of paths) invalidate(path);
+    return moved;
+  },
+
   async trashPaths(paths) {
     for (const path of paths) {
       await vfs.remove(path);

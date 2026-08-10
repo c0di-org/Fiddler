@@ -6,7 +6,9 @@ import { FolderGlyph } from "./FileGlyph";
 import { GitDot } from "./GitDot";
 import { Thumb } from "./Thumb";
 import { beginFolderDrag, endFolderDrag, FOLDER_DRAG_TYPE } from "../favorites";
+import { beginItemDrag, endItemDrag, ITEM_DRAG_TYPE, type DragItems } from "../drag.ts";
 import { type FolderTouchDragHandlers, useFolderTouchDrag } from "./folder-touch-drag";
+import { dropProps, useDropTarget, type DropItems } from "./use-drop-target.ts";
 
 /**
  * The default view: big previews in a grid. Virtualized by row, so a folder with
@@ -68,6 +70,11 @@ interface Props {
   touchFolderDrag?: FolderTouchDragHandlers;
   /** Touch gets direct open/preview actions; mouse keeps selection behavior. */
   directTouch?: boolean;
+  /** What a drag starting on this item carries — the whole selection when the
+   * item is part of it. Null where the item isn't a drag source. */
+  dragItems?: (id: string) => DragItems | null;
+  /** Where a drop landed and what it should do. */
+  onDropItems?: DropItems;
 }
 
 export function IconGrid(props: Props) {
@@ -237,6 +244,8 @@ export function IconGrid(props: Props) {
                   iconSize={iconSize}
                   selected={props.selection.has(cell.id)}
                   touchFolderDrag={props.touchFolderDrag}
+                  dragItems={props.dragItems}
+                  onDropItems={props.onDropItems}
                 />
               ))}
             </div>
@@ -254,35 +263,53 @@ function Cell({
   iconSize,
   selected,
   touchFolderDrag,
+  dragItems,
+  onDropItems,
 }: {
   cell: GridCell;
   width: number;
   iconSize: number;
   selected: boolean;
   touchFolderDrag?: FolderTouchDragHandlers;
+  dragItems?: (id: string) => DragItems | null;
+  onDropItems?: DropItems;
 }) {
   const e = cell.entry;
   const ignored = e?.code?.index === "!";
   const isFolder = !!cell.wt || e?.kind === "dir" || (e?.kind === "symlink" && e.linkToDir);
   const touchDrag = useFolderTouchDrag(isFolder ? { name: cell.name, path: cell.path } : null, touchFolderDrag);
+  const drop = useDropTarget(isFolder ? cell.path : null, onDropItems);
+  const { className: dropClass, ...dropHandlers } = dropProps(drop);
 
   return (
     <div
       className={`cell ${selected ? "selected" : ""} ${ignored || e?.hidden ? "muted" : ""} ${
         touchDrag.dragging ? "touch-dragging" : ""
-      }`}
+      } ${dropClass}`}
       data-cell-id={cell.id}
       style={{ width }}
       title={cell.path}
-      draggable={isFolder}
+      {...dropHandlers}
+      draggable={isFolder || !!cell.entry}
       onDragStart={(event) => {
-        if (!isFolder) return;
-        beginFolderDrag({ name: cell.name, path: cell.path });
-        event.dataTransfer.effectAllowed = "copy";
-        event.dataTransfer.setData(FOLDER_DRAG_TYPE, JSON.stringify({ name: cell.name, path: cell.path }));
+        // A folder keeps its own drag type so Favorites, which is the one drop
+        // target that wants a bookmark rather than the bytes, still works.
+        if (isFolder) {
+          beginFolderDrag({ name: cell.name, path: cell.path });
+          event.dataTransfer.setData(FOLDER_DRAG_TYPE, JSON.stringify({ name: cell.name, path: cell.path }));
+        }
+        const items = dragItems?.(cell.id) ?? null;
+        if (items) {
+          beginItemDrag(items);
+          event.dataTransfer.setData(ITEM_DRAG_TYPE, JSON.stringify(items.paths));
+        }
+        event.dataTransfer.effectAllowed = items ? "copyMove" : "copy";
         event.dataTransfer.setData("text/plain", cell.path);
       }}
-      onDragEnd={endFolderDrag}
+      onDragEnd={() => {
+        endFolderDrag();
+        endItemDrag();
+      }}
       onPointerDown={touchDrag.onPointerDown}
       onPointerMove={touchDrag.onPointerMove}
       onPointerUp={touchDrag.onPointerUp}

@@ -88,6 +88,7 @@ pub fn run() {
             commands::write_text_file,
             commands::rename_path,
             commands::copy_paths,
+            commands::move_paths,
             commands::trash_paths,
         ])
         .run(tauri::generate_context!())

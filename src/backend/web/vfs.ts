@@ -227,6 +227,42 @@ export async function copyInto(sources: string[], destination: string): Promise<
   return created;
 }
 
+/** Move rather than duplicate. No provider here has a cross-directory rename —
+ * `rename` only replaces a name in place — so every move is a copy followed by
+ * a delete, and the delete only happens once the copy is whole.
+ *
+ * Nothing is overwritten: a name already taken at the destination refuses the
+ * whole batch up front, so a drop either lands or it doesn't. */
+export async function moveInto(sources: string[], destination: string): Promise<string[]> {
+  const { mount } = resolve(destination);
+  assertWritable(mount);
+
+  const taken = new Set((await listDir(destination)).map((n) => n.name));
+  const plan: { source: string; target: string; kind: Node["kind"] }[] = [];
+  for (const source of sources) {
+    const node = await stat(source);
+    if (!node) continue;
+    if (destination === source || destination.startsWith(source + "/")) {
+      throw new Error(`“${node.name}” can’t be moved into itself`);
+    }
+    if (parentOf(source) === destination) throw new Error(`“${node.name}” is already there`);
+    if (taken.has(node.name)) throw new Error(`“${node.name}” already exists there`);
+    taken.add(node.name);
+    plan.push({ source, target: childPath(destination, node.name), kind: node.kind });
+  }
+
+  const moved: string[] = [];
+  for (const { source, target, kind } of plan) {
+    await copyOne(source, target, kind);
+    const { mount: from, rel } = resolve(source);
+    await from.provider.remove(rel);
+    touchDir(parentOf(source));
+    moved.push(target);
+  }
+  touchDir(destination);
+  return moved;
+}
+
 async function copyOne(source: string, target: string, kind: Node["kind"]) {
   if (kind === "file") {
     const { mount, rel } = resolve(target);

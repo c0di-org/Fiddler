@@ -500,6 +500,62 @@ button {
   opacity: 0.48;
 }
 
+/* ------------------------------------------------------- dropping items --
+ *
+ * A folder holding a drag: a grid cell, a list row, a sidebar place, a
+ * breadcrumb. All four wear the same ring and the same pill, because they all
+ * mean the same thing, and the pill spells the verb out — copy is the default
+ * here and ⌘ or ⌥ asks for a move, which is the reverse of Finder and so is
+ * exactly the thing that must never be guessed at.
+ *
+ * The pill is an `::after`, positioned absolutely so a list row — which is a
+ * grid with a fixed set of tracks — doesn't gain a sixth column and break the
+ * row height the virtual scroller measures with. `contain: layout` on `.lrow`
+ * already makes it the containing block; the rest ask for one.
+ */
+.drop-into {
+  position: relative;
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+
+/* The selection gradient would otherwise read louder than the drop ring on the
+   very row the pointer is over. */
+.lrow.selected.drop-into,
+.place.active.drop-into {
+  background: color-mix(in srgb, var(--accent) 42%, var(--surface-2));
+  color: var(--fg);
+}
+
+/* Inside the target's own width, never hanging past it: the rightmost cell in
+   the grid and the last column of a row both sit against a clipping scroller. */
+.drop-into::after {
+  position: absolute;
+  top: -8px;
+  right: 0;
+  z-index: 3;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: var(--accent);
+  box-shadow: var(--shadow-1);
+  color: var(--sel-fg);
+  font-size: 10.5px;
+  font-weight: 640;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  content: attr(data-drop-verb);
+  pointer-events: none;
+}
+
+/* A crumb and a place are short and sit against an edge, so the pill tucks
+   inside them rather than hanging off into the window chrome. */
+.crumb.drop-into::after,
+.place.drop-into::after {
+  top: 50%;
+  right: 6px;
+  transform: translateY(-50%);
+}
+
 .favorites-list.drop-before::before,
 .favorite-slot.drop-before::before,
 .favorite-slot.drop-after::after {

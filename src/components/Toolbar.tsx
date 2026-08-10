@@ -15,6 +15,7 @@ import {
   DeviceIcon,
   LaptopIcon,
 } from "./icons";
+import { dropProps, useDropTarget, type DropItems } from "./use-drop-target.ts";
 import type { PeerDevice } from "../types";
 
 interface Props {
@@ -38,6 +39,9 @@ interface Props {
   onTogglePreview: () => void;
   onNewFile: () => void;
   device?: PeerDevice;
+  /** A crumb is a folder, so it takes a drop like any other — which is how an
+   * item goes back up the tree without navigating away from where it is. */
+  onDropItems?: DropItems;
 }
 
 export function Toolbar(p: Props) {
@@ -73,14 +77,16 @@ export function Toolbar(p: Props) {
               …
             </span>
           ) : (
-            <button
+            <Crumb
               key={c.path}
-              className={`crumb ${i === all.length - 1 ? "here" : ""}`}
-              onClick={() => p.onCrumb(c.path)}
+              crumb={c}
+              here={i === all.length - 1}
+              onCrumb={p.onCrumb}
+              onDropItems={p.onDropItems}
             >
               {remote && i === 0 && (p.device!.platform === "macos" || p.device!.platform === "desktop" ? <LaptopIcon size={14} /> : <DeviceIcon size={14} />)}
               {c.label}
-            </button>
+            </Crumb>
           )
         )}
       </nav>
@@ -158,6 +164,32 @@ export function Toolbar(p: Props) {
 type Crumb = { label: string; path: string };
 
 const ELLIPSIS = { label: "…", path: "" };
+
+function Crumb({
+  crumb,
+  here,
+  onCrumb,
+  onDropItems,
+  children,
+}: {
+  crumb: Crumb;
+  here: boolean;
+  onCrumb: (path: string) => void;
+  onDropItems?: DropItems;
+  children: React.ReactNode;
+}) {
+  const drop = useDropTarget(crumb.path, onDropItems);
+  const { className: dropClass, ...dropHandlers } = dropProps(drop);
+  return (
+    <button
+      className={`crumb ${here ? "here" : ""} ${dropClass}`}
+      onClick={() => onCrumb(crumb.path)}
+      {...dropHandlers}
+    >
+      {children}
+    </button>
+  );
+}
 
 /**
  * Deep paths get their middle elided rather than letting every segment shrink to

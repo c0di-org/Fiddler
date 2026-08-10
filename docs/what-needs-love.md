@@ -8,20 +8,22 @@ Ordered by what a person would notice, not by effort.
 
 ## Product gaps
 
-### Dragging doesn't move anything
+### Dragging in and out of Finder
 
-Files can't be dragged at all, and folders drag only to Favorites
-(`IconGrid.tsx`, `beginFolderDrag`). Nothing drags out to Finder either —
-`dragDropEnabled` is `false` in `tauri.conf.json`. For most people dragging *is*
-the file manager, so this is the biggest single absence.
+Dragging *within* Fiddler is done: any selection drags from either view onto a
+folder cell, a folder row, a sidebar place or a breadcrumb, and the target says
+`Copy` or `Move` on itself before the button comes up. Copy is the default and
+⌘ or ⌥ asks for a move — the reverse of Finder, on purpose, so nothing leaves
+where it was put because a pointer wobbled on the way past. `dropPlan` in
+`drag.ts` holds every rule about what a drop means and is where to add one.
 
-Move already exists in the backend in every sense that matters: `copy_paths` is
-the transfer primitive, `rename_path` is a move within a volume. What's missing
-is the drag layer — a drag source on entry rows and cells, a drop target on
-folder rows, the sidebar and the breadcrumb, and the copy-vs-move decision
-(same volume moves, different volume copies, ⌥ forces copy).
-
-Do this one before tabs or column view.
+What's still absent is the OS: nothing drags out to Finder, and nothing dropped
+from Finder is accepted. These are two separate pieces of work, and neither is
+free. Drag-out isn't HTML5 at all and needs a native drag plugin. Drop-in needs
+`dragDropEnabled: true` in `tauri.conf.json`, and that is the same switch whose
+being `false` is what lets HTML5 drag work inside the webview — documented for
+Windows, unverified on macOS. Prototype whether the two can coexist before
+promising drop-in, because the answer decides whether internal drag survives it.
 
 ### There is no undo
 

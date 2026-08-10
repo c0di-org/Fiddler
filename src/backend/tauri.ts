@@ -84,6 +84,8 @@ const backend: Backend = {
 
   copyPaths: (paths, destination) => invoke<string[]>("copy_paths", { paths, destination }),
 
+  movePaths: (paths, destination) => invoke<string[]>("move_paths", { paths, destination }),
+
   trashPaths: (paths) => invoke<void>("trash_paths", { paths }),
 
   onDirsChanged: (fn) => listen<string[]>("fiddler:dirs-changed", (e) => fn(e.payload)),

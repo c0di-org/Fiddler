@@ -1,6 +1,7 @@
 import { useState } from "react";
 
 import { FAVORITE_DRAG_TYPE, FOLDER_DRAG_TYPE, currentFolderDrag } from "../favorites";
+import { dropProps, useDropTarget, type DropItems } from "./use-drop-target.ts";
 import type { Favorite, PeerDevice, Place, UsbDevice } from "../types";
 import { connectionNotice } from "../usb";
 import { BoltIcon, CableIcon, CloseIcon, DeviceIcon, FolderIcon, FolderPlusIcon, HeartIcon, LaptopIcon, LockIcon, SparkIcon, placeIcon } from "./icons";
@@ -28,6 +29,10 @@ interface Props {
   /** Present only where a folder can be mounted — the web build, in a browser
    * that has the File System Access API. */
   onOpenFolder?: () => void;
+  /** Places take a drop of items, which Favorites deliberately doesn't: a
+   * favourite is a bookmark, and dragging a folder there means "remember this",
+   * not "put this inside it". */
+  onDropItems?: DropItems;
 }
 
 type DragKind = "folder" | "favorite";
@@ -71,6 +76,7 @@ export function Sidebar({
   usb,
   onOpenUsb,
   onOpenFolder,
+  onDropItems,
 }: Props) {
   const [dropIndex, setDropIndex] = useState<number | null>(null);
   const [draggingFavorite, setDraggingFavorite] = useState(false);
@@ -110,7 +116,13 @@ export function Sidebar({
 
       <SidebarHeading>Places</SidebarHeading>
       {places.map((place) => (
-        <PlaceButton key={place.path} place={place} active={place.path === current} onPick={onPick} />
+        <PlaceButton
+          key={place.path}
+          place={place}
+          active={place.path === current}
+          onPick={onPick}
+          onDropItems={onDropItems}
+        />
       ))}
       {onOpenFolder && (
         <button className="place place-action" onClick={onOpenFolder} title="Browse a folder from this computer">
@@ -270,13 +282,26 @@ function SidebarHeading({ icon, children }: { icon?: React.ReactNode; children: 
   );
 }
 
-function PlaceButton({ place, active, onPick }: { place: Place; active: boolean; onPick: (path: string) => void }) {
+function PlaceButton({
+  place,
+  active,
+  onPick,
+  onDropItems,
+}: {
+  place: Place;
+  active: boolean;
+  onPick: (path: string) => void;
+  onDropItems?: DropItems;
+}) {
   const Icon = placeIcon[place.icon] ?? FolderIcon;
+  const drop = useDropTarget(place.path, onDropItems);
+  const { className: dropClass, ...dropHandlers } = dropProps(drop);
   return (
     <button
-      className={`place ${active ? "active" : ""}`}
+      className={`place ${active ? "active" : ""} ${dropClass}`}
       onClick={() => onPick(place.path)}
       title={place.path}
+      {...dropHandlers}
     >
       <span className="place-icon">
         <Icon size={18} />

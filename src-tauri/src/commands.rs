@@ -933,6 +933,110 @@ pub async fn copy_paths(
     .map_err(|e| e.to_string())?
 }
 
+/// Move items into a folder — the other half of `copy_paths`, and what a drag
+/// within one disk should actually do rather than duplicating the bytes.
+///
+/// `rename_path` cannot stand in for this: it joins the new name onto the
+/// item's *own* parent, so it can only ever move something inside the folder it
+/// is already in.
+///
+/// Nothing here overwrites. Every target is checked for a collision before the
+/// first item moves, so a five-item drop either happens or doesn't, rather than
+/// stopping halfway with three items in their new home and two still behind.
+#[tauri::command]
+pub async fn move_paths(
+    state: State<'_, AppState>,
+    paths: Vec<String>,
+    destination: String,
+) -> Result<Vec<String>, String> {
+    let cache = state.cache.clone();
+    let watcher = state.watcher.clone();
+
+    // A move can be a rename (instant) or a whole copy-and-delete across
+    // volumes (unbounded), and nothing tells the two apart until it is tried.
+    tauri::async_runtime::spawn_blocking(move || {
+        local_only(&destination)?;
+        for path in &paths {
+            local_only(path)?;
+        }
+        let destination = PathBuf::from(&destination);
+        if !destination.is_dir() {
+            return Err("Move destination is not a folder".into());
+        }
+
+        // Two passes: work out every target and refuse the whole batch on the
+        // first problem, then move. A partial move is the one outcome a person
+        // can't reason about afterwards.
+        let mut plan = Vec::new();
+        for path in &paths {
+            let source = PathBuf::from(path);
+            let name = source
+                .file_name()
+                .and_then(|name| name.to_str())
+                .ok_or("Invalid file name")?
+                .to_owned();
+            if contains(&source, &destination) {
+                return Err(format!("“{name}” can’t be moved into itself"));
+            }
+            if source.parent() == Some(destination.as_path()) {
+                return Err(format!("“{name}” is already there"));
+            }
+            let target = destination.join(&name);
+            if occupied(&target, &source) {
+                return Err(format!("“{name}” already exists there"));
+            }
+            plan.push((source, target, name));
+        }
+
+        let mut moved = Vec::new();
+        let mut touched: Vec<PathBuf> = vec![destination.clone()];
+        for (source, target, name) in plan {
+            move_one(&source, &target).map_err(|e| format!("Couldn’t move “{name}”: {e}"))?;
+            if let Some(parent) = source.parent() {
+                if !touched.iter().any(|seen| seen == parent) {
+                    touched.push(parent.to_path_buf());
+                }
+            }
+            moved.push(target.to_string_lossy().into_owned());
+        }
+
+        for dir in touched {
+            cache.forget_discovery_under(&dir);
+            watcher.poke(&dir);
+        }
+        Ok(moved)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// `EXDEV`. The one rename failure that isn't a failure: the two paths are on
+/// different filesystems, so the bytes have to travel rather than the entry.
+const CROSSES_DEVICES: i32 = 18;
+
+fn move_one(source: &Path, target: &Path) -> Result<(), String> {
+    match std::fs::rename(source, target) {
+        Ok(()) => return Ok(()),
+        Err(error) if error.raw_os_error() == Some(CROSSES_DEVICES) => {}
+        Err(error) => return Err(error.to_string()),
+    }
+
+    // Across volumes a move is a copy and then a delete, in that order: the
+    // original is the only copy until the new one is complete.
+    copy_tree(source, target)?;
+    let removed = if std::fs::symlink_metadata(source)
+        .map_err(|e| e.to_string())?
+        .is_dir()
+    {
+        std::fs::remove_dir_all(source)
+    } else {
+        std::fs::remove_file(source)
+    };
+    removed.map_err(|error| {
+        format!("copied, but the original could not be removed: {error}")
+    })
+}
+
 /// Paste onto a phone or camera over USB.
 ///
 /// Sources have to be local. Two devices cannot be copied between directly —
@@ -1249,6 +1353,36 @@ mod tests {
         assert!(head.binary);
         assert!(head.text.is_empty());
         assert_eq!(head.bytes, 4096);
+    }
+
+    #[test]
+    fn moving_a_tree_takes_its_contents_and_leaves_nothing_behind() {
+        let dir = scratch("move");
+        let source = dir.join("project");
+        std::fs::create_dir_all(source.join("src")).unwrap();
+        std::fs::write(source.join("src/main.rs"), b"fn main() {}").unwrap();
+        let into = dir.join("archive");
+        std::fs::create_dir(&into).unwrap();
+
+        let target = into.join("project");
+        move_one(&source, &target).unwrap();
+
+        assert!(!source.exists());
+        assert_eq!(
+            std::fs::read_to_string(target.join("src/main.rs")).unwrap(),
+            "fn main() {}"
+        );
+
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_move_reports_the_reason_rather_than_swallowing_it() {
+        let dir = scratch("move-missing");
+        let missing = dir.join("was-never-here");
+        assert!(move_one(&missing, &dir.join("target")).is_err());
+
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

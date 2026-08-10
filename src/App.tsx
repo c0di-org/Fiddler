@@ -14,6 +14,7 @@ import { Toolbar } from "./components/Toolbar";
 import { UsbConnecting, UsbLinkBanner } from "./components/UsbPanel";
 import type { FolderTouchDragHandlers } from "./components/folder-touch-drag";
 import { GridIcon } from "./components/icons";
+import { describeItems, type DragItems, type DropVerb } from "./drag";
 import { addFavorite, loadFavorites, moveFavorite, saveFavorites } from "./favorites";
 import { invalidate as peekChanged, setShowHidden as setPeekHidden } from "./folder-peek";
 import { formatSize } from "./format";
@@ -842,6 +843,58 @@ export default function App() {
     }
   }, [copiedPaths, flash]);
 
+  /**
+   * What a drag starting on `id` carries.
+   *
+   * Finder's rule: dragging something already selected takes the whole
+   * selection, dragging something else takes just that. Worktree rows are left
+   * out — they are a view of git's bookkeeping rather than a listing, and
+   * moving the folder underneath one breaks the repo that points at it.
+   */
+  const dragItems = useCallback(
+    (id: string): DragItems | null => {
+      const chosen = selection.has(id) ? selected : [byId.get(id)];
+      const items = chosen.filter((target): target is Target => !!target?.entry);
+      if (items.length === 0) return null;
+      return { paths: items.map((t) => t.path), names: items.map((t) => t.name) };
+    },
+    [selection, selected, byId]
+  );
+
+  /** A drop that landed. The verb was decided while the drag was still in the
+   * air, by `dropPlan`, so all that's left here is to run it. */
+  const dropItems = useCallback(
+    async (destination: string, verb: DropVerb, items: DragItems) => {
+      const what = describeItems(items);
+      try {
+        if (verb === "move") {
+          await ipc.movePaths(items.paths, destination);
+          // The originals are gone; keeping them selected would leave the
+          // status bar describing files that aren't there.
+          setSelection(new Set());
+          flash(`Moved ${what}`);
+          return;
+        }
+        // A cable is slow enough that silence reads as nothing happening.
+        const device = destination.startsWith("mtp://");
+        if (device) flash(`Copying ${what} to the device…`);
+        await ipc.copyPaths(items.paths, destination);
+        // Nothing watches a folder on a device, so the listing only shows what
+        // just arrived if we go and ask again.
+        if (device) await store.invalidateDirs([destination]);
+        flash(`Copied ${what}`);
+      } catch (error) {
+        flash(String(error).replace(/^Error:\s*/, ""));
+      }
+    },
+    [flash]
+  );
+
+  const onDropItems = useCallback(
+    (destination: string, verb: DropVerb, items: DragItems) => void dropItems(destination, verb, items),
+    [dropItems]
+  );
+
   const newFolder = useCallback(async () => {
     const here = locationCaps(store.path);
     if (!here.create) {
@@ -1210,6 +1263,7 @@ export default function App() {
         onMoveFavorite={reorderFavorite}
         touchFolderDropIndex={folderTouchDrag?.dropIndex}
         onOpenFolder={mountFolder}
+        onDropItems={onDropItems}
       />
 
       <main className="main">
@@ -1233,6 +1287,7 @@ export default function App() {
           onNewFile={newTextFile}
           onToggleHidden={() => void store.setShowHidden(!store.showHidden)}
           onTogglePreview={() => store.togglePreview()}
+          onDropItems={onDropItems}
         />
 
         {currentUsb && currentUsb.stage === "ready" && !linkSeen.has(currentUsb.serial) && (
@@ -1266,6 +1321,8 @@ export default function App() {
               onBackgroundClick={() => setSelection(new Set())}
               touchFolderDrag={touchFolderDragHandlers}
               directTouch={caps.directTouch}
+              dragItems={dragItems}
+              onDropItems={onDropItems}
             />
           ) : (
             <DetailList
@@ -1295,6 +1352,8 @@ export default function App() {
               onBackgroundClick={() => setSelection(new Set())}
               touchFolderDrag={touchFolderDragHandlers}
               directTouch={caps.directTouch}
+              dragItems={dragItems}
+              onDropItems={onDropItems}
             />
           )}
 
