@@ -30,7 +30,8 @@ use objc2_core_foundation::{
 use objc2_core_graphics::{CGBitmapContextCreateImage, CGColor, CGColorSpace, CGContext, CGImage};
 use objc2_foundation::{NSError, NSString, NSURL};
 use objc2_image_io::{
-    kCGImageSourceCreateThumbnailFromImageAlways, kCGImageSourceCreateThumbnailWithTransform,
+    kCGImageSourceCreateThumbnailFromImageAlways, kCGImageSourceCreateThumbnailFromImageIfAbsent,
+    kCGImageSourceCreateThumbnailWithTransform,
     kCGImageSourceShouldCacheImmediately, kCGImageSourceThumbnailMaxPixelSize, CGImageDestination,
     CGImageSource,
 };
@@ -373,6 +374,22 @@ fn usb_thumbnail(path: &Path, max_px: u32, out: PathBuf) -> Result<PathBuf, Stri
     let text = path.to_str().ok_or("unrepresentable path")?;
     let head = service.read_range(text, 0, USB_HEAD_BYTES)?;
 
+    // Decide what we actually have before drawing anything.
+    //
+    // A truncated image must never be rendered. ImageIO will cheerfully decode
+    // the fraction of a photo that arrived and produce a picture that fades to
+    // blank part way down, which looks like a broken app rather than a missing
+    // preview. So either the file arrived whole, or its EXIF thumbnail did, or
+    // we decline and the tile keeps its glyph.
+    let whole = (head.len() as u32) < USB_HEAD_BYTES;
+    let source = if matches!(lane, Lane::Text) || whole {
+        Source::Whole
+    } else if embedded_thumbnail(&head).is_some() {
+        Source::Embedded
+    } else {
+        return Err("only part of this file arrived and it carries no thumbnail".into());
+    };
+
     // The scratch file keeps the real extension: `thumb_text` picks its syntax
     // highlighting from it, and ImageIO uses it as a decoding hint.
     let suffix = path.extension().and_then(|e| e.to_str()).unwrap_or("bin");
@@ -380,13 +397,55 @@ fn usb_thumbnail(path: &Path, max_px: u32, out: PathBuf) -> Result<PathBuf, Stri
         ".head-{:016x}.{suffix}",
         out.file_name().map_or(0, hash_of)
     ));
-    std::fs::write(&scratch, &head).map_err(|e| e.to_string())?;
-    let result = match lane {
-        Lane::Text => crate::thumb_text::render(&scratch, max_px, &out),
-        _ => image_io(&scratch, max_px, &out),
+
+    let result = match source {
+        // Whole file, or text drawn from its first bytes: the ordinary paths.
+        Source::Whole => {
+            std::fs::write(&scratch, &head).map_err(|e| e.to_string())?;
+            match lane {
+                Lane::Text => crate::thumb_text::render(&scratch, max_px, &out),
+                _ => image_io_opts(&scratch, max_px, &out, false),
+            }
+        }
+        // Only the front of a photo arrived.
+        //
+        // Handing that to ImageIO does not work even with `IfAbsent`: it
+        // decodes the truncated main image anyway and returns a picture that
+        // fades to grey part way down. Measured, not assumed — the first fix
+        // for this bug set `IfAbsent` and changed nothing.
+        //
+        // So cut the embedded JPEG out and decode that instead. It is a whole,
+        // valid image, which is the only thing ImageIO can be trusted with
+        // here. It carries no EXIF of its own, so the parent's orientation has
+        // to be read and applied by hand or portrait photos come back sideways.
+        Source::Embedded => {
+            let thumbnail = embedded_thumbnail(&head).ok_or("no embedded thumbnail")?;
+            std::fs::write(&scratch, thumbnail).map_err(|e| e.to_string())?;
+            decode_upright(&scratch, max_px, &out, exif_orientation(&head))
+        }
     };
     let _ = std::fs::remove_file(&scratch);
     result.map(|_| out)
+}
+
+/// Decode an image and write it out turned the right way up.
+#[cfg(not(target_os = "android"))]
+fn decode_upright(src: &Path, max_px: u32, out: &Path, orientation: u16) -> Result<(), String> {
+    let image = image_io_image(src, max_px)?;
+    if orientation <= 1 {
+        return write_png(&image, out);
+    }
+    let upright = oriented(&image, orientation)?;
+    write_png(&upright, out)
+}
+
+/// Where a device thumbnail's pixels come from.
+#[cfg(not(target_os = "android"))]
+enum Source {
+    /// The read covered the entire file, so it can be decoded like any other.
+    Whole,
+    /// Only the front arrived, but it contains a complete EXIF thumbnail.
+    Embedded,
 }
 
 #[cfg(not(target_os = "android"))]
@@ -398,12 +457,162 @@ fn hash_of(name: &std::ffi::OsStr) -> u64 {
 
 /// Decode straight to thumbnail size via ImageIO.
 fn image_io(path: &Path, max_px: u32, out: &Path) -> Result<(), String> {
+    image_io_opts(path, max_px, out, false)
+}
+
+/// The complete JPEG embedded in this buffer's EXIF block, if there is one.
+///
+/// A camera photo carries a full thumbnail of itself near the front, between a
+/// second SOI marker and its matching EOI. Finding a *complete* one is the test
+/// for whether a truncated file can be drawn at all: ImageIO will happily decode
+/// the partial full-size image otherwise and produce a picture that fades into
+/// blank half way down.
+fn embedded_thumbnail(buf: &[u8]) -> Option<&[u8]> {
+    // Skip the outer SOI, then find the nested one that opens the thumbnail.
+    let start = buf.windows(2).skip(2).position(|w| w == [0xFF, 0xD8])? + 2;
+    let end = buf[start..].windows(2).position(|w| w == [0xFF, 0xD9])? + 2;
+    Some(&buf[start..start + end])
+}
+
+/// The EXIF orientation of a JPEG, or 1 when it doesn't say.
+///
+/// Needed because an embedded thumbnail is stored the way the sensor read it
+/// and carries no EXIF of its own — the orientation lives in the parent file.
+/// Pull the thumbnail out on its own and a portrait photo comes back on its
+/// side, so the tag has to be read here and applied by hand.
+fn exif_orientation(buf: &[u8]) -> u16 {
+    // Walk JPEG segments looking for APP1/Exif. Bounded, and bails on anything
+    // malformed rather than trusting lengths from a half-downloaded file.
+    let mut at = 2; // past SOI
+    while at + 4 <= buf.len() {
+        if buf[at] != 0xFF {
+            return 1;
+        }
+        let marker = buf[at + 1];
+        let len = u16::from_be_bytes([buf[at + 2], buf[at + 3]]) as usize;
+        if len < 2 || at + 2 + len > buf.len() {
+            return 1;
+        }
+        if marker == 0xE1 && buf[at + 4..].starts_with(b"Exif\0\0") {
+            return orientation_in_tiff(&buf[at + 10..at + 2 + len]);
+        }
+        at += 2 + len;
+    }
+    1
+}
+
+/// Read tag 0x0112 out of IFD0 of a TIFF block, which is what an EXIF APP1 is.
+fn orientation_in_tiff(tiff: &[u8]) -> u16 {
+    if tiff.len() < 8 {
+        return 1;
+    }
+    let big = match &tiff[..2] {
+        b"MM" => true,
+        b"II" => false,
+        _ => return 1,
+    };
+    let u16_at = |b: &[u8], i: usize| -> u16 {
+        if big { u16::from_be_bytes([b[i], b[i + 1]]) } else { u16::from_le_bytes([b[i], b[i + 1]]) }
+    };
+    let u32_at = |b: &[u8], i: usize| -> u32 {
+        let v = [b[i], b[i + 1], b[i + 2], b[i + 3]];
+        if big { u32::from_be_bytes(v) } else { u32::from_le_bytes(v) }
+    };
+
+    let ifd = u32_at(tiff, 4) as usize;
+    if ifd + 2 > tiff.len() {
+        return 1;
+    }
+    let count = u16_at(tiff, ifd) as usize;
+    for i in 0..count {
+        let entry = ifd + 2 + i * 12;
+        if entry + 12 > tiff.len() {
+            return 1;
+        }
+        if u16_at(tiff, entry) == 0x0112 {
+            let value = u16_at(tiff, entry + 8);
+            return if (1..=8).contains(&value) { value } else { 1 };
+        }
+    }
+    1
+}
+
+/// Turn a decoded image the right way up for an EXIF orientation.
+///
+/// Only the four rotations are handled; the mirrored orientations (2, 4, 5, 7)
+/// come from flatbed scanners and effectively never off a phone, so they pass
+/// through rather than earning a transform nobody will see.
+fn oriented(image: &CGImage, orientation: u16) -> Result<CFRetained<CGImage>, String> {
+    let w = CGImage::width(Some(image)) as f64;
+    let h = CGImage::height(Some(image)) as f64;
+    let quarter = std::f64::consts::FRAC_PI_2;
+    // A quarter turn swaps the output's width and height.
+    let (out_w, out_h) = match orientation {
+        6 | 8 => (h, w),
+        _ => (w, h),
+    };
+
+    let ctx = bitmap(out_w as usize, out_h as usize)?;
+    match orientation {
+        3 => {
+            CGContext::translate_ctm(Some(&ctx), out_w, out_h);
+            CGContext::rotate_ctm(Some(&ctx), std::f64::consts::PI);
+        }
+        // Core Graphics has a bottom-left origin and rotates counter-clockwise
+        // for positive angles, so these run the opposite way round to the
+        // top-left, clockwise convention EXIF is written in. Verified against a
+        // real orientation-6 phone photo rather than reasoned about: the other
+        // pairing renders upside down.
+        6 => {
+            CGContext::translate_ctm(Some(&ctx), 0.0, out_h);
+            CGContext::rotate_ctm(Some(&ctx), -quarter);
+        }
+        8 => {
+            CGContext::translate_ctm(Some(&ctx), out_w, 0.0);
+            CGContext::rotate_ctm(Some(&ctx), quarter);
+        }
+        _ => {}
+    }
+    CGContext::draw_image(
+        Some(&ctx),
+        CGRect::new(CGPoint::new(0.0, 0.0), CGSize::new(w, h)),
+        Some(image),
+    );
+    CGBitmapContextCreateImage(Some(&ctx)).ok_or_else(|| "could not read back the rotation".into())
+}
+
+/// Decode via ImageIO, choosing where the thumbnail comes from.
+///
+/// `prefer_embedded` is the difference between a whole file and the front of
+/// one. `...FromImageAlways` decodes the full-size image and ignores any
+/// embedded thumbnail, which is right for a local file and catastrophic for a
+/// 256 KB head: it renders the sliver of the photo that arrived. `IfAbsent`
+/// uses the embedded thumbnail, which is the whole picture at small size.
+fn image_io_opts(path: &Path, max_px: u32, out: &Path, prefer_embedded: bool) -> Result<(), String> {
+    let image = image_io_thumbnail(path, max_px, prefer_embedded)?;
+    write_png(&image, out)
+}
+
+/// Decode a whole image file to at most `max_px`, without writing it anywhere.
+fn image_io_image(path: &Path, max_px: u32) -> Result<CFRetained<CGImage>, String> {
+    image_io_thumbnail(path, max_px, false)
+}
+
+fn image_io_thumbnail(
+    path: &Path,
+    max_px: u32,
+    prefer_embedded: bool,
+) -> Result<CFRetained<CGImage>, String> {
     let url = CFURL::from_file_path(path).ok_or("unrepresentable path")?;
     let src = unsafe { CGImageSource::with_url(&url, None) }.ok_or("not a readable image")?;
 
     let keys: [&CFString; 4] = unsafe {
         [
-            kCGImageSourceCreateThumbnailFromImageAlways,
+            if prefer_embedded {
+                kCGImageSourceCreateThumbnailFromImageIfAbsent
+            } else {
+                kCGImageSourceCreateThumbnailFromImageAlways
+            },
             kCGImageSourceThumbnailMaxPixelSize,
             kCGImageSourceCreateThumbnailWithTransform,
             kCGImageSourceShouldCacheImmediately,
@@ -420,9 +629,8 @@ fn image_io(path: &Path, max_px: u32, out: &Path) -> Result<(), String> {
     ];
     let opts = CFDictionary::from_slices(&keys, &values);
 
-    let image = unsafe { src.thumbnail_at_index(0, Some(opts.as_ref())) }
-        .ok_or("ImageIO produced no thumbnail")?;
-    write_png(&image, out)
+    unsafe { src.thumbnail_at_index(0, Some(opts.as_ref())) }
+        .ok_or_else(|| "ImageIO produced no thumbnail".to_string())
 }
 
 /// Ask Quick Look — the same machinery behind Finder's previews — for a
@@ -637,6 +845,100 @@ mod tests {
         assert_ne!(base, keyed_with(other, 128, 0, 1_786_348_440, 7_828_774), "two photos are two keys");
     }
 
+
+    #[test]
+    fn exif_orientation_is_read_from_the_parent_file() {
+        // An embedded thumbnail carries no EXIF of its own, so the tag has to
+        // come out of the photo around it. Build a minimal little-endian APP1.
+        fn jpeg_with_orientation(value: u16) -> Vec<u8> {
+            let mut tiff = Vec::new();
+            tiff.extend_from_slice(b"II");                        // little-endian
+            tiff.extend_from_slice(&42u16.to_le_bytes());         // magic
+            tiff.extend_from_slice(&8u32.to_le_bytes());          // IFD0 at offset 8
+            tiff.extend_from_slice(&1u16.to_le_bytes());          // one entry
+            tiff.extend_from_slice(&0x0112u16.to_le_bytes());     // Orientation
+            tiff.extend_from_slice(&3u16.to_le_bytes());          // SHORT
+            tiff.extend_from_slice(&1u32.to_le_bytes());          // count
+            tiff.extend_from_slice(&value.to_le_bytes());         // value, then pad
+            tiff.extend_from_slice(&[0, 0]);
+
+            let payload = [b"Exif\0\0".as_ref(), &tiff].concat();
+            let mut out = vec![0xFF, 0xD8, 0xFF, 0xE1];
+            out.extend_from_slice(&((payload.len() + 2) as u16).to_be_bytes());
+            out.extend_from_slice(&payload);
+            out
+        }
+
+        // 6 is the common one: a phone held upright.
+        assert_eq!(exif_orientation(&jpeg_with_orientation(6)), 6);
+        assert_eq!(exif_orientation(&jpeg_with_orientation(1)), 1);
+        assert_eq!(exif_orientation(&jpeg_with_orientation(8)), 8);
+        // Out-of-range values are not trusted into the rotation table.
+        assert_eq!(exif_orientation(&jpeg_with_orientation(99)), 1);
+
+        // Anything without usable EXIF reads as upright rather than erroring:
+        // a missing tag must never stop a thumbnail being drawn.
+        assert_eq!(exif_orientation(&[0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10]), 1);
+        assert_eq!(exif_orientation(&[]), 1);
+        assert_eq!(exif_orientation(&[0xFF, 0xD8]), 1);
+        // A length that runs off the end of a truncated file must not panic.
+        assert_eq!(exif_orientation(&[0xFF, 0xD8, 0xFF, 0xE1, 0xFF, 0xFF, 0x00]), 1);
+    }
+
+    #[test]
+    fn a_quarter_turn_swaps_the_thumbnail_dimensions() {
+        // Cheap proof that the rotation actually transposes rather than just
+        // redrawing: a portrait photo must not come back landscape.
+        let ctx = bitmap(40, 20).unwrap();
+        wash(&ctx, 40.0, 20.0, 0.5);
+        let wide = CGBitmapContextCreateImage(Some(&ctx)).unwrap();
+        assert_eq!(CGImage::width(Some(&wide)), 40);
+
+        for turned in [6, 8] {
+            let out = oriented(&wide, turned).unwrap();
+            assert_eq!(CGImage::width(Some(&out)), 20, "orientation {turned}");
+            assert_eq!(CGImage::height(Some(&out)), 40, "orientation {turned}");
+        }
+        // A half turn keeps them.
+        let flipped = oriented(&wide, 3).unwrap();
+        assert_eq!(CGImage::width(Some(&flipped)), 40);
+    }
+
+    #[test]
+    fn a_truncated_photo_is_only_drawable_via_its_embedded_thumbnail() {
+        // The bug this exists to prevent: ImageIO asked to build a thumbnail
+        // "from image always" decodes whatever part of a truncated JPEG it has
+        // and returns a photo that fades to blank part way down. A head is only
+        // drawable when it carries a complete embedded thumbnail — SOI to EOI —
+        // and that is what we must be able to detect.
+        let mut head = vec![0xFF, 0xD8, 0xFF, 0xE1]; // outer SOI + APP1
+        head.extend_from_slice(&[0x00; 12]);
+        let thumb_start = head.len();
+        head.extend_from_slice(&[0xFF, 0xD8]); // the thumbnail's own SOI
+        head.extend_from_slice(b"thumbnail pixels");
+        head.extend_from_slice(&[0xFF, 0xD9]); // and its EOI
+        let tail_start = head.len();
+        head.extend_from_slice(&[0x42; 64]); // the main image, cut off
+
+        let found = embedded_thumbnail(&head).expect("a complete embedded thumbnail");
+        // The slice is a JPEG in its own right: its own SOI, its payload, its EOI.
+        assert_eq!(found.len(), tail_start - thumb_start);
+        assert_eq!(&found[..2], &[0xFF, 0xD8]);
+        assert_eq!(&found[found.len() - 2..], &[0xFF, 0xD9]);
+        assert!(found[2..].starts_with(b"thumbnail pixels"));
+        // And it stops at the thumbnail: none of the truncated main image.
+        assert!(!found.contains(&0x42));
+
+        // A head whose thumbnail was itself cut off must not be drawn: this is
+        // exactly the 4 MB photo where 256 KB was not enough.
+        let cut = &head[..thumb_start + 8];
+        assert!(embedded_thumbnail(cut).is_none(), "an incomplete thumbnail is not usable");
+
+        // Nor may a bare truncated JPEG with no embedded thumbnail at all.
+        let bare = [&[0xFF, 0xD8, 0xFF, 0xE0][..], &[0x11; 200]].concat();
+        assert!(embedded_thumbnail(&bare).is_none(), "no nested SOI means nothing to draw");
+    }
+
     #[test]
     fn a_device_path_never_falls_through_to_a_filesystem_stat() {
         // `cache_path` would try to stat the literal string "mtp://…" and fail.
@@ -690,3 +992,4 @@ mod smoke {
         render("/System/Library/CoreServices/NotificationCenter.app/Contents/Resources/mac_widgets-edu_full.mov");
     }
 }
+
