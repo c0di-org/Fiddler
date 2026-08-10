@@ -126,6 +126,7 @@ export interface PeerDevice {
   host: string;
   port: number;
   paired: boolean;
+  platform: "android" | "macos" | "desktop" | "";
 }
 
 export interface PairingInfo {

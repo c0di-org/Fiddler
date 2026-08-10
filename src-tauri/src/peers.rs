@@ -32,6 +32,7 @@ pub struct PeerDevice {
     pub host: String,
     pub port: u16,
     pub paired: bool,
+    pub platform: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -51,6 +52,8 @@ struct Discovery {
     port: u16,
     #[serde(default)]
     visible: Vec<String>,
+    #[serde(default)]
+    platform: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -95,6 +98,7 @@ struct SeenPeer {
     port: u16,
     seen_at: u64,
     mutual: bool,
+    platform: String,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -165,7 +169,7 @@ impl PeerService {
                 known.name = peer.name.clone();
                 true
             } else { false };
-            devices.push(PeerDevice { id, name: peer.name, host: peer.host, port: peer.port, paired });
+            devices.push(PeerDevice { id, name: peer.name, host: peer.host, port: peer.port, paired, platform: peer.platform });
         }
         devices.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
         devices
@@ -338,7 +342,7 @@ impl PeerService {
                 // A peer must explicitly advertise that it sees our ID too; that
                 // makes discovery quiet on busy Wi-Fi and avoids false locations.
                 let visible = st.seen.iter().filter_map(|(id, peer)| (now.saturating_sub(peer.seen_at) < 8).then_some(id.clone())).collect();
-                let packet = serde_json::to_vec(&Discovery { id: st.id.clone(), name: st.name.clone(), port: st.port, visible }).unwrap_or_default();
+                let packet = serde_json::to_vec(&Discovery { id: st.id.clone(), name: st.name.clone(), port: st.port, visible, platform: platform_name() }).unwrap_or_default();
                 drop(st);
                 let _ = socket.send_to(&packet, SocketAddr::new(IpAddr::V4(Ipv4Addr::BROADCAST), DISCOVERY_PORT));
                 last_sent = now;
@@ -348,7 +352,7 @@ impl PeerService {
                     let mut st = self.state.lock().unwrap();
                     if packet.id != st.id && packet.port != 0 {
                         let mutual = packet.visible.iter().any(|id| id == &st.id);
-                        st.seen.insert(packet.id, SeenPeer { name: packet.name, host: from.ip().to_string(), port: packet.port, seen_at: now, mutual });
+                        st.seen.insert(packet.id, SeenPeer { name: packet.name, host: from.ip().to_string(), port: packet.port, seen_at: now, mutual, platform: packet.platform });
                     }
                 },
                 Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => thread::sleep(Duration::from_millis(120)),
@@ -381,6 +385,7 @@ fn friendly_name(id: &str) -> String {
     format!("{} {}", ADJECTIVES[first], FRUITS[second])
 }
 fn pairing_code() -> String { format!("{:06}", (Uuid::new_v4().as_u128() % 1_000_000)) }
+fn platform_name() -> String { #[cfg(target_os = "android")] { "android".into() } #[cfg(target_os = "macos")] { "macos".into() } #[cfg(not(any(target_os = "android", target_os = "macos")))] { "desktop".into() } }
 fn now_secs() -> u64 { SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs() }
 
 fn request(host: &str, port: u16, route: &str, token: Option<&str>) -> Result<Vec<u8>, String> {

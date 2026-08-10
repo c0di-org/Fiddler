@@ -164,6 +164,13 @@ export const DeviceIcon = stroked(
   </>
 );
 
+export const LaptopIcon = stroked(
+  <>
+    <rect x="2.75" y="3" width="10.5" height="7.25" rx=".9" />
+    <path d="M1.75 12.5h12.5" />
+  </>
+);
+
 export const CloseIcon = stroked(<path d="m4.25 4.25 7.5 7.5m0-7.5-7.5 7.5" />);
 
 /** Empty-state artwork: an open, and pointedly empty, folder. */

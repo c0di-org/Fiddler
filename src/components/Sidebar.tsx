@@ -2,7 +2,7 @@ import { useState } from "react";
 
 import { FAVORITE_DRAG_TYPE, FOLDER_DRAG_TYPE } from "../favorites";
 import type { Favorite, PeerDevice, Place } from "../types";
-import { CloseIcon, DeviceIcon, FolderIcon, HeartIcon, LockIcon, SparkIcon, placeIcon } from "./icons";
+import { CloseIcon, DeviceIcon, FolderIcon, HeartIcon, LaptopIcon, LockIcon, SparkIcon, placeIcon } from "./icons";
 
 interface Props {
   places: Place[];
@@ -101,7 +101,7 @@ export function Sidebar({
         <SidebarHeading icon={<DeviceIcon size={13} />}>Devices</SidebarHeading>
         {devices.map((device) => (
           <button className="place device" key={device.id} onClick={() => onOpenDevice(device)} title={device.paired ? "Browse this device" : "Pair with this device"}>
-            <span className="place-icon"><DeviceIcon size={18} /></span>
+            <span className="place-icon">{device.platform === "macos" || device.platform === "desktop" ? <LaptopIcon size={18} /> : <DeviceIcon size={18} />}</span>
             <span className="place-label">{device.name}</span>
             {!device.paired && <LockIcon size={12} className="device-lock" />}
           </button>
