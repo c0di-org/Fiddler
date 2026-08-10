@@ -1,4 +1,5 @@
 import type { Entry } from "../types";
+import { folderIconForName, type FolderIcon } from "../folder-icon";
 
 /**
  * The icon shown when there's no image preview. Scales from a 20px list row up to
@@ -40,7 +41,7 @@ const LARGE = 40;
 export function FileGlyph({ entry, size }: { entry: Entry; size: number }) {
   const isDir = entry.kind === "dir" || (entry.kind === "symlink" && entry.linkToDir);
 
-  if (isDir) return <FolderGlyph size={size} repo={entry.isRepo} />;
+  if (isDir) return <FolderGlyph size={size} repo={entry.isRepo} name={entry.name} />;
 
   const dot = entry.name.lastIndexOf(".");
   const ext = dot > 0 ? entry.name.slice(dot + 1).toLowerCase() : "";
@@ -91,7 +92,17 @@ export function FileGlyph({ entry, size }: { entry: Entry; size: number }) {
   );
 }
 
-export function FolderGlyph({ size, repo }: { size: number; repo?: boolean }) {
+export function FolderGlyph({
+  size,
+  repo,
+  name,
+}: {
+  size: number;
+  repo?: boolean;
+  /** The folder's leaf name, used for familiar system-folder marks. */
+  name?: string;
+}) {
+  const icon = name ? folderIconForName(name) : null;
   return (
     <svg
       viewBox="0 0 48 48"
@@ -118,9 +129,13 @@ export function FolderGlyph({ size, repo }: { size: number; repo?: boolean }) {
         stroke="rgba(255,255,255,0.45)"
         strokeWidth="1.1"
       />
+      {icon && size >= 16 && <FolderNameMark icon={icon} />}
       {repo && size >= 28 && (
         // A quiet branch mark on the folder face — present, never the subject.
-        <g className="folder-repo-mark" transform="translate(30.5 21.5) scale(0.66)">
+        <g
+          className="folder-repo-mark"
+          transform={icon ? "translate(34 18) scale(0.46)" : "translate(30.5 21.5) scale(0.66)"}
+        >
           <circle cx="3" cy="3" r="2.6" />
           <circle cx="3" cy="16" r="2.6" />
           <circle cx="15" cy="3" r="2.6" />
@@ -129,6 +144,48 @@ export function FolderGlyph({ size, repo }: { size: number; repo?: boolean }) {
         </g>
       )}
     </svg>
+  );
+}
+
+/** A familiar, debossed mark on the face of named folders. */
+function FolderNameMark({ icon }: { icon: FolderIcon }) {
+  return (
+    <g className="folder-name-mark" transform="translate(13.2 18.3) scale(1.35)">
+      {icon === "android" && (
+        <>
+          <path d="M3 6.5h10v6.25a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" />
+          <path d="M3.5 6.25a4.5 4.5 0 0 1 9 0ZM5 3 3.75 1.5M10.5 3l1.25-1.5" />
+          <circle cx="6" cy="8.5" r=".7" className="folder-name-fill" />
+          <circle cx="9.5" cy="8.5" r=".7" className="folder-name-fill" />
+        </>
+      )}
+      {icon === "apps" && <><rect x="2.5" y="2.5" width="4" height="4" rx=".8" /><rect x="9.5" y="2.5" width="4" height="4" rx=".8" /><rect x="2.5" y="9.5" width="4" height="4" rx=".8" /><rect x="9.5" y="9.5" width="4" height="4" rx=".8" /></>}
+      {icon === "archive" && <><path d="M2.5 5h11v9h-11z" /><path d="M2 2.5h12v2.5H2zM6 8.5h4" /></>}
+      {icon === "audiobooks" && <><path d="M2.75 3.25h4.5A2.75 2.75 0 0 1 10 6v7.25a2.5 2.5 0 0 0-2.75-1.5h-4.5Z" /><path d="M13.25 3.25h-2.5M12.5 7v3M10.75 8.5h3.5" /></>}
+      {icon === "backup" && <><path d="M4.25 5.75V2.5L2 4.75" /><path d="M4 4.5a5.5 5.5 0 1 1-1 6" /><path d="M8 5.5v3l2 1.5" /></>}
+      {icon === "books" && <><path d="M2.5 3h4.75A2.75 2.75 0 0 1 10 5.75v7.75A2.75 2.75 0 0 0 7.25 12H2.5Z" /><path d="M13.5 3H12a2 2 0 0 0-2 2v8.5A2.75 2.75 0 0 1 12.75 12h.75Z" /></>}
+      {icon === "cloud" && <path d="M4.75 12.5h7a3 3 0 0 0 .4-5.97A4.25 4.25 0 0 0 4 7.75a2.4 2.4 0 0 0 .75 4.75Z" />}
+      {icon === "code" && <><path d="m6 4-3.5 4L6 12M10 4l3.5 4-3.5 4M9 2.75 7 13.25" /></>}
+      {icon === "database" && <><ellipse cx="8" cy="3.75" rx="5" ry="2.25" /><path d="M3 3.75v8.5c0 1.25 2.25 2.25 5 2.25s5-1 5-2.25v-8.5M3 8c0 1.25 2.25 2.25 5 2.25S13 9.25 13 8" /></>}
+      {icon === "design" && <><path d="m3 11.5-.75 2.25 2.25-.75 8.25-8.25-1.5-1.5Z" /><path d="m10.5 3.25 1.5 1.5M2.5 13.5h5" /></>}
+      {icon === "documents" && <><path d="M4 2.25h5l3 3v8.5H4Z" /><path d="M9 2.25v3h3M6 8h4M6 10.5h4" /></>}
+      {icon === "downloads" && <><path d="M8 2.5v7.25M5 7.5 8 10.5l3-3M3 13h10" /></>}
+      {icon === "fonts" && <path d="m3 13 3.5-10h3L13 13M4.75 9.25h6.5" />}
+      {icon === "games" && <><path d="M5.25 7h5.5c1.2 0 2.05.73 2.4 1.8l.45 1.45c.45 1.5-1.5 2.25-2.4 1.1l-.8-1.1H5.6l-.8 1.1c-.9 1.15-2.85.4-2.4-1.1l.45-1.45C3.2 7.73 4.05 7 5.25 7Z" /><path d="M5.25 8.5v2M4.25 9.5h2M11.5 9h.01M12.5 10h.01" /></>}
+      {icon === "images" && <><rect x="2.25" y="3" width="11.5" height="10" rx="1.25" /><circle cx="5.25" cy="6" r="1" /><path d="m3.5 11 3.25-3 2.25 2 1.5-1.5 2 2" /></>}
+      {icon === "media" && <><rect x="2.5" y="3" width="11" height="10" rx="1" /><path d="m6.5 5.5 3.5 2.5-3.5 2.5Z" /><path d="M4 3v10M12 3v10" /></>}
+      {icon === "music" && <><path d="M10.5 3v7.5a2 2 0 1 1-1-1.73V5l-5 1v6a2 2 0 1 1-1-1.73V4.5Z" /></>}
+      {icon === "notes" && <><path d="M3 2.5h9.5v11H3Z" /><path d="M5.25 5.5h5M5.25 8h5M5.25 10.5h3.25" /></>}
+      {icon === "notifications" && <><path d="M4.25 10.75h7.5l-1.1-1.6V6.5a2.65 2.65 0 0 0-5.3 0v2.65Z" /><path d="M6.5 12a1.65 1.65 0 0 0 3 0M7.25 2.75h1.5" /></>}
+      {icon === "phone" && <><rect x="4.5" y="2" width="7" height="12" rx="1.25" /><path d="M7 4h2M7.4 11.5h1.2" /></>}
+      {icon === "photos" && <><rect x="2.25" y="5" width="11.5" height="8" rx="1.25" /><path d="M5.25 5 6.5 3.25h3L10.75 5" /><circle cx="8" cy="9" r="2" /></>}
+      {icon === "podcasts" && <><circle cx="8" cy="8" r="5.25" /><circle cx="8" cy="8" r="1" className="folder-name-fill" /><path d="M8 5.25v-1M8 11.75v-1M5.25 8h-1M11.75 8h-1" /></>}
+      {icon === "recordings" && <path d="M3 9v-2M5.5 12V4M8 14V2M10.5 12V4M13 9v-2" />}
+      {icon === "ringtones" && <><path d="M3 9.75h2.25L8.5 12.5v-9L5.25 6.25H3Z" /><path d="M10.5 6.25a2.5 2.5 0 0 1 0 3.5M12.25 4.5a5 5 0 0 1 0 7" /></>}
+      {icon === "settings" && <><circle cx="8" cy="8" r="2.25" /><path d="M8 2.5v1.25M8 12.25v1.25M2.5 8h1.25M12.25 8h1.25M4.1 4.1l.9.9M11 11l.9.9M11.9 4.1l-.9.9M5 11l-.9.9" /></>}
+      {icon === "videos" && <><rect x="2.25" y="4" width="8.5" height="8" rx="1" /><path d="m10.75 6 3-1.5v7l-3-1.5ZM5.75 6.5l2.5 1.5-2.5 1.5Z" /></>}
+      {icon === "work" && <><rect x="2.25" y="5.5" width="11.5" height="8" rx="1.25" /><path d="M6 5.5V4.25c0-.7.55-1.25 1.25-1.25h1.5c.7 0 1.25.55 1.25 1.25V5.5M2.25 8.5h11.5M6.75 8.5v1h2.5v-1" /></>}
+    </g>
   );
 }
 

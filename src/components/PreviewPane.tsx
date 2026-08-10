@@ -113,7 +113,7 @@ export function PreviewPane({ entry, worktree, count }: Props) {
           ) : entry ? (
             <FileGlyph entry={entry} size={ART} />
           ) : (
-            <FolderGlyph size={ART} repo />
+            <FolderGlyph size={ART} repo name={worktree?.name} />
           )}
         </div>
       )}
