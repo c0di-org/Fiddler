@@ -8,6 +8,7 @@ import { GitDot } from "./GitDot";
 import { EmptyState } from "./EmptyState";
 import { Chevron, ForkIcon, LockIcon, WarnIcon } from "./icons";
 import { FOLDER_DRAG_TYPE } from "../favorites";
+import { type FolderTouchDragHandlers, useFolderTouchDrag } from "./folder-touch-drag";
 
 /** Finder's list view: dense, sortable, with disclosure triangles. */
 
@@ -42,6 +43,8 @@ interface Props {
   emptyMessage: string;
   /** Suppresses the empty state while a listing is still in flight. */
   loaded: boolean;
+  /** Android's WebView needs a touch implementation for folder drops. */
+  touchFolderDrag?: FolderTouchDragHandlers;
 }
 
 export function DetailList(props: Props) {
@@ -149,6 +152,7 @@ export function DetailList(props: Props) {
                 searching={searching}
                 onRenameCommit={props.onRenameCommit}
                 onRenameCancel={props.onRenameCancel}
+                touchFolderDrag={props.touchFolderDrag}
               />
             ))}
           </div>
@@ -166,6 +170,7 @@ function RowView({
   searching,
   onRenameCommit,
   onRenameCancel,
+  touchFolderDrag,
 }: {
   row: Row;
   selected: boolean;
@@ -173,6 +178,7 @@ function RowView({
   searching: boolean;
   onRenameCommit: (row: Row, name: string) => void;
   onRenameCancel: () => void;
+  touchFolderDrag?: FolderTouchDragHandlers;
 }) {
   const expandable = !searching && (row.kind === "wt-group" || row.dirPath !== null);
   const e = row.kind === "entry" ? row.entry : null;
@@ -187,21 +193,26 @@ function RowView({
   const muted = e ? e.code?.index === "!" || e.hidden : row.kind === "worktree" && row.wt.prunable;
   const path = row.kind === "entry" ? row.entry.path : row.kind === "worktree" ? row.wt.path : null;
   const isFolder = row.dirPath !== null;
+  const touchDrag = useFolderTouchDrag(isFolder && path ? { name, path } : null, touchFolderDrag);
 
   return (
     <div
-      className={`lrow ${selected ? "selected" : ""} ${muted ? "muted" : ""} ${
+      className={`lrow ${selected ? "selected" : ""} ${muted ? "muted" : ""} ${touchDrag.dragging ? "touch-dragging" : ""} ${
         row.kind === "wt-group" ? "section" : ""
       }`}
       data-row-id={row.id}
       style={{ height: ROW_H }}
-      draggable={isFolder}
+      draggable={isFolder && !touchFolderDrag}
       onDragStart={(event) => {
         if (!isFolder || !path) return;
         event.dataTransfer.effectAllowed = "copy";
         event.dataTransfer.setData(FOLDER_DRAG_TYPE, JSON.stringify({ name, path }));
         event.dataTransfer.setData("text/plain", path);
       }}
+      onPointerDown={touchDrag.onPointerDown}
+      onPointerMove={touchDrag.onPointerMove}
+      onPointerUp={touchDrag.onPointerUp}
+      onPointerCancel={touchDrag.onPointerCancel}
     >
       <div className="c-name" style={{ paddingLeft: 6 + row.depth * 17 }}>
         <span

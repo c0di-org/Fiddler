@@ -12,6 +12,8 @@ interface Props {
   onAddFavorite: (favorite: Favorite, at?: number) => void;
   onRemoveFavorite: (path: string) => void;
   onMoveFavorite: (path: string, at: number) => void;
+  /** The current Android touch drag, if it is over a Favorites drop target. */
+  touchFolderDropIndex?: number | null;
 }
 
 type DragKind = "folder" | "favorite";
@@ -48,9 +50,11 @@ export function Sidebar({
   onAddFavorite,
   onRemoveFavorite,
   onMoveFavorite,
+  touchFolderDropIndex = null,
 }: Props) {
   const [dropIndex, setDropIndex] = useState<number | null>(null);
   const [draggingFavorite, setDraggingFavorite] = useState(false);
+  const visibleDropIndex = touchFolderDropIndex ?? dropIndex;
 
   const clearDrop = () => setDropIndex(null);
 
@@ -92,7 +96,8 @@ export function Sidebar({
       <div className="sidebar-favorites">
         <SidebarHeading icon={<HeartIcon size={13} />}>Favorites</SidebarHeading>
         <div
-          className={`favorites-list ${dropIndex === 0 && favorites.length === 0 ? "drop-before" : ""}`}
+          className={`favorites-list ${visibleDropIndex === 0 && favorites.length === 0 ? "drop-before" : ""}`}
+          data-favorites-list
           onDragOver={(event) => {
             if (event.target === event.currentTarget) void allowFavoriteDrop(event, favorites.length);
           }}
@@ -105,9 +110,10 @@ export function Sidebar({
             <FavoriteButton
               key={favorite.path}
               favorite={favorite}
+              index={index}
               active={favorite.path === current}
-              before={dropIndex === index}
-              after={dropIndex === favorites.length && index === favorites.length - 1}
+              before={visibleDropIndex === index}
+              after={visibleDropIndex === favorites.length && index === favorites.length - 1}
               onPick={onPick}
               onRemove={onRemoveFavorite}
               onDragStart={() => setDraggingFavorite(true)}
@@ -191,6 +197,7 @@ function FavoriteButton({
   onDragEnd,
   onDragOver,
   onDrop,
+  index,
 }: {
   favorite: Favorite;
   active: boolean;
@@ -202,10 +209,12 @@ function FavoriteButton({
   onDragEnd: () => void;
   onDragOver: (event: React.DragEvent<HTMLDivElement>) => void;
   onDrop: (event: React.DragEvent<HTMLDivElement>) => void;
+  index: number;
 }) {
   return (
     <div
       className={`favorite-slot ${before ? "drop-before" : ""} ${after ? "drop-after" : ""}`}
+      data-favorite-index={index}
       draggable
       onDragStart={(event) => {
         event.dataTransfer.effectAllowed = "move";

@@ -11,6 +11,7 @@ import { Sidebar } from "./components/Sidebar";
 import { TintPicker } from "./components/TintPicker";
 import { TextEditor } from "./components/TextEditor";
 import { Toolbar } from "./components/Toolbar";
+import type { FolderTouchDragHandlers } from "./components/folder-touch-drag";
 import { GridIcon } from "./components/icons";
 import { addFavorite, loadFavorites, moveFavorite, saveFavorites } from "./favorites";
 import { formatSize } from "./format";
@@ -41,6 +42,13 @@ interface Target {
   entry?: Entry;
 }
 
+interface FolderTouchDrag {
+  folder: Favorite;
+  x: number;
+  y: number;
+  dropIndex: number | null;
+}
+
 interface EditorState {
   path?: string;
   text: string;
@@ -55,6 +63,8 @@ export default function App() {
 
   const [places, setPlaces] = useState<Place[]>([]);
   const [favorites, setFavorites] = useState<Favorite[]>(loadFavorites);
+  const [folderTouchDrag, setFolderTouchDrag] = useState<FolderTouchDrag | null>(null);
+  const folderTouchDragRef = useRef<FolderTouchDrag | null>(null);
   const [selection, setSelection] = useState<Set<string>>(new Set());
   const [revealSelection, setRevealSelection] = useState(0);
   const [renamingId, setRenamingId] = useState<string | null>(null);
@@ -394,6 +404,69 @@ export default function App() {
   const reorderFavorite = useCallback((path: string, at: number) => {
     setFavorites((current) => moveFavorite(current, path, at));
   }, []);
+
+  const favoriteDropAt = useCallback(
+    (x: number, y: number) => {
+      const hit = document.elementFromPoint(x, y);
+      const list = hit?.closest<HTMLElement>("[data-favorites-list]");
+      if (!hit || !list) return null;
+      const slot = hit.closest<HTMLElement>("[data-favorite-index]");
+      if (!slot) return favorites.length;
+      const index = Number(slot.dataset.favoriteIndex);
+      if (!Number.isInteger(index)) return null;
+      const bounds = slot.getBoundingClientRect();
+      return index + (y > bounds.top + bounds.height / 2 ? 1 : 0);
+    },
+    [favorites.length],
+  );
+
+  const beginFolderTouchDrag = useCallback(
+    (folder: Favorite, x: number, y: number) => {
+      const next = { folder, x, y, dropIndex: favoriteDropAt(x, y) };
+      folderTouchDragRef.current = next;
+      setFolderTouchDrag(next);
+    },
+    [favoriteDropAt],
+  );
+
+  const moveFolderTouchDrag = useCallback(
+    (x: number, y: number) => {
+      const current = folderTouchDragRef.current;
+      if (!current) return;
+      const next = { ...current, x, y, dropIndex: favoriteDropAt(x, y) };
+      folderTouchDragRef.current = next;
+      setFolderTouchDrag(next);
+    },
+    [favoriteDropAt],
+  );
+
+  const cancelFolderTouchDrag = useCallback(() => {
+    folderTouchDragRef.current = null;
+    setFolderTouchDrag(null);
+  }, []);
+
+  const endFolderTouchDrag = useCallback(
+    (x: number, y: number) => {
+      const current = folderTouchDragRef.current;
+      cancelFolderTouchDrag();
+      const at = favoriteDropAt(x, y);
+      if (current && at !== null) favorite(current.folder, at);
+    },
+    [cancelFolderTouchDrag, favorite, favoriteDropAt],
+  );
+
+  const touchFolderDragHandlers = useMemo<FolderTouchDragHandlers | undefined>(
+    () =>
+      isAndroid
+        ? {
+            onStart: beginFolderTouchDrag,
+            onMove: moveFolderTouchDrag,
+            onEnd: endFolderTouchDrag,
+            onCancel: cancelFolderTouchDrag,
+          }
+        : undefined,
+    [beginFolderTouchDrag, moveFolderTouchDrag, endFolderTouchDrag, cancelFolderTouchDrag],
+  );
 
   /** The item Quick Look would show: the most recently selected one. */
   const lead = useMemo(() => {
@@ -790,6 +863,7 @@ export default function App() {
         onAddFavorite={favorite}
         onRemoveFavorite={unfavorite}
         onMoveFavorite={reorderFavorite}
+        touchFolderDropIndex={folderTouchDrag?.dropIndex}
       />
 
       <main className="main">
@@ -832,6 +906,7 @@ export default function App() {
               }}
               onContextMenu={(c, x, y) => buildMenu(c ? (byId.get(c.id) ?? null) : null, x, y)}
               onBackgroundClick={() => setSelection(new Set())}
+              touchFolderDrag={touchFolderDragHandlers}
             />
           ) : (
             <DetailList
@@ -859,6 +934,7 @@ export default function App() {
               onRenameCommit={(r, v) => void commitRename(r, v)}
               onRenameCancel={() => setRenamingId(null)}
               onBackgroundClick={() => setSelection(new Set())}
+              touchFolderDrag={touchFolderDragHandlers}
             />
           )}
 

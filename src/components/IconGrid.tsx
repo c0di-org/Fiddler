@@ -6,6 +6,7 @@ import { FolderGlyph } from "./FileGlyph";
 import { GitDot } from "./GitDot";
 import { Thumb } from "./Thumb";
 import { FOLDER_DRAG_TYPE } from "../favorites";
+import { type FolderTouchDragHandlers, useFolderTouchDrag } from "./folder-touch-drag";
 
 /**
  * The default view: big previews in a grid. Virtualized by row, so a folder with
@@ -52,6 +53,8 @@ interface Props {
   emptyMessage: string;
   /** Suppresses the empty state while a listing is still in flight. */
   loaded: boolean;
+  /** Android's WebView needs a touch implementation for folder drops. */
+  touchFolderDrag?: FolderTouchDragHandlers;
 }
 
 export function IconGrid(props: Props) {
@@ -211,6 +214,7 @@ export function IconGrid(props: Props) {
                   width={cellW}
                   iconSize={iconSize}
                   selected={props.selection.has(cell.id)}
+                  touchFolderDrag={props.touchFolderDrag}
                 />
               ))}
             </div>
@@ -227,29 +231,38 @@ function Cell({
   width,
   iconSize,
   selected,
+  touchFolderDrag,
 }: {
   cell: GridCell;
   width: number;
   iconSize: number;
   selected: boolean;
+  touchFolderDrag?: FolderTouchDragHandlers;
 }) {
   const e = cell.entry;
   const ignored = e?.code?.index === "!";
   const isFolder = !!cell.wt || e?.kind === "dir" || (e?.kind === "symlink" && e.linkToDir);
+  const touchDrag = useFolderTouchDrag(isFolder ? { name: cell.name, path: cell.path } : null, touchFolderDrag);
 
   return (
     <div
-      className={`cell ${selected ? "selected" : ""} ${ignored || e?.hidden ? "muted" : ""}`}
+      className={`cell ${selected ? "selected" : ""} ${ignored || e?.hidden ? "muted" : ""} ${
+        touchDrag.dragging ? "touch-dragging" : ""
+      }`}
       data-cell-id={cell.id}
       style={{ width }}
       title={cell.path}
-      draggable={isFolder}
+      draggable={isFolder && !touchFolderDrag}
       onDragStart={(event) => {
         if (!isFolder) return;
         event.dataTransfer.effectAllowed = "copy";
         event.dataTransfer.setData(FOLDER_DRAG_TYPE, JSON.stringify({ name: cell.name, path: cell.path }));
         event.dataTransfer.setData("text/plain", cell.path);
       }}
+      onPointerDown={touchDrag.onPointerDown}
+      onPointerMove={touchDrag.onPointerMove}
+      onPointerUp={touchDrag.onPointerUp}
+      onPointerCancel={touchDrag.onPointerCancel}
     >
       <div className="cell-art" style={{ height: iconSize }}>
         {e ? <Thumb entry={e} size={iconSize} /> : <FolderGlyph size={iconSize} repo name={cell.name} />}

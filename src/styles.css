@@ -336,6 +336,12 @@ button {
   position: relative;
 }
 
+/* A held Android folder is being moved by the touch fallback, not selected. */
+.cell.touch-dragging,
+.lrow.touch-dragging {
+  opacity: 0.48;
+}
+
 .favorites-list.drop-before::before,
 .favorite-slot.drop-before::before,
 .favorite-slot.drop-after::after {
