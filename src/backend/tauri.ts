@@ -65,6 +65,8 @@ const backend: Backend = {
 
   onUsbEntries: (fn) => listen<EntryBatch>("fiddler:usb-entries", (e) => fn(e.payload)),
 
+  releaseUsbDevice: (serial) => invoke<string>("release_usb_device", { serial }),
+
   createFolder: (parent, name) => invoke<string>("create_folder", { parent, name }),
 
   createTextFile: (parent, name, text) =>

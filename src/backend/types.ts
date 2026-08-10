@@ -70,6 +70,9 @@ export interface Backend {
   /** The rest of a device folder, after `listDir` returned its first screenful.
    * MTP costs a round trip per object, so a big folder is drawn as it is read. */
   onUsbEntries(fn: (batch: EntryBatch) => void): Promise<Unlisten>;
+  /** Quit whatever is holding a device, when it's something we recognise.
+   * Resolves with the name of what was quit. */
+  releaseUsbDevice(serial: string): Promise<string>;
 
   // ------------------------------------------------------------ mutation
 

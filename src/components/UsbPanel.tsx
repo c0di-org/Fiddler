@@ -10,9 +10,18 @@ import { BoltIcon, DeviceIcon, SdCardIcon } from "./icons";
  * when the person does the thing — so this is a place to wait that tells you
  * what you're waiting for.
  */
-export function UsbConnecting({ device }: { device: UsbDevice }) {
+export function UsbConnecting({
+  device,
+  onRelease,
+}: {
+  device: UsbDevice;
+  onRelease?: (device: UsbDevice) => void;
+}) {
   const notice = connectionNotice(device);
   if (!notice) return null;
+  // Only offer the button when there is a named process we are willing to end.
+  // Without a name there is nothing to promise, and the panel says so instead.
+  const releasable = device.stage === "blocked" && !!device.owner && !!onRelease;
   return (
     <div className="usb-panel">
       <div className={`usb-panel-glyph ${notice.resolves ? "waiting" : "stopped"}`}>
@@ -20,10 +29,15 @@ export function UsbConnecting({ device }: { device: UsbDevice }) {
       </div>
       <h2>{notice.title}</h2>
       <p>{notice.detail}</p>
+      {releasable && (
+        <button className="usb-panel-fix" onClick={() => onRelease?.(device)}>
+          Quit {device.stage === "blocked" ? device.owner : ""} and connect
+        </button>
+      )}
       {notice.resolves && (
         <div className="usb-panel-live">
           <span className="usb-pulse" />
-          Watching for it — nothing to click
+          {releasable ? "Reconnects on its own once it lets go" : "Watching for it — nothing to click"}
         </div>
       )}
     </div>

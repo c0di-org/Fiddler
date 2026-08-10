@@ -62,6 +62,8 @@ pub fn run() {
             commands::nearby_devices,
             #[cfg(not(target_os = "android"))]
             commands::usb_devices,
+            #[cfg(not(target_os = "android"))]
+            commands::release_usb_device,
             commands::nearby_pairing_info,
             commands::pair_nearby_device,
             commands::search_contents,
