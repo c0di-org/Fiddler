@@ -15,6 +15,7 @@ import type {
   NearbySearch,
   PairingInfo,
   PdfMeta,
+  PeekItem,
   PeerDevice,
   Place,
   RepoInfo,
@@ -35,6 +36,9 @@ const backend: Backend = {
     invoke<ContentSearch>("search_contents", { path, names, terms }),
 
   inspect: (path) => invoke<Inspect>("inspect", { path }),
+
+  folderPeek: (path, showHidden, limit) =>
+    invoke<PeekItem[]>("folder_peek", { path, showHidden, limit }),
 
   readText: (path, maxBytes) => invoke<TextHead>("read_text", { path, maxBytes }),
 

@@ -62,6 +62,7 @@ pub fn run() {
             commands::thumbnail,
             commands::thumbnails,
             commands::inspect,
+            commands::folder_peek,
             commands::read_text,
             commands::pdf_meta,
             commands::pdf_page,

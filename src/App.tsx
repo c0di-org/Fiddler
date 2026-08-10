@@ -13,6 +13,7 @@ import { Toolbar } from "./components/Toolbar";
 import type { FolderTouchDragHandlers } from "./components/folder-touch-drag";
 import { GridIcon } from "./components/icons";
 import { addFavorite, loadFavorites, moveFavorite, saveFavorites } from "./favorites";
+import { invalidate as peekChanged, setShowHidden as setPeekHidden } from "./folder-peek";
 import { formatSize } from "./format";
 import * as ipc from "./ipc";
 import { caps, permissionHelp } from "./platform";
@@ -136,6 +137,10 @@ export default function App() {
 
   useEffect(() => saveFavorites(favorites), [favorites]);
 
+  // What a folder icon shows is a listing like any other, and follows the same
+  // choice about hidden files.
+  useEffect(() => setPeekHidden(store.showHidden), [store.showHidden]);
+
   const tintRef = useRef(tint);
   tintRef.current = tint;
   useEffect(() => watchTint(() => tintRef.current, () => setSystemTint(hasSystemAccent())), []);
@@ -143,7 +148,12 @@ export default function App() {
   useEffect(() => {
     const subs = [
       ipc.onRepoStatus((p) => void store.applyRepoStatus(p)),
-      ipc.onDirsChanged((dirs) => void store.invalidateDirs(dirs)),
+      ipc.onDirsChanged((dirs) => {
+        // A folder's icon shows what's in it, so a change to its contents dates
+        // the icon as surely as it dates the listing.
+        peekChanged(dirs);
+        void store.invalidateDirs(dirs);
+      }),
     ];
     return () => {
       for (const s of subs) void s.then((off) => off());

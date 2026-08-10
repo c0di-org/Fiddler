@@ -17,6 +17,7 @@ import type {
   NearbySearch,
   PairingInfo,
   PdfMeta,
+  PeekItem,
   PeerDevice,
   Place,
   RepoInfo,
@@ -38,6 +39,8 @@ export interface Backend {
   nearbyEntries(path: string, showHidden: boolean, maxDepth?: number): Promise<NearbySearch>;
   searchContents(path: string, names: string[], terms: string[]): Promise<ContentSearch>;
   inspect(path: string): Promise<Inspect>;
+  /** The leading children of a folder, for the fan of cards on its icon. */
+  folderPeek(path: string, showHidden: boolean, limit: number): Promise<PeekItem[]>;
   /** The front of a text file, bounded by `maxBytes` and cut on a character. */
   readText(path: string, maxBytes: number): Promise<TextHead>;
 

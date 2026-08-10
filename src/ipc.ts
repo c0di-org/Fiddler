@@ -15,6 +15,7 @@ export const {
   nearbyEntries,
   searchContents,
   inspect,
+  folderPeek,
   readText,
   repoInfo,
   refreshRepo,

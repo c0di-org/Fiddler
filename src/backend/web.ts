@@ -6,6 +6,7 @@
  * treats as "this feature isn't here" and hides accordingly (see
  * `platform.ts`). */
 
+import { natural } from "../sort";
 import type { Entry, PairingInfo, PdfMeta, RepoInfo } from "../types";
 import { canThumb } from "./web/render";
 import { nearbyEntries, searchContents } from "./web/search-fs";
@@ -94,6 +95,31 @@ const backend: Backend = {
   searchContents: (path, names, terms) => searchContents(path, names, terms),
 
   inspect: (path) => inspect(path),
+
+  /** The first few things in a folder, for the fan of cards on its icon.
+   * Ordered the way `folder_peek` in `commands.rs` orders them — folders first,
+   * then natural by name — so an icon looks the same on both backends. */
+  async folderPeek(path, showHidden, limit) {
+    const capped = Math.min(Math.max(limit, 1), 4);
+    const nodes = await vfs.listDir(path);
+    return nodes
+      .filter(
+        (node) =>
+          node.name !== ".DS_Store" && (showHidden || !node.name.startsWith("."))
+      )
+      .sort((a, b) => {
+        const aDir = a.kind === "dir";
+        const bDir = b.kind === "dir";
+        return aDir === bDir ? natural(a.name, b.name) : aDir ? -1 : 1;
+      })
+      .slice(0, capped)
+      .map((node) => ({
+        name: node.name,
+        path: vfs.childPath(path, node.name),
+        isDir: node.kind === "dir",
+        thumbable: node.kind === "file" && canThumb(node.name),
+      }));
+  },
 
   readText: (path, maxBytes) => readText(path, maxBytes),
 

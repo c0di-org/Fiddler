@@ -23,8 +23,13 @@ type Sink = (src: string | null) => void;
 interface Want {
   path: string;
   size: number;
-  el: Element;
-  sinks: Set<Sink>;
+  /**
+   * Everyone waiting, grouped by the element whose position speaks for them. The
+   * same file at the same size can be on screen in more than one place — a tile
+   * and the folder icon it is fanned out of — and each of those places has its
+   * own claim on how urgent it is.
+   */
+  els: Map<Element, Set<Sink>>;
 }
 
 /** Resolved thumbnails; `null` means "this file has no preview to give". */
@@ -33,8 +38,14 @@ const memo = new Map<string, string | null>();
 const MEMO_CAP = 8000;
 
 const wanted = new Map<string, Want>();
-const onScreen = new Set<string>();
-const keys = new WeakMap<Element, string>();
+/** Wants currently on screen, by the anchors that put them there. */
+const onScreen = new Map<string, Set<Element>>();
+/**
+ * The wants each observed element stands for. Usually one — a tile and its own
+ * preview — but a folder icon anchors the previews of the children fanned out of
+ * it to the single element the observer can actually measure.
+ */
+const keys = new WeakMap<Element, Set<string>>();
 
 /** Requests are re-sent at most this often while a scroll is in flight. */
 const INTERVAL_MS = 90;
@@ -48,10 +59,20 @@ function watcher(): IntersectionObserver {
   if (!observer) {
     observer = new IntersectionObserver((entries) => {
       for (const e of entries) {
-        const key = keys.get(e.target);
-        if (!key) continue;
-        if (e.isIntersecting) onScreen.add(key);
-        else onScreen.delete(key);
+        const held = keys.get(e.target);
+        if (!held) continue;
+        for (const key of held) {
+          if (e.isIntersecting) {
+            let anchors = onScreen.get(key);
+            if (!anchors) onScreen.set(key, (anchors = new Set()));
+            anchors.add(e.target);
+          } else {
+            const anchors = onScreen.get(key);
+            if (!anchors) continue;
+            anchors.delete(e.target);
+            if (anchors.size === 0) onScreen.delete(key);
+          }
+        }
       }
       schedule();
     }, { rootMargin: MARGIN });
@@ -78,25 +99,49 @@ export function subscribe(path: string, size: number, el: Element, sink: Sink): 
 
   let want = wanted.get(key);
   if (!want) {
-    want = { path, size, el, sinks: new Set() };
+    want = { path, size, els: new Map() };
     wanted.set(key, want);
   }
-  want.el = el;
-  want.sinks.add(sink);
-  keys.set(el, key);
-  watcher().observe(el);
+  let sinks = want.els.get(el);
+  if (!sinks) want.els.set(el, (sinks = new Set()));
+  sinks.add(sink);
+  anchor(el, key);
 
   return () => {
-    watcher().unobserve(el);
     const still = wanted.get(key);
-    if (!still) return;
-    still.sinks.delete(sink);
-    if (still.sinks.size === 0) {
+    const held = still?.els.get(el);
+    if (!still || !held) return;
+    held.delete(sink);
+    if (held.size > 0) return;
+
+    still.els.delete(el);
+    release(el, key);
+    if (still.els.size === 0) {
       wanted.delete(key);
       onScreen.delete(key);
       schedule();
     }
   };
+}
+
+/** Start answering for `key` whenever `el` is on screen. */
+function anchor(el: Element, key: string) {
+  let held = keys.get(el);
+  if (!held) {
+    held = new Set();
+    keys.set(el, held);
+  }
+  held.add(key);
+  // Observing something already observed is a no-op beyond one extra callback.
+  watcher().observe(el);
+}
+
+/** Drop `key` from `el`, and the element itself once nothing else needs it. */
+function release(el: Element, key: string) {
+  const held = keys.get(el);
+  if (!held) return;
+  held.delete(key);
+  if (held.size === 0) watcher().unobserve(el);
 }
 
 let timer: ReturnType<typeof setTimeout> | undefined;
@@ -122,12 +167,17 @@ function flush() {
 
   // Order outward from the middle of the viewport: that's where the eye is, and
   // the backend renders in the order we hand it. Every rect is read before
-  // anything is written, so this doesn't thrash layout.
+  // anything is written, so this doesn't thrash layout. A want showing in more
+  // than one place is as urgent as its nearest showing.
   const middle = window.innerHeight / 2;
   const urgency = new Map<Want, number>();
   for (const w of live) {
-    const box = w.el.getBoundingClientRect();
-    urgency.set(w, Math.abs(box.top + box.height / 2 - middle));
+    let nearest = Infinity;
+    for (const el of w.els.keys()) {
+      const box = el.getBoundingClientRect();
+      nearest = Math.min(nearest, Math.abs(box.top + box.height / 2 - middle));
+    }
+    urgency.set(w, nearest);
   }
   live.sort((a, b) => urgency.get(a)! - urgency.get(b)!);
 
@@ -154,8 +204,16 @@ function deliver({ path, size, src }: ThumbReady) {
   if (!want) return;
   wanted.delete(key);
   onScreen.delete(key);
-  watcher().unobserve(want.el);
-  for (const sink of want.sinks) sink(src);
+  for (const [el, sinks] of want.els) {
+    release(el, key);
+    for (const sink of sinks) sink(src);
+  }
+}
+
+/** Ask for a device-pixel-accurate thumbnail, snapped so the cache stays shared. */
+export function thumbPx(size: number) {
+  const want = size * Math.min(2, window.devicePixelRatio || 1);
+  return want <= 64 ? 64 : want <= 128 ? 128 : want <= 256 ? 256 : 512;
 }
 
 /** Drop the least recently added quarter. `Map` iterates in insertion order. */
