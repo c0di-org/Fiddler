@@ -57,8 +57,10 @@ previews for formats Android can decode. It also has a full-screen text editor:
 tap the new-file button, name a `.txt`, `.md`, `.json` (or any other) file, then
 write and save it in place. Existing text files open in that editor; large or
 binary files still open in their installed Android app; opening an APK launches
-Android's package installer. System Trash, terminal launching, and macOS Quick
-Look thumbnails are not available on Android.
+Android's package installer. Android deletions are permanent (with a
+confirmation), because Android does not provide Fiddler with a general system
+Trash. Terminal launching and macOS Quick Look thumbnails are not available on
+Android.
 
 ## Keys
 
@@ -71,7 +73,7 @@ Look thumbnails are not available on Android.
 | `⇧⌘.` | Show hidden files |
 | type letters | Jump to the first matching name |
 | `↵` / `⌘↵` | Rename / open |
-| `⌘⌫` | Move to Trash |
+| `⌘⌫` | Move to Trash (permanently delete on Android) |
 | `⇧⌘N` | New folder |
 | `⌘N` | New text file |
 
