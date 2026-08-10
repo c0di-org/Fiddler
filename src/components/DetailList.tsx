@@ -62,7 +62,7 @@ interface Props {
   sortKey: SortKey;
   sortAsc: boolean;
   onSort: (key: SortKey) => void;
-  onSelect: (id: string, e: React.MouseEvent) => void;
+  onSelect: (id: string, e: React.MouseEvent, touch?: boolean) => void;
   onToggle: (row: Row) => void;
   onOpen: (row: Row) => void;
   onContextMenu: (row: Row | null, x: number, y: number) => void;
@@ -74,11 +74,14 @@ interface Props {
   loaded: boolean;
   /** Android's WebView needs a touch implementation for folder drops. */
   touchFolderDrag?: FolderTouchDragHandlers;
+  /** Touch gets direct open/preview actions; mouse keeps selection behavior. */
+  directTouch?: boolean;
 }
 
 export function DetailList(props: Props) {
   const { rows, selection, renamingId, revealSelection, searching } = props;
   const scrollerRef = useRef<HTMLDivElement>(null);
+  const pointerType = useRef<string | null>(null);
   const revealed = useRef(0);
   const [scrollTop, setScrollTop] = useState(0);
   const [viewport, setViewport] = useState(600);
@@ -244,6 +247,9 @@ export function DetailList(props: Props) {
       <div
         className="list-scroller"
         ref={scrollerRef}
+        onPointerDown={(e) => {
+          pointerType.current = e.pointerType;
+        }}
         onScroll={onScroll}
         onClick={(e) => {
           const row = rowFrom(e);
@@ -252,9 +258,10 @@ export function DetailList(props: Props) {
             return;
           }
           if ((e.target as HTMLElement).closest("[data-twisty]")) props.onToggle(row);
-          else props.onSelect(row.id, e);
+          else props.onSelect(row.id, e, props.directTouch && pointerType.current === "touch");
         }}
         onDoubleClick={(e) => {
+          if (props.directTouch && pointerType.current === "touch") return;
           const row = rowFrom(e);
           if (row) props.onOpen(row);
         }}

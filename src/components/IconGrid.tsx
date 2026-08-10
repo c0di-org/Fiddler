@@ -46,7 +46,7 @@ interface Props {
   selection: Set<string>;
   /** Advances when keyboard navigation asks us to reveal the lead selection. */
   revealSelection: number;
-  onSelect: (id: string, e: React.MouseEvent) => void;
+  onSelect: (id: string, e: React.MouseEvent, touch?: boolean) => void;
   onOpen: (cell: GridCell) => void;
   onContextMenu: (cell: GridCell | null, x: number, y: number) => void;
   onBackgroundClick: () => void;
@@ -55,11 +55,14 @@ interface Props {
   loaded: boolean;
   /** Android's WebView needs a touch implementation for folder drops. */
   touchFolderDrag?: FolderTouchDragHandlers;
+  /** Touch gets direct open/preview actions; mouse keeps selection behavior. */
+  directTouch?: boolean;
 }
 
 export function IconGrid(props: Props) {
   const { entries, contentEntries = [], worktrees, iconSize } = props;
   const scrollerRef = useRef<HTMLDivElement>(null);
+  const pointerType = useRef<string | null>(null);
   const revealed = useRef(0);
   const [scrollTop, setScrollTop] = useState(0);
   const [box, setBox] = useState({ w: 900, h: 600 });
@@ -177,13 +180,17 @@ export function IconGrid(props: Props) {
     <div
       className="grid-scroller"
       ref={scrollerRef}
+      onPointerDown={(e) => {
+        pointerType.current = e.pointerType;
+      }}
       onScroll={onScroll}
       onClick={(e) => {
         const c = cellFrom(e);
-        if (c) props.onSelect(c.id, e);
+        if (c) props.onSelect(c.id, e, props.directTouch && pointerType.current === "touch");
         else props.onBackgroundClick();
       }}
       onDoubleClick={(e) => {
+        if (props.directTouch && pointerType.current === "touch") return;
         const c = cellFrom(e);
         if (c) props.onOpen(c);
       }}
