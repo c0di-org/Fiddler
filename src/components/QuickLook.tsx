@@ -71,7 +71,7 @@ export function QuickLook({ entry, index, total, onStep, onClose }: Props) {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape" || e.key === " ") {
+      if (e.key === "Escape" || isSpaceKey(e)) {
         e.preventDefault();
         e.stopPropagation();
         onClose();
@@ -148,16 +148,24 @@ function Body({
     return <Picture entry={entry} />;
   }
 
+  if (route === "audio") return <Audio entry={entry} />;
+
+  if (route === "video") return <Video entry={entry} />;
+
   if (isTextual(route)) {
     return <Text entry={entry} route={route} />;
   }
 
-  return (
-    <div className="ql-plain">
-      <FileGlyph entry={entry} size={200} />
-      <p className="ql-note">No preview for this kind of file</p>
-    </div>
-  );
+  // Extensions are only hints. A surprising number of useful files have an
+  // in-house suffix (or none at all), so give any non-binary file the same
+  // bounded reader as .txt rather than making Quick Look a dead end.
+  return <Text entry={entry} route="text" />;
+}
+
+function isSpaceKey(e: KeyboardEvent) {
+  // Some Android/DeX keyboards still report the legacy key value. `code` is
+  // layout-independent and catches physical space bars that report neither.
+  return e.key === " " || e.key === "Spacebar" || e.key === "Space" || e.code === "Space";
 }
 
 /**
@@ -222,10 +230,38 @@ function Picture({ entry }: { entry: Entry }) {
     };
   }, [entry.path]);
 
-  if (!src) return <div className="ql-plain" />;
+  if (!src) {
+    return (
+      <div className="ql-plain">
+        <FileGlyph entry={entry} size={200} />
+        <p className="ql-note">This file has no image preview</p>
+      </div>
+    );
+  }
   return (
     <div className="ql-picture">
       <img src={convertFileSrc(src)} alt="" draggable={false} />
+    </div>
+  );
+}
+
+function Audio({ entry }: { entry: Entry }) {
+  return (
+    <div className="ql-media ql-audio">
+      <FileGlyph entry={entry} size={180} />
+      <audio controls preload="metadata" src={convertFileSrc(entry.path)}>
+        Your Android device can’t play this audio format.
+      </audio>
+    </div>
+  );
+}
+
+function Video({ entry }: { entry: Entry }) {
+  return (
+    <div className="ql-media ql-video">
+      <video controls preload="metadata" src={convertFileSrc(entry.path)}>
+        Your Android device can’t play this video format.
+      </video>
     </div>
   );
 }

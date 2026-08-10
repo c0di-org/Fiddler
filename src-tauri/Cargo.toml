@@ -43,6 +43,13 @@ objc2-quick-look-thumbnailing = { version = "0.3", default-features = false, fea
 [target.'cfg(not(target_os = "android"))'.dependencies]
 trash = "5"
 
+# Android's PdfRenderer is part of the OS, is hardware-adjacent, and avoids
+# carrying a large PDF engine in every APK. These two tiny bindings are only
+# linked into the Android build to reach it from the Rust command layer.
+[target.'cfg(target_os = "android")'.dependencies]
+jni = "0.21"
+ndk-context = "0.1"
+
 [profile.release]
 codegen-units = 1
 lto = true

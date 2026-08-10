@@ -368,6 +368,14 @@ export default function App() {
       const target = lead ? s.targets.find((t) => t.id === lead) : undefined;
       const perRow = store.view === "icons" ? iconsPerRow() : 1;
 
+      // Android keyboards are not consistent here: modern ones use a literal
+      // space, older DeX stacks use `Spacebar`, and a few only expose `code`.
+      if ((e.key === " " || e.key === "Spacebar" || e.key === "Space" || e.code === "Space") && target?.entry && !modifier) {
+        e.preventDefault();
+        setQuickLook(true);
+        return;
+      }
+
       switch (e.key) {
         case "ArrowDown":
           e.preventDefault();
@@ -460,13 +468,6 @@ export default function App() {
           if (modifier && e.shiftKey) {
             e.preventDefault();
             void store.setShowHidden(!store.showHidden);
-          }
-          break;
-        case " ":
-          // Quick Look, as everywhere else on this OS.
-          if (target?.entry && !modifier) {
-            e.preventDefault();
-            setQuickLook(true);
           }
           break;
         case "Escape":

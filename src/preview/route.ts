@@ -6,7 +6,7 @@
 /** The routes that are read rather than looked at. */
 export type TextRoute = "markdown" | "code" | "text";
 
-export type Route = TextRoute | "pdf" | "image" | "art" | "none";
+export type Route = TextRoute | "pdf" | "image" | "audio" | "video" | "art" | "none";
 
 const IMAGE = new Set([
   "png", "jpg", "jpeg", "jpe", "gif", "bmp", "ico", "tif", "tiff", "webp", "avif", "heic", "heif",
@@ -35,9 +35,15 @@ const CODE = new Set([
 
 /** Things macOS can picture but we can only show as a still. */
 const ART = new Set([
-  "mov", "mp4", "m4v", "avi", "mkv", "webm", "ai", "sketch", "key", "pages", "numbers", "ppt",
+  "avi", "mkv", "ai", "sketch", "key", "pages", "numbers", "ppt",
   "pptx", "doc", "docx", "xls", "xlsx", "epub", "usdz", "obj", "stl",
 ]);
+
+// These are handed directly to Android WebView. `preload="metadata"` means
+// opening Quick Look reads only the small container header; actual bytes stream
+// when the user presses play, through Android's media stack.
+const AUDIO = new Set(["mp3", "m4a", "aac", "wav", "ogg", "oga", "opus", "flac", "weba"]);
+const VIDEO = new Set(["mp4", "m4v", "mov", "webm", "3gp", "3g2"]);
 
 const NAMED: Record<string, Route> = {
   Makefile: "code",
@@ -79,6 +85,8 @@ export function routeOf(nameOrPath: string): Route {
   if (MARKDOWN.has(ext)) return "markdown";
   if (ext === "pdf") return "pdf";
   if (IMAGE.has(ext)) return "image";
+  if (AUDIO.has(ext)) return "audio";
+  if (VIDEO.has(ext)) return "video";
   if (PLAIN.has(ext)) return "text";
   if (CODE.has(ext)) return "code";
   if (ART.has(ext)) return "art";
