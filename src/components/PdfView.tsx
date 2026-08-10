@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { convertFileSrc } from "@tauri-apps/api/core";
 
 import * as ipc from "../ipc";
 import type { PdfMeta } from "../types";
@@ -91,7 +90,7 @@ export function PdfView({ path, page, onPages }: Props) {
       {error ? (
         <div className="preview-none">This PDF couldn’t be rendered</div>
       ) : src ? (
-        <img className="pdf-page" src={convertFileSrc(src)} alt="" draggable={false} />
+        <img className="pdf-page" src={ipc.fileSrc(src)} alt="" draggable={false} />
       ) : (
         // Hold the page's shape so the frame doesn't jump when it lands.
         <div className="pdf-holding" style={{ aspectRatio: String(meta?.aspect ?? 0.773) }} />

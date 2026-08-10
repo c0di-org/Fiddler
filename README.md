@@ -35,6 +35,43 @@ produce — build a debug bundle instead:
 npx tauri build --debug --bundles app && open src-tauri/target/debug/bundle/macos/Fiddler.app
 ```
 
+## Web
+
+Fiddler also runs in a browser, at [files.c0di.com](https://files.c0di.com).
+It is the same React front end — the whole port is a second implementation of
+one interface.
+
+```bash
+npm run dev:web      # vite, port 1420
+npm run build:web    # → dist-web
+npm run deploy       # build, then wrangler deploy
+```
+
+`src/ipc.ts` is the seam. `@backend` resolves at build time to
+`src/backend/tauri.ts` (Rust over IPC) or `src/backend/web.ts` (a virtual
+filesystem in the tab), and nothing above that line knows which it got. The
+markdown parser, the highlighter, sort, search, and the thumbnail scheduler are
+all plain TypeScript that never learns the difference.
+
+The browser build opens on a demo folder, and can also browse **real** folders:
+**Open Folder…** in the sidebar uses the File System Access API to mount one
+with read/write access (Chromium only), and files or folders dragged onto the
+window are read in every browser. Nothing is uploaded — there is no server
+behind the page, which is also why edits to the demo folder don't survive a
+reload.
+
+What it does have: browsing, both views, sorting, type-to-jump, the preview
+pane, Quick Look, markdown rendering, syntax highlighting, image and text
+thumbnails, PDF pages via a lazily-loaded pdf.js chunk, creating, renaming,
+editing, copying, deleting, name search, the nearby-folder fallback, and content
+search.
+
+What it deliberately doesn't: **git**. No status dots, no branches, no
+worktrees. A tab has no git, and a file browser showing invented status is one
+you can't trust the rest of. Reveal in Finder, Open in Terminal and nearby
+devices are absent for the same reason. `src/platform.ts` holds the capability
+flags that decide what each build offers.
+
 ## Android / Samsung DeX
 
 Fiddler also has an Android target, designed primarily for the wide, keyboard-
@@ -84,6 +121,7 @@ LAN address; storage is never listed until the device is explicitly paired.
 | type letters | Jump to the first matching name |
 | `↵` / `⌘↵` | Rename / open |
 | `⌘⌫` | Move to Trash (permanently delete on Android) |
+| `↵` on a `.url` | Follow the shortcut |
 | `⇧⌘N` | New folder |
 | `⌘N` | New text file |
 
@@ -153,3 +191,8 @@ Folders can be dragged into Favorites in the sidebar, then reordered or removed;
 Quick Look renders documents
 itself rather than hosting the system's previews, so formats outside the list
 above show a still image instead.
+
+Shortcut files (`.url`, `.webloc`) are understood everywhere — Quick Look shows
+the destination and offers to open it — but only the web build draws the
+destination onto the tile. The desktop shows a generic shortcut glyph until
+`thumb.rs` learns the lane.

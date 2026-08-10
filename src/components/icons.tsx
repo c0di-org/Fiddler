@@ -1,5 +1,7 @@
 /** Hand-rolled inline SVGs — a dozen glyphs isn't worth an icon dependency. */
 
+import { LINK_MARKS, type LinkKind } from "../preview/link";
+
 interface P {
   size?: number;
   className?: string;
@@ -35,6 +37,13 @@ export const GripIcon = stroked(
 
 export const FolderIcon = stroked(
   <path d="M1.75 4.25A1.25 1.25 0 0 1 3 3h3l1.5 1.75H13a1.25 1.25 0 0 1 1.25 1.25v6A1.25 1.25 0 0 1 13 13.25H3A1.25 1.25 0 0 1 1.75 12z" />
+);
+
+export const FolderPlusIcon = stroked(
+  <>
+    <path d="M1.75 4.25A1.25 1.25 0 0 1 3 3h3l1.5 1.75H13a1.25 1.25 0 0 1 1.25 1.25v6A1.25 1.25 0 0 1 13 13.25H3A1.25 1.25 0 0 1 1.75 12z" />
+    <path d="M8 7.25v4M6 9.25h4" />
+  </>
 );
 
 export const ForkIcon = stroked(
@@ -114,13 +123,13 @@ export const NewFileIcon = stroked(
 );
 
 const HomeIcon = stroked(<path d="M2.5 7 8 2.5 13.5 7v6a.75.75 0 0 1-.75.75h-9A.75.75 0 0 1 3 13z" />);
-const CodeIcon = stroked(
+export const CodeIcon = stroked(
   <>
     <path d="M5.5 5 2.5 8l3 3" />
     <path d="M10.5 5l3 3-3 3" />
   </>
 );
-const DownloadIcon = stroked(
+export const DownloadIcon = stroked(
   <>
     <path d="M8 2.5v7" />
     <path d="M5 6.75 8 9.75l3-3" />
@@ -185,6 +194,29 @@ export const EmptyIcon = stroked(
     <path d="M2.25 12 4 7.75h11.25L13.5 12a1 1 0 0 1-.95.75H3.2A1 1 0 0 1 2.25 12Z" />
   </>
 );
+
+/** A shortcut's destination, drawn from the shared path data in `preview/link`
+ * so the glyph and the web build's thumbnail are the same picture. */
+export function LinkMark({ kind, size = 14, className }: P & { kind: LinkKind }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden="true"
+    >
+      {LINK_MARKS[kind].map((d) => (
+        <path key={d} d={d} />
+      ))}
+    </svg>
+  );
+}
 
 export const placeIcon: Record<string, (p: P) => React.ReactElement> = {
   home: HomeIcon,

@@ -1,6 +1,4 @@
 import { useEffect, useMemo, useState } from "react";
-import { convertFileSrc } from "@tauri-apps/api/core";
-import { openPath } from "@tauri-apps/plugin-opener";
 
 import * as ipc from "../ipc";
 import { grammarNamed, tokenize, State } from "../preview/highlight";
@@ -208,8 +206,8 @@ function Link({ href, children }: { href: string; children: React.ReactNode }) {
       title={href}
       role="link"
       tabIndex={0}
-      onClick={() => void openPath(href)}
-      onKeyDown={(e) => e.key === "Enter" && void openPath(href)}
+      onClick={() => void ipc.openExternal(href)}
+      onKeyDown={(e) => e.key === "Enter" && void ipc.openExternal(href)}
     >
       {children}
     </span>
@@ -252,7 +250,7 @@ function Image({ src, alt, dir }: { src: string; alt: string; dir: string }) {
 
   if (missing) return <span className="md-img-remote">{alt || "image"}</span>;
   if (!rendered) return <span className="md-img-holding" aria-hidden />;
-  return <img className="md-img" src={convertFileSrc(rendered)} alt={alt} draggable={false} />;
+  return <img className="md-img" src={ipc.fileSrc(rendered)} alt={alt} draggable={false} />;
 }
 
 /** Join a relative image reference onto the document's folder. */

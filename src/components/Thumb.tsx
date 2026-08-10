@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { convertFileSrc } from "@tauri-apps/api/core";
 
+import * as ipc from "../ipc";
 import { isTextual, routeOf } from "../preview/route";
 import { peek, subscribe } from "../thumbs";
 import type { Entry } from "../types";
@@ -30,7 +30,11 @@ export function Thumb({ entry, size }: Props) {
   // Only files are routed by name. A folder called `assets.css` is not a
   // stylesheet, and whatever it has to show is worth showing at any size.
   const isFile = entry.kind === "file";
-  const worthIt = !isFile || size >= TEXT_FLOOR || !isTextual(routeOf(entry.name));
+  const route = routeOf(entry.name);
+  const worthIt = !isFile || size >= TEXT_FLOOR || !isTextual(route);
+  // A shortcut's thumbnail is a rounded icon on transparency, not a rectangular
+  // picture. It has to carry its own corners and its own shadow.
+  const alpha = isFile && route === "link";
   const [src, setSrc] = useState<string | null>(() =>
     worthIt ? (peek(entry.path, want) ?? null) : null
   );
@@ -46,8 +50,8 @@ export function Thumb({ entry, size }: Props) {
     <div className="thumb" ref={hostRef} style={{ width: size, height: size }}>
       {src ? (
         <img
-          className="thumb-img"
-          src={convertFileSrc(src)}
+          className={`thumb-img${alpha ? " art-alpha" : ""}`}
+          src={ipc.fileSrc(src)}
           alt=""
           draggable={false}
           // Keep image decoding off the thread that's handling the scroll.

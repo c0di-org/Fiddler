@@ -1,16 +1,19 @@
 import { useCallback, useEffect, useState } from "react";
-import { convertFileSrc } from "@tauri-apps/api/core";
-import { openPath } from "@tauri-apps/plugin-opener";
 
 import { formatSize } from "../format";
 import * as ipc from "../ipc";
 import { kindOf } from "../kind";
+import { LINK_LABEL, parseShortcut, type Shortcut } from "../preview/link";
 import { isTextual, routeOf } from "../preview/route";
 import type { Entry, TextHead } from "../types";
 import { CodeView } from "./CodeView";
 import { FileGlyph, FolderGlyph } from "./FileGlyph";
+import { LinkMark } from "./icons";
 import { MarkdownView } from "./MarkdownView";
 import { PdfView } from "./PdfView";
+
+/** A shortcut that needs more than this is not a shortcut. */
+const LINK_BYTES = 8 * 1024;
 
 /**
  * The big look: space bar over a selected file.
@@ -86,7 +89,7 @@ export function QuickLook({ entry, index, total, onStep, onClose }: Props) {
       } else if (e.key === "Enter") {
         e.preventDefault();
         e.stopPropagation();
-        void openPath(entry.path);
+        void ipc.openExternal(entry.path);
       }
     };
     // Capture, so the browser's own shortcuts see these last.
@@ -110,7 +113,7 @@ export function QuickLook({ entry, index, total, onStep, onClose }: Props) {
               {total > 1 && ` · ${index + 1} of ${total}`}
             </span>
           </div>
-          <button className="ql-open" onClick={() => void openPath(entry.path)}>
+          <button className="ql-open" onClick={() => void ipc.openExternal(entry.path)}>
             Open
           </button>
         </header>
@@ -151,6 +154,8 @@ function Body({
   if (route === "audio") return <Audio entry={entry} />;
 
   if (route === "video") return <Video entry={entry} />;
+
+  if (route === "link") return <Link entry={entry} />;
 
   if (isTextual(route)) {
     return <Text entry={entry} route={route} />;
@@ -216,7 +221,7 @@ function Folder({ entry }: { entry: Entry }) {
     <div className="ql-folder">
       <div className="ql-folder-art">
         {cover ? (
-          <img src={convertFileSrc(cover)} alt="" draggable={false} />
+          <img src={ipc.fileSrc(cover)} alt="" draggable={false} />
         ) : (
           // Drawn big and scaled down by CSS, so it fills whatever the window has
           // rather than sitting at one fixed size in the middle of it.
@@ -272,28 +277,98 @@ function Picture({ entry }: { entry: Entry }) {
   }
   return (
     <div className="ql-picture">
-      <img src={convertFileSrc(src)} alt="" draggable={false} />
+      <img src={ipc.fileSrc(src)} alt="" draggable={false} />
     </div>
   );
 }
 
+/** A shortcut is the one file whose whole content is a destination, so the
+ * preview *is* the button. The URL is shown in full above it: following a link
+ * you can't see first is a thing to be asked, not assumed. */
+function Link({ entry }: { entry: Entry }) {
+  const [shortcut, setShortcut] = useState<Shortcut | null | undefined>(undefined);
+
+  useEffect(() => {
+    let alive = true;
+    setShortcut(undefined);
+    void ipc
+      .readText(entry.path, LINK_BYTES)
+      .then((head) => alive && setShortcut(parseShortcut(head.text)))
+      .catch(() => alive && setShortcut(null));
+    return () => {
+      alive = false;
+    };
+  }, [entry.path]);
+
+  if (shortcut === undefined) return <div className="ql-empty" />;
+
+  if (!shortcut) {
+    return (
+      <div className="ql-empty">
+        <FileGlyph entry={entry} size={160} />
+        <p>This shortcut doesn’t point anywhere Fiddler will open</p>
+      </div>
+    );
+  }
+
+  const title = entry.name.replace(/\.(url|webloc)$/i, "");
+
+  return (
+    <div className="ql-link">
+      <LinkMark kind={shortcut.kind} size={92} className="link-mark" />
+      <h2>{title}</h2>
+      <p className="ql-link-kind">{LINK_LABEL[shortcut.kind]}</p>
+      <button className="ql-link-go" onClick={() => void ipc.openExternal(shortcut.url)}>
+        Open in a new tab
+      </button>
+      <p className="ql-link-url">{shortcut.url}</p>
+    </div>
+  );
+}
+
+/** Media is the one preview whose source isn't something the backend already
+ * rendered for us — it's the file itself, streamed. On the desktop that URL is
+ * there for the asking; in a browser the bytes have to be read first, so both
+ * go through the same await rather than the web build growing a special case. */
+function useMediaUrl(path: string): string | null {
+  const [url, setUrl] = useState<string | null>(null);
+  useEffect(() => {
+    let alive = true;
+    setUrl(null);
+    void ipc
+      .mediaUrl(path)
+      .then((resolved) => alive && setUrl(resolved))
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [path]);
+  return url;
+}
+
 function Audio({ entry }: { entry: Entry }) {
+  const src = useMediaUrl(entry.path);
   return (
     <div className="ql-media ql-audio">
       <FileGlyph entry={entry} size={180} />
-      <audio controls preload="metadata" src={convertFileSrc(entry.path)}>
-        Your Android device can’t play this audio format.
-      </audio>
+      {src && (
+        <audio controls preload="metadata" src={src}>
+          This device can’t play this audio format.
+        </audio>
+      )}
     </div>
   );
 }
 
 function Video({ entry }: { entry: Entry }) {
+  const src = useMediaUrl(entry.path);
   return (
     <div className="ql-media ql-video">
-      <video controls preload="metadata" src={convertFileSrc(entry.path)}>
-        Your Android device can’t play this video format.
-      </video>
+      {src && (
+        <video controls preload="metadata" src={src}>
+          This device can’t play this video format.
+        </video>
+      )}
     </div>
   );
 }

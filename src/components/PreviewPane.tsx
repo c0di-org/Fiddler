@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import { convertFileSrc } from "@tauri-apps/api/core";
 
 import { formatSize, formatStamp } from "../format";
 import * as ipc from "../ipc";
@@ -109,7 +108,12 @@ export function PreviewPane({ entry, worktree, count }: Props) {
       ) : (
         <div className="preview-art">
           {thumb ? (
-            <img src={convertFileSrc(thumb)} alt="" draggable={false} />
+            <img
+              className={route === "link" ? "art-alpha" : undefined}
+              src={ipc.fileSrc(thumb)}
+              alt=""
+              draggable={false}
+            />
           ) : entry ? (
             <FileGlyph entry={entry} size={ART} />
           ) : (

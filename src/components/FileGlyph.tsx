@@ -10,7 +10,7 @@ import { folderIconForName, type FolderIcon } from "../folder-icon";
  * of 40,000 files doesn't ship 40,000 copies of the same <linearGradient>.
  */
 
-type Category = "code" | "image" | "media" | "doc" | "archive" | "config" | "plain";
+type Category = "code" | "image" | "media" | "doc" | "archive" | "config" | "link" | "plain";
 
 const CATEGORY: Record<string, Category> = {
   ts: "code", tsx: "code", js: "code", jsx: "code", mjs: "code", cjs: "code",
@@ -33,6 +33,10 @@ const CATEGORY: Record<string, Category> = {
 
   zip: "archive", gz: "archive", tar: "archive", rar: "archive", "7z": "archive",
   dmg: "archive", pkg: "archive",
+
+  // Shortcuts. The band is all a list row can say — which destination it points
+  // at needs the file read, so that lives in the preview and the thumbnail.
+  url: "link", webloc: "link",
 };
 
 /** Below this the glyph is a list-row icon; above it, artwork worth a shadow. */
@@ -217,6 +221,7 @@ export function GlyphDefs() {
         <CatGradient id="g-media" from="#fb7185" to="#d61f60" />
         <CatGradient id="g-doc" from="#4facff" to="#0060df" />
         <CatGradient id="g-archive" from="#fbbf4d" to="#e07b00" />
+        <CatGradient id="g-link" from="#38bdf8" to="#0369a1" />
         <CatGradient id="g-plain" from="#b4b4bb" to="#84848c" />
       </defs>
     </svg>

@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { openPath } from "@tauri-apps/plugin-opener";
 
 import { ContextMenu, type MenuItem } from "./components/ContextMenu";
 import { DetailList } from "./components/DetailList";
@@ -16,13 +15,15 @@ import { GridIcon } from "./components/icons";
 import { addFavorite, loadFavorites, moveFavorite, saveFavorites } from "./favorites";
 import { formatSize } from "./format";
 import * as ipc from "./ipc";
+import { caps, permissionHelp } from "./platform";
+import { parseShortcut } from "./preview/link";
+import { routeOf } from "./preview/route";
 import { contentTerms, prepareSearch, search, type SearchKind, type SearchRecord } from "./search";
 import { TreeStore, type Row } from "./store/tree";
 import { applyTint, hasSystemAccent, loadTint, saveTint, watchTint, type Tint } from "./tint";
 import type { ContentSearch, Entry, Favorite, NearbyEntry, NearbySearch, PairingInfo, PeerDevice, Place, WorktreeInfo } from "./types";
 
 const store = new TreeStore();
-const isAndroid = /Android/i.test(navigator.userAgent);
 
 /** How long a type-to-jump buffer stays alive between keystrokes. */
 const TYPE_AHEAD_MS = 900;
@@ -83,6 +84,7 @@ export default function App() {
   const [tint, setTint] = useState<Tint>(loadTint);
   const [systemTint, setSystemTint] = useState(false);
   const [editor, setEditor] = useState<EditorState | null>(null);
+  const [dropping, setDropping] = useState(false);
   const anchorRef = useRef<string | null>(null);
   const typeAhead = useRef({ buffer: "", at: 0 });
   const editorActive = useRef(false);
@@ -420,6 +422,62 @@ export default function App() {
     await go(`fiddler://${device.id}/`);
   }, [flash, go]);
 
+  /** Takes on a newly mounted location and goes there. Both ways of gaining one
+   * — the folder picker and a drop — add a Place, so both have to re-read them. */
+  const adopt = useCallback(
+    async (mounting: Promise<string | null>) => {
+      try {
+        const path = await mounting;
+        if (!path) return; // A cancelled picker is not a failure.
+        setPlaces(await ipc.sidebarPlaces());
+        await go(path);
+      } catch (error) {
+        flash(String(error).replace(/^Error:\s*/, ""));
+      }
+    },
+    [flash, go]
+  );
+
+  const openFolder = ipc.openFolder;
+  const mountFolder = useMemo(
+    () => (openFolder ? () => void adopt(openFolder()) : undefined),
+    [adopt, openFolder]
+  );
+
+  // Dragging a folder in from the desktop is the other half of "point this at
+  // real files", and the only half Safari and Firefox can do. It coexists with
+  // the internal favourites drag by looking only at drags carrying files.
+  const importDropped = ipc.importDropped;
+
+  const allowExternalDrop = useCallback(
+    (event: React.DragEvent) => {
+      if (!importDropped || !carriesFiles(event)) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "copy";
+      setDropping(true);
+    },
+    [importDropped]
+  );
+
+  const endExternalDrop = useCallback((event: React.DragEvent) => {
+    // Only when the pointer has actually left the window, not on the constant
+    // stream of leaves fired while crossing child elements.
+    if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
+    setDropping(false);
+  }, []);
+
+  const acceptExternalDrop = useCallback(
+    (event: React.DragEvent) => {
+      if (!importDropped || !carriesFiles(event)) return;
+      event.preventDefault();
+      setDropping(false);
+      // Called synchronously: the dropped items stop being readable the moment
+      // this handler returns.
+      void adopt(importDropped(event.dataTransfer));
+    },
+    [adopt, importDropped]
+  );
+
   const favorite = useCallback((item: Favorite, at?: number) => {
     setFavorites((current) => addFavorite(current, item, at));
   }, []);
@@ -484,7 +542,7 @@ export default function App() {
 
   const touchFolderDragHandlers = useMemo<FolderTouchDragHandlers | undefined>(
     () =>
-      isAndroid
+      caps.directTouch
         ? {
             onStart: beginFolderTouchDrag,
             onMove: moveFolderTouchDrag,
@@ -509,8 +567,20 @@ export default function App() {
         return;
       }
       try {
-        if (isAndroid && /\.apk$/i.test(t.name)) {
+        if (caps.installApk && /\.apk$/i.test(t.name)) {
           await ipc.installApk(t.path);
+          return;
+        }
+        // A shortcut's only content is where it goes, so opening it means going
+        // there — not opening the file that holds the address.
+        if (routeOf(t.name) === "link") {
+          const head = await ipc.readText(t.path, 8 * 1024);
+          const shortcut = parseShortcut(head.text);
+          if (!shortcut) {
+            flash(`“${t.name}” doesn’t point anywhere Fiddler will open`);
+            return;
+          }
+          await ipc.openExternal(shortcut.url);
           return;
         }
         const text = await ipc.readText(t.path, 2 * 1024 * 1024);
@@ -518,7 +588,7 @@ export default function App() {
           setEditor({ path: t.path, text: text.text });
           return;
         }
-        await openPath(t.path);
+        await ipc.openExternal(t.path);
       } catch {
         flash(`Could not open “${t.name}”`);
       }
@@ -583,7 +653,7 @@ export default function App() {
   const trashSelected = useCallback(async () => {
     const paths = selected.filter((t) => t.entry).map((t) => t.path);
     if (paths.length === 0) return;
-    if (isAndroid) {
+    if (!caps.trash) {
       const noun = paths.length === 1 ? "this item" : `these ${paths.length} items`;
       if (!window.confirm(`Permanently delete ${noun}? This cannot be undone.`)) return;
     }
@@ -652,8 +722,10 @@ export default function App() {
         items.push({ label: t.isDir ? "Open" : "Open", onPick: () => void openTarget(t) });
         items.push({ label: selected.length > 1 ? `Copy ${selected.length} Items` : "Copy", onPick: copySelected });
         if (!t.isDir) items.push({ label: "Edit Text File", onPick: () => void openTarget(t) });
-        if (!isAndroid) {
+        if (caps.reveal) {
           items.push({ label: "Reveal in Finder", onPick: () => void ipc.revealInFinder(t.path) });
+        }
+        if (caps.terminal) {
           items.push({ label: "Open in Terminal", onPick: () => void ipc.openTerminalHere(t.path) });
         }
         items.push({
@@ -664,13 +736,13 @@ export default function App() {
         if (t.entry) {
           items.push({ label: "Rename…", onPick: () => setRenamingId(t.id) });
           items.push({
-            label: isAndroid
+            label: caps.trash
               ? selected.length > 1
-                ? `Delete ${selected.length} Items…`
-                : "Delete…"
-              : selected.length > 1
                 ? `Move ${selected.length} Items to Trash`
-                : "Move to Trash",
+                : "Move to Trash"
+              : selected.length > 1
+                ? `Delete ${selected.length} Items…`
+                : "Delete…",
             danger: true,
             separatorBefore: true,
             onPick: () => void trashSelected(),
@@ -680,7 +752,8 @@ export default function App() {
         if (copiedPaths.length > 0) items.push({ label: "Paste", onPick: () => void paste() });
         items.push({ label: "New Text File", onPick: newTextFile });
         items.push({ label: "New Folder", onPick: () => void newFolder() });
-        if (!isAndroid) items.push({ label: "Open in Terminal", onPick: () => void ipc.openTerminalHere(store.path) });
+        if (caps.terminal) items.push({ label: "Open in Terminal", onPick: () => void ipc.openTerminalHere(store.path) });
+        if (mountFolder) items.push({ label: "Open Folder…", separatorBefore: true, onPick: mountFolder });
         const root = store.listing?.repoRoot;
         if (root) {
           items.push({
@@ -693,7 +766,7 @@ export default function App() {
 
       setMenu({ x, y, items });
     },
-    [openTarget, selected.length, copySelected, trashSelected, copiedPaths.length, paste, newFolder, newTextFile]
+    [openTarget, selected.length, copySelected, trashSelected, copiedPaths.length, paste, newFolder, newTextFile, mountFolder]
   );
 
   // ------------------------------------------------------------- keyboard
@@ -891,9 +964,7 @@ export default function App() {
       return "No matches";
     }
     return /denied|not permitted|Operation not permitted/i.test(err)
-      ? isAndroid
-        ? "Fiddler needs All files access to browse shared storage.\nAllow it in Android Settings, then return here."
-        : "Fiddler doesn’t have permission to read this folder.\nGrant access in System Settings › Privacy & Security › Files and Folders."
+      ? permissionHelp()
       : err.replace(/^Error:\s*/, "");
   }, [store.listing, searching, localSearchEmpty, nearbyBusy, contentBusy, nearbyResult]);
 
@@ -920,8 +991,19 @@ export default function App() {
   }, [usingNearby, targets.length, localSearchEmpty, nearbyBusy, contentBusy, selected, selectedDirectory, selectedDirCount, contentEntries.length]);
 
   return (
-    <div className="app">
+    <div
+      className="app"
+      onDragOver={allowExternalDrop}
+      onDragLeave={endExternalDrop}
+      onDrop={acceptExternalDrop}
+    >
       <GlyphDefs />
+      {dropping && (
+        <div className="drop-veil">
+          <strong>Drop to open</strong>
+          <span>Files and folders you drop stay in this tab.</span>
+        </div>
+      )}
       <Sidebar
         places={places}
         devices={devices}
@@ -934,6 +1016,7 @@ export default function App() {
         onRemoveFavorite={unfavorite}
         onMoveFavorite={reorderFavorite}
         touchFolderDropIndex={folderTouchDrag?.dropIndex}
+        onOpenFolder={mountFolder}
       />
 
       <main className="main">
@@ -978,7 +1061,7 @@ export default function App() {
               onContextMenu={(c, x, y) => buildMenu(c ? (byId.get(c.id) ?? null) : null, x, y)}
               onBackgroundClick={() => setSelection(new Set())}
               touchFolderDrag={touchFolderDragHandlers}
-              directTouch={isAndroid}
+              directTouch={caps.directTouch}
             />
           ) : (
             <DetailList
@@ -1007,7 +1090,7 @@ export default function App() {
               onRenameCancel={() => setRenamingId(null)}
               onBackgroundClick={() => setSelection(new Set())}
               touchFolderDrag={touchFolderDragHandlers}
-              directTouch={isAndroid}
+              directTouch={caps.directTouch}
             />
           )}
 
@@ -1083,6 +1166,12 @@ function iconsPerRow(): number {
 
 function entryKind(entry: Entry): SearchKind {
   return entry.kind === "dir" || (entry.kind === "symlink" && entry.linkToDir) ? "dir" : "file";
+}
+
+/** Distinguishes a drag from outside — files from the desktop — from the app's
+ * own folder-to-Favorites drag, which carries a custom type instead. */
+function carriesFiles(event: React.DragEvent) {
+  return Array.from(event.dataTransfer.types).includes("Files");
 }
 
 function isContentCandidate(entry: Entry) {
