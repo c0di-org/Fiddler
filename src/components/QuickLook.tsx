@@ -179,11 +179,15 @@ function isSpaceKey(e: KeyboardEvent) {
 function Folder({ entry }: { entry: Entry }) {
   const [cover, setCover] = useState<string | null>(null);
   const [count, setCount] = useState<number | null>(null);
+  const [children, setChildren] = useState<Entry[]>([]);
+  const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
     let alive = true;
     setCover(null);
     setCount(null);
+    setChildren([]);
+    setLoaded(false);
     void ipc
       .thumbnail(entry.path, PICTURE_PX)
       .then((p) => alive && setCover(p))
@@ -192,6 +196,17 @@ function Folder({ entry }: { entry: Entry }) {
       .inspect(entry.path)
       .then((i) => alive && setCount(i.childCount))
       .catch(() => {});
+    // A folder's Quick Look is a compact, visual answer to "what's in here?".
+    // The regular scan already filters Finder detritus and gives us the same
+    // icons as the main browser, so keep the preview faithful to the folder.
+    void ipc
+      .listDir(entry.path, false)
+      .then((listing) => {
+        if (!alive) return;
+        setChildren(listing.entries.slice(0, 20));
+        setLoaded(true);
+      })
+      .catch(() => alive && setLoaded(true));
     return () => {
       alive = false;
     };
@@ -199,18 +214,35 @@ function Folder({ entry }: { entry: Entry }) {
 
   return (
     <div className="ql-folder">
-      {cover ? (
-        <img src={convertFileSrc(cover)} alt="" draggable={false} />
-      ) : (
-        // Drawn big and scaled down by CSS, so it fills whatever the window has
-        // rather than sitting at one fixed size in the middle of it.
-        <FolderGlyph size={512} repo={entry.isRepo} />
-      )}
-      {count !== null && (
-        <p className="ql-note">
-          {count} item{count === 1 ? "" : "s"}
-        </p>
-      )}
+      <div className="ql-folder-art">
+        {cover ? (
+          <img src={convertFileSrc(cover)} alt="" draggable={false} />
+        ) : (
+          // Drawn big and scaled down by CSS, so it fills whatever the window has
+          // rather than sitting at one fixed size in the middle of it.
+          <FolderGlyph size={512} repo={entry.isRepo} name={entry.name} />
+        )}
+        {count !== null && (
+          <p className="ql-note">
+            {count} item{count === 1 ? "" : "s"}
+          </p>
+        )}
+      </div>
+
+      <section className="ql-folder-contents" aria-label="Folder contents">
+        {children.length > 0 ? (
+          <div className="ql-folder-grid">
+            {children.map((child) => (
+              <div className="ql-folder-item" key={child.path} title={child.name}>
+                <FileGlyph entry={child} size={72} />
+                <span>{child.name}</span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          loaded && <p className="ql-note">This folder is empty</p>
+        )}
+      </section>
     </div>
   );
 }

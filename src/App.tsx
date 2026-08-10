@@ -51,6 +51,7 @@ export default function App() {
   const [menu, setMenu] = useState<{ x: number; y: number; items: MenuItem[] } | null>(null);
   const [quickLook, setQuickLook] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  const [selectedDirCount, setSelectedDirCount] = useState<number | null | undefined>(undefined);
   const [tint, setTint] = useState<Tint>(loadTint);
   const [systemTint, setSystemTint] = useState(false);
   const [editor, setEditor] = useState<EditorState | null>(null);
@@ -159,6 +160,26 @@ export default function App() {
     () => [...selection].map((id) => byId.get(id)).filter((t): t is Target => !!t),
     [selection, byId]
   );
+  const selectedDirectory = selected.length === 1 && selected[0].isDir ? selected[0] : null;
+
+  // The bottom bar describes the selection, not the directory being browsed.
+  // Read the selected folder independently so that its count stays useful even
+  // when that folder has not been expanded or opened yet.
+  useEffect(() => {
+    let alive = true;
+    setSelectedDirCount(undefined);
+    if (!selectedDirectory) return () => {
+      alive = false;
+    };
+
+    void ipc
+      .inspect(selectedDirectory.path)
+      .then((info) => alive && setSelectedDirCount(info.childCount))
+      .catch(() => alive && setSelectedDirCount(null));
+    return () => {
+      alive = false;
+    };
+  }, [selectedDirectory?.path]);
 
   const currentBranch = useMemo(() => {
     const root = store.listing?.repoRoot;
@@ -538,12 +559,17 @@ export default function App() {
   }, [store.listing, q]);
 
   const statusText = useMemo(() => {
+    if (selectedDirectory) {
+      if (selectedDirCount === undefined) return `${selectedDirectory.name} — Loading…`;
+      if (selectedDirCount === null) return selectedDirectory.name;
+      return `${selectedDirectory.name} — ${selectedDirCount} item${selectedDirCount === 1 ? "" : "s"}`;
+    }
     if (selected.length === 1 && selected[0].entry && !selected[0].isDir) {
       return `${selected[0].name} — ${formatSize(selected[0].entry.size, false)}`;
     }
     if (selected.length > 1) return `${selected.length} of ${targets.length} selected`;
     return `${targets.length} item${targets.length === 1 ? "" : "s"}`;
-  }, [selected, targets.length]);
+  }, [selected, selectedDirectory, selectedDirCount, targets.length]);
 
   return (
     <div className="app">
@@ -643,7 +669,7 @@ export default function App() {
             competing with navigation for room in the toolbar. */}
         <footer className="statusbar">
           <TintPicker tint={tint} systemAvailable={systemTint} onPick={setTint} />
-          <span className="status-text">{statusText}</span>
+          <span className="status-text" title={statusText}>{statusText}</span>
           {store.view === "icons" && (
             <label className="status-zoom" title="Icon size">
               <GridIcon size={11} />

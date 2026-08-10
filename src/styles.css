@@ -2403,23 +2403,102 @@ li.md-task {
   box-shadow: var(--shadow-2);
 }
 
-/* A folder gets the room a picture would. The glyph is drawn at 512 and scaled
-   here, so it fills the window instead of sitting small in the middle of it. */
+/* A folder gets the room a picture would, plus an at-a-glance inventory of its
+   children. The icon stays deliberately prominent while the adaptive grid uses
+   every remaining column and only ever receives the first twenty entries. */
 .ql-folder {
-  flex-direction: column;
-  gap: 8px;
+  display: grid;
+  grid-template-columns: minmax(260px, 0.95fr) minmax(0, 1.35fr);
+  align-items: stretch;
+  gap: clamp(24px, 5vw, 72px);
+  padding: clamp(28px, 5vw, 72px);
 }
 
-.ql-folder .glyph,
-.ql-folder img {
+.ql-folder-art {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+}
+
+.ql-folder-art .glyph,
+.ql-folder-art img {
   width: auto;
   height: auto;
-  max-width: min(100%, 520px);
-  max-height: min(62vh, 520px);
+  max-width: 100%;
+  max-height: min(58vh, 560px);
 }
 
-.ql-folder img {
+.ql-folder-art .glyph {
+  width: min(100%, 560px);
+  height: auto;
+}
+
+.ql-folder-art img {
   object-fit: contain;
+}
+
+.ql-folder-contents {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: clamp(8px, 1.5vw, 18px);
+  border-left: 1px solid var(--hair-soft);
+}
+
+.ql-folder-grid {
+  width: 100%;
+  max-height: 100%;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(96px, 100%), 1fr));
+  align-content: center;
+  gap: clamp(12px, 2.1vw, 28px);
+}
+
+.ql-folder-item {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 7px;
+  color: var(--fg-dim);
+  font-size: 11px;
+  text-align: center;
+}
+
+.ql-folder-item .glyph {
+  width: clamp(48px, 7vw, 72px);
+  height: clamp(48px, 7vw, 72px);
+}
+
+.ql-folder-item span {
+  width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 680px) {
+  .ql-folder {
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(160px, 0.8fr) minmax(0, 1fr);
+    gap: 18px;
+    padding: 22px;
+  }
+
+  .ql-folder-art .glyph,
+  .ql-folder-art img {
+    max-height: 30vh;
+  }
+
+  .ql-folder-contents {
+    border-top: 1px solid var(--hair-soft);
+    border-left: 0;
+  }
 }
 
 .ql-picture img {
