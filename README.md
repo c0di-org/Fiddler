@@ -52,7 +52,10 @@ Downloads/Documents shortcuts. DeX keyboards accept both `Ctrl` and `⌘` for th
 existing shortcuts.
 
 The Android build keeps browsing, Git status, folder creation, rename, text
-previews and image previews. It opens other file types in installed Android apps.
+previews and image previews. It also has a full-screen text editor: tap the
+new-file button, name a `.txt`, `.md`, `.json` (or any other) file, then write
+and save it in place. Existing text files open in that editor; large or binary
+files still open in their installed Android app.
 System Trash, terminal launching, macOS Quick Look thumbnails, and in-app PDF
 rendering are not available on Android yet.
 
@@ -69,6 +72,7 @@ rendering are not available on Android yet.
 | `↵` / `⌘↵` | Rename / open |
 | `⌘⌫` | Move to Trash |
 | `⇧⌘N` | New folder |
+| `⌘N` | New text file |
 
 ## How it stays fast
 
