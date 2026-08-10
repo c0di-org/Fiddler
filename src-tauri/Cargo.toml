@@ -3,7 +3,8 @@ name = "fiddler"
 version = "0.1.0"
 description = "A git-native file browser"
 edition = "2021"
-rust-version = "1.77"
+# 1.85 is mtp-rs's floor; everything else here still builds on 1.77.
+rust-version = "1.85"
 
 [lib]
 name = "fiddler_lib"
@@ -41,8 +42,23 @@ objc2-core-text = { version = "0.3", default-features = false, features = ["std"
 objc2-image-io = { version = "0.3", default-features = false, features = ["std", "CGImageSource", "CGImageDestination", "objc2-core-graphics"] }
 objc2-quick-look-thumbnailing = { version = "0.3", default-features = false, features = ["std", "block2", "QLThumbnailGenerator", "QLThumbnailGenerationRequest", "QLThumbnailRepresentation", "objc2-core-foundation", "objc2-core-graphics"] }
 
+# MTP is how a phone that isn't running Fiddler shows up: plug in a cable and
+# it's there, no pairing, no app on the other end. `mtp-rs` is pure Rust over
+# `nusb` — no libmtp, no libusb, no `-sys` crate — so it cross-compiles with the
+# rest of the tree and adds nothing to the build beyond Rust. It also exposes the
+# two primitives this UI is built on: byte-range reads, which turn a 4 MB photo
+# into a 256 KB thumbnail fetch, and windowed downloads, which hand the device's
+# single PTP session back between windows so browsing stays live during a copy.
+#
+# It needs an async runtime, but only for itself: the service owns one
+# current-thread tokio runtime on a worker thread and the rest of Fiddler stays
+# synchronous.
 [target.'cfg(not(target_os = "android"))'.dependencies]
 trash = "5"
+mtp-rs = "0.30"
+tokio = { version = "1", features = ["rt", "time", "sync", "macros"] }
+futures = "0.3"
+bytes = "1"
 
 # Android's PdfRenderer is part of the OS, is hardware-adjacent, and avoids
 # carrying a large PDF engine in every APK. These two tiny bindings are only
@@ -50,6 +66,13 @@ trash = "5"
 [target.'cfg(target_os = "android")'.dependencies]
 jni = "0.21"
 ndk-context = "0.1"
+
+# mtp-rs can back a device with a local directory instead of a cable, so the
+# listing path, the handle cache, and the stage machine are all testable without
+# a phone plugged in. Dev-only: `cargo build` never pulls this in.
+[target.'cfg(not(target_os = "android"))'.dev-dependencies]
+mtp-rs = { version = "0.30", features = ["virtual-device"] }
+tokio = { version = "1", features = ["rt", "time", "sync", "macros"] }
 
 [profile.release]
 codegen-units = 1

@@ -1,8 +1,10 @@
 import { useState } from "react";
 
 import { FAVORITE_DRAG_TYPE, FOLDER_DRAG_TYPE, currentFolderDrag } from "../favorites";
-import type { Favorite, PeerDevice, Place } from "../types";
-import { CloseIcon, DeviceIcon, FolderIcon, HeartIcon, LaptopIcon, LockIcon, SparkIcon, placeIcon } from "./icons";
+import type { Favorite, PeerDevice, Place, UsbDevice } from "../types";
+import { connectionNotice } from "../usb";
+import { BoltIcon, CableIcon, CloseIcon, DeviceIcon, FolderIcon, HeartIcon, LaptopIcon, LockIcon, SparkIcon, placeIcon } from "./icons";
+import { UsbStorageRow } from "./UsbPanel";
 
 interface Props {
   places: Place[];
@@ -17,6 +19,9 @@ interface Props {
   devices: PeerDevice[];
   onOpenDevice: (device: PeerDevice) => void;
   selfDeviceName: string | null;
+  /** Devices on the end of a cable. No pairing, so these need no lock state. */
+  usb: UsbDevice[];
+  onOpenUsb: (device: UsbDevice) => void;
 }
 
 type DragKind = "folder" | "favorite";
@@ -56,6 +61,8 @@ export function Sidebar({
   devices,
   onOpenDevice,
   selfDeviceName,
+  usb,
+  onOpenUsb,
 }: Props) {
   const [dropIndex, setDropIndex] = useState<number | null>(null);
   const [draggingFavorite, setDraggingFavorite] = useState(false);
@@ -97,6 +104,52 @@ export function Sidebar({
       {places.map((place) => (
         <PlaceButton key={place.path} place={place} active={place.path === current} onPick={onPick} />
       ))}
+
+      {usb.length > 0 && (
+        <div className="sidebar-devices">
+          <SidebarHeading icon={<CableIcon size={13} />}>Connected</SidebarHeading>
+          {usb.map((device) => {
+            const notice = connectionNotice(device);
+            const open = current.startsWith(`mtp://${device.serial}/`);
+            return (
+              <div key={device.serial} className="usb-device">
+                <button
+                  className={`place device ${open && device.storages.length <= 1 ? "active" : ""}`}
+                  onClick={() => onOpenUsb(device)}
+                  title={notice ? notice.title : `Browse ${device.name}`}
+                >
+                  <span className="place-icon">
+                    <DeviceIcon size={18} />
+                  </span>
+                  <span className="place-label">{device.name}</span>
+                  {device.throttled && device.stage === "ready" && (
+                    <BoltIcon size={11} className="usb-slow" />
+                  )}
+                </button>
+                {/* The stage sits under the name rather than replacing the row,
+                    so the device never disappears while it is still arriving. */}
+                {notice && (
+                  <div className={`usb-stage ${notice.resolves ? "waiting" : "stopped"}`}>
+                    {notice.resolves && <span className="usb-pulse" />}
+                    {notice.title}
+                  </div>
+                )}
+                {/* Only worth listing storages when there is a choice to make. */}
+                {device.storages.length > 1 &&
+                  device.storages.map((storage) => (
+                    <UsbStorageRow
+                      key={storage.id}
+                      device={device}
+                      storage={storage}
+                      active={current.startsWith(`mtp://${device.serial}/${storage.id}`)}
+                      onPick={onPick}
+                    />
+                  ))}
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       {devices.length > 0 && <div className="sidebar-devices">
         <SidebarHeading icon={<DeviceIcon size={13} />}>Devices</SidebarHeading>

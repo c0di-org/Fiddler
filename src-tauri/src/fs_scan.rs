@@ -102,7 +102,7 @@ pub fn scan(dir: &Path, opts: &ScanOpts, cache: &GitCache) -> Result<Vec<Entry>,
 
 /// Finder ordering: directories first, then a natural (digit-aware) case-insensitive
 /// compare so `file2` sorts before `file10`.
-fn cmp_entries(a: &Entry, b: &Entry) -> Ordering {
+pub(crate) fn cmp_entries(a: &Entry, b: &Entry) -> Ordering {
     let a_dir = matches!(a.kind, Kind::Dir) || (matches!(a.kind, Kind::Symlink) && a.link_to_dir);
     let b_dir = matches!(b.kind, Kind::Dir) || (matches!(b.kind, Kind::Symlink) && b.link_to_dir);
     b_dir

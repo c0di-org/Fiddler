@@ -9,6 +9,8 @@ use crate::fs_scan::{self, ScanOpts};
 use crate::git::status::RepoStatus;
 use crate::git::{self, GitCache};
 use crate::model::{DirListing, Entry, Kind, Place, RepoInfo, Rollup, WorktreeInfo};
+#[cfg(not(target_os = "android"))]
+use crate::mtp::{self, MtpService, UsbDevice};
 use crate::nearby::{self, NearbySearch};
 use crate::peers::{self, PairingInfo, PeerDevice, PeerService};
 use crate::thumb_pool::{ThumbPool, ThumbReady, ThumbReq};
@@ -19,6 +21,8 @@ pub struct AppState {
     pub watcher: Arc<FsWatcher>,
     pub thumbs: Arc<ThumbPool>,
     pub peers: Arc<PeerService>,
+    #[cfg(not(target_os = "android"))]
+    pub usb: Arc<MtpService>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -56,6 +60,15 @@ pub async fn list_dir(
 ) -> Result<DirListing, String> {
     if let Some((device, remote_path)) = peers::parse_remote_path(&path) {
         return state.peers.remote_listing(&device, &remote_path, show_hidden);
+    }
+    // A USB device listing crosses a cable and a worker thread, so it goes to the
+    // blocking pool rather than parking the async executor behind a phone.
+    #[cfg(not(target_os = "android"))]
+    if mtp::path::parse(&path).is_some() {
+        let usb = state.usb.clone();
+        return tauri::async_runtime::spawn_blocking(move || usb.listing(&path, show_hidden))
+            .await
+            .map_err(|e| e.to_string())?;
     }
     let cache = state.cache.clone();
     let watcher = state.watcher.clone();
@@ -141,6 +154,14 @@ pub async fn list_dir(
 /// Devices discovered on the same local network. Presence alone grants no file access.
 #[tauri::command]
 pub fn nearby_devices(state: State<'_, AppState>) -> Vec<PeerDevice> { state.peers.devices() }
+
+/// Devices attached by USB, each with the stage it has reached. Unlike
+/// `nearby_devices` there is nothing to pair: the cable is the authorisation.
+/// A device shows up here from the moment it enumerates, including while it is
+/// still waiting to be unlocked, which is the point.
+#[cfg(not(target_os = "android"))]
+#[tauri::command]
+pub fn usb_devices(state: State<'_, AppState>) -> Vec<UsbDevice> { state.usb.devices() }
 
 /// Show this short code on the device that is being browsed for the first time.
 #[tauri::command]

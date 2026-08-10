@@ -131,6 +131,47 @@ export interface PeerDevice {
   platform: "android" | "macos" | "desktop" | "";
 }
 
+/** A storage on a USB device: internal memory, or an SD card. */
+export interface UsbStorage {
+  id: number;
+  description: string;
+  freeSpace: number;
+  totalCapacity: number;
+  removable: boolean;
+}
+
+/**
+ * How far a USB device has got between being plugged in and being browsable.
+ *
+ * `awaitingGrant` is the one that matters: the phone is open and has told us its
+ * model, but is exposing no storages because it's locked or still set to
+ * charge-only. Other MTP apps report that as "device not detected", which is
+ * both wrong and impossible to act on.
+ */
+export type UsbStage =
+  | { stage: "connecting" }
+  | { stage: "blocked"; owner: string | null; ownerPid: number | null }
+  | { stage: "awaitingGrant" }
+  | { stage: "ready" }
+  | { stage: "failed"; message: string };
+
+/** A device attached by cable. Unlike a PeerDevice there is nothing to pair. */
+export type UsbDevice = UsbStage & {
+  serial: string;
+  name: string;
+  vendorId: number;
+  productId: number;
+  storages: UsbStorage[];
+  /** Negotiated link, named as cable packaging does: "USB 2.0", "USB 3.2 Gen 1". */
+  link: string | null;
+  linkMbps: number | null;
+  /**
+   * The link came up at USB 2.0 or slower. Not a claim about the cable: USB only
+   * tells us the speed both ends agreed on, never which end was the limit.
+   */
+  throttled: boolean;
+};
+
 export interface PairingInfo {
   id: string;
   name: string;

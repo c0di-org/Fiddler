@@ -4,6 +4,10 @@ mod content_search;
 mod fs_scan;
 mod git;
 mod model;
+// USB devices that aren't running Fiddler. Android has no host-side USB stack
+// to speak MTP with, so this is a desktop capability only.
+#[cfg(not(target_os = "android"))]
+mod mtp;
 mod nearby;
 mod peers;
 #[cfg(target_os = "macos")]
@@ -40,11 +44,15 @@ pub fn run() {
             let thumbs = ThumbPool::start(app.handle().clone());
             let peer_dir = app.path().app_data_dir().map_err(|e| e.to_string())?.join("peers");
             let peers = peers::PeerService::start(peer_dir, cache.clone())?;
+            #[cfg(not(target_os = "android"))]
+            let usb = mtp::MtpService::start(app.handle().clone());
             app.manage(AppState {
                 cache,
                 watcher,
                 thumbs,
                 peers,
+                #[cfg(not(target_os = "android"))]
+                usb,
             });
             Ok(())
         })
@@ -52,6 +60,8 @@ pub fn run() {
             commands::list_dir,
             commands::nearby_entries,
             commands::nearby_devices,
+            #[cfg(not(target_os = "android"))]
+            commands::usb_devices,
             commands::nearby_pairing_info,
             commands::pair_nearby_device,
             commands::search_contents,

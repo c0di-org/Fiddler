@@ -337,6 +337,119 @@ button {
 .place.device { position: relative; }
 .device-lock { margin-left: auto; color: var(--fg-faint); }
 .device-self { margin: 5px 6px 1px; color: var(--fg-faint); font-size: 11px; }
+
+/* ------------------------------------------------------------------ usb --
+ *
+ * A device on a cable is drawn as one block: the name, whatever stage it has
+ * reached, and its storages. The stage line sits *under* the name rather than
+ * replacing it, so a phone that is still being unlocked never vanishes and
+ * reappears — it just stops explaining itself once it's ready.
+ */
+.usb-device { margin-bottom: 2px; }
+
+.usb-slow { margin-left: auto; color: var(--git-modified); }
+
+.usb-stage {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 1px 6px 4px 30px;
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--fg-dim);
+}
+.usb-stage.stopped { color: var(--git-conflict); }
+
+/* A slow, soft pulse: this is a thing that is still happening, not an alarm. */
+.usb-pulse {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: usb-breathe 1.9s ease-in-out infinite;
+}
+@keyframes usb-breathe {
+  0%, 100% { opacity: 0.28; transform: scale(0.82); }
+  50% { opacity: 1; transform: scale(1); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .usb-pulse { animation: none; opacity: 0.8; }
+}
+
+.usb-storage { height: auto; padding-top: 5px; padding-bottom: 5px; }
+.usb-storage-body { display: flex; flex-direction: column; gap: 3px; min-width: 0; flex: 1; }
+.usb-storage-free { font-size: 10.5px; color: var(--fg-faint); }
+
+.usb-meter {
+  display: block;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--fill);
+  overflow: hidden;
+}
+.usb-meter-fill {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+  background: linear-gradient(90deg, var(--accent), var(--accent-2));
+}
+
+/* The waiting room: what fills the content area for a device that is still
+   arriving. Centred and quiet, because there is nothing to do here. */
+.usb-panel {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  height: 100%;
+  padding: 0 44px;
+  text-align: center;
+}
+.usb-panel-glyph { color: var(--fg-faint); }
+.usb-panel-glyph.waiting { animation: usb-breathe 2.4s ease-in-out infinite; }
+.usb-panel-glyph.stopped { color: var(--git-conflict); }
+.usb-panel h2 { margin: 0; font-size: 15px; font-weight: 600; }
+.usb-panel p { margin: 0; max-width: 42ch; font-size: 12.5px; line-height: 1.5; color: var(--fg-dim); }
+.usb-panel-live {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--fg-faint);
+}
+
+/* The link banner. Amber rather than red: this is information, not a fault. */
+.usb-link-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  margin: 8px 10px 0;
+  padding: 9px 11px;
+  border: 1px solid color-mix(in srgb, var(--git-modified) 30%, transparent);
+  border-radius: var(--r-md);
+  background: color-mix(in srgb, var(--git-modified) 9%, var(--surface-2));
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+.usb-link-banner > svg { flex: none; margin-top: 1px; color: var(--git-modified); }
+.usb-link-copy { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.usb-link-copy strong { font-weight: 600; }
+.usb-link-copy span { color: var(--fg-dim); }
+.usb-link-dismiss {
+  flex: none;
+  align-self: center;
+  padding: 4px 9px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: var(--fill);
+  color: var(--fg);
+  font: inherit;
+  font-size: 11px;
+}
+.usb-link-dismiss:hover { background: var(--fill-hover); }
 .crumb svg { vertical-align: -2px; margin-right: 4px; }
 
 .favorites-list {

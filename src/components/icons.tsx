@@ -169,6 +169,26 @@ export const DeviceIcon = stroked(
   </>
 );
 
+/** The cable itself, heading the section for devices that arrived over one. */
+export const CableIcon = stroked(
+  <>
+    <path d="M2.5 13.5 6 10" />
+    <path d="M10 6l3.5-3.5" />
+    <rect x="5.4" y="5.4" width="5.2" height="5.2" rx="1.2" transform="rotate(45 8 8)" />
+  </>
+);
+
+/** Link speed. Shown when a device negotiated USB 2.0 or slower. */
+export const BoltIcon = stroked(<path d="M9 1.75 3.75 9h3.5l-.75 5.25L12.25 7h-3.5Z" />);
+
+/** A removable storage, so an SD card doesn't read as a second phone. */
+export const SdCardIcon = stroked(
+  <>
+    <path d="M4 1.75h5.4L12 4.4v9.85H4Z" />
+    <path d="M6.4 3.6v2M8 3.6v2M9.6 3.6v2" />
+  </>
+);
+
 export const LaptopIcon = stroked(
   <>
     <rect x="2.75" y="3" width="10.5" height="7.25" rx=".9" />

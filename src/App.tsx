@@ -11,6 +11,7 @@ import { Sidebar } from "./components/Sidebar";
 import { TintPicker } from "./components/TintPicker";
 import { TextEditor } from "./components/TextEditor";
 import { Toolbar } from "./components/Toolbar";
+import { UsbConnecting, UsbLinkBanner } from "./components/UsbPanel";
 import type { FolderTouchDragHandlers } from "./components/folder-touch-drag";
 import { GridIcon } from "./components/icons";
 import { addFavorite, loadFavorites, moveFavorite, saveFavorites } from "./favorites";
@@ -19,7 +20,7 @@ import * as ipc from "./ipc";
 import { contentTerms, prepareSearch, search, type SearchKind, type SearchRecord } from "./search";
 import { TreeStore, type Row } from "./store/tree";
 import { applyTint, hasSystemAccent, loadTint, saveTint, watchTint, type Tint } from "./tint";
-import type { ContentSearch, Entry, Favorite, NearbyEntry, NearbySearch, PairingInfo, PeerDevice, Place, WorktreeInfo } from "./types";
+import type { ContentSearch, Entry, Favorite, NearbyEntry, NearbySearch, PairingInfo, PeerDevice, Place, UsbDevice, WorktreeInfo } from "./types";
 
 const store = new TreeStore();
 const isAndroid = /Android/i.test(navigator.userAgent);
@@ -72,6 +73,9 @@ export default function App() {
   const [revealSelection, setRevealSelection] = useState(0);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [filter, setFilter] = useState("");
+  const [usb, setUsb] = useState<UsbDevice[]>([]);
+  /** Devices whose slow-link banner has been dismissed, by serial. */
+  const [linkSeen, setLinkSeen] = useState<Set<string>>(new Set());
   const [nearby, setNearby] = useState<NearbyState | null>(null);
   const [nearbyBusy, setNearbyBusy] = useState(false);
   const [content, setContent] = useState<ContentState | null>(null);
@@ -123,6 +127,16 @@ export default function App() {
     void ipc.nearbyPairingInfo().then((info) => alive && setPairingInfo(info)).catch(() => {});
     const timer = window.setInterval(refresh, 2500);
     return () => { alive = false; window.clearInterval(timer); };
+  }, []);
+
+  // USB is event-driven rather than polled: the backend already watches the bus
+  // and only emits when a stage actually changes, so an idle phone on the desk
+  // costs nothing and an unlocked one appears without anyone clicking refresh.
+  useEffect(() => {
+    let alive = true;
+    void ipc.usbDevices().then((found) => alive && setUsb(found)).catch(() => {});
+    const stop = ipc.onUsbDevices((found) => alive && setUsb(found));
+    return () => { alive = false; void stop.then((off) => off()); };
   }, []);
 
   // The accent follows the OS unless overridden, and has to be re-derived when
@@ -419,6 +433,20 @@ export default function App() {
     }
     await go(`fiddler://${device.id}/`);
   }, [flash, go]);
+
+  // No pairing step: the cable is the authorisation. A device with exactly one
+  // storage skips straight into it, because picking from a list of one is a
+  // click that teaches nobody anything.
+  const openUsb = useCallback(async (device: UsbDevice) => {
+    const only = device.storages.length === 1 ? device.storages[0] : null;
+    await go(only ? `mtp://${device.serial}/${only.id}` : `mtp://${device.serial}/`);
+  }, [go]);
+
+  /** The USB device the current path belongs to, if any. */
+  const currentUsb = useMemo(
+    () => usb.find((device) => store.path.startsWith(`mtp://${device.serial}/`)) ?? null,
+    [usb, store.path]
+  );
 
   const favorite = useCallback((item: Favorite, at?: number) => {
     setFavorites((current) => addFavorite(current, item, at));
@@ -930,6 +958,8 @@ export default function App() {
         current={store.path}
         onPick={(p) => void go(p)}
         onOpenDevice={(device) => void openDevice(device)}
+        usb={usb}
+        onOpenUsb={(device) => void openUsb(device)}
         onAddFavorite={favorite}
         onRemoveFavorite={unfavorite}
         onMoveFavorite={reorderFavorite}
@@ -959,8 +989,19 @@ export default function App() {
           onTogglePreview={() => store.togglePreview()}
         />
 
+        {currentUsb && currentUsb.stage === "ready" && !linkSeen.has(currentUsb.serial) && (
+          <UsbLinkBanner
+            device={currentUsb}
+            onDismiss={() => setLinkSeen((seen) => new Set(seen).add(currentUsb.serial))}
+          />
+        )}
+
         <div className="body">
-          {store.view === "icons" ? (
+          {/* A device that isn't browsable yet takes over the content area
+              instead of showing an empty folder that looks like a failure. */}
+          {currentUsb && currentUsb.stage !== "ready" ? (
+            <UsbConnecting device={currentUsb} />
+          ) : store.view === "icons" ? (
             <IconGrid
               emptyMessage={emptyMessage}
               loaded={store.loaded}

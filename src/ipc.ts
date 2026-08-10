@@ -14,6 +14,7 @@ import type {
   TextHead,
   ThumbReady,
   ThumbReq,
+  UsbDevice,
 } from "./types";
 
 export const listDir = (path: string, showHidden: boolean) =>
@@ -33,6 +34,17 @@ export const refreshRepo = (root: string) => invoke<void>("refresh_repo", { root
 export const sidebarPlaces = () => invoke<Place[]>("sidebar_places");
 
 export const nearbyDevices = () => invoke<PeerDevice[]>("nearby_devices");
+
+/** Devices attached by cable, each with the stage it has reached. */
+export const usbDevices = () => invoke<UsbDevice[]>("usb_devices");
+
+/**
+ * Fires whenever a device's stage changes — plugged in, unlocked, granted,
+ * unplugged. This is what lets the sidebar advance on its own while someone is
+ * looking at their phone rather than at Fiddler.
+ */
+export const onUsbDevices = (fn: (devices: UsbDevice[]) => void) =>
+  listen<UsbDevice[]>("fiddler:usb", (event) => fn(event.payload));
 export const nearbyPairingInfo = () => invoke<PairingInfo>("nearby_pairing_info");
 export const pairNearbyDevice = (id: string, code: string) =>
   invoke<void>("pair_nearby_device", { id, code });
