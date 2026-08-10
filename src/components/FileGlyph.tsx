@@ -55,7 +55,7 @@ function FileArt({
 }: {
   name: string;
   size: number;
-  /** The foot of the sheet is hidden, so the lettering down there is dropped
+  /** The foot of the sheet is hidden, so the ruled lines down there are dropped
    *  rather than sliced in half by whatever covers it. */
   tucked?: boolean;
 }) {
@@ -64,8 +64,11 @@ function FileArt({
   // The band is the only thing telling one file from another in a list row, so
   // it survives all the way down; only its lettering needs room to be legible.
   const showBand = ext.length > 0 && ext.length <= 6;
-  const showLines = showBand && size >= 44;
-  const showText = showLines && !tucked;
+  // Lettering is worth drawing well before the sheet has room for ruled lines:
+  // in a folder's fan each sheet is barely a third of the icon, and the type is
+  // the whole reason it's there.
+  const showText = showBand && size >= 28;
+  const showLines = showBand && size >= 44 && !tucked;
   // Shrink the type text rather than truncating it — "SWIF" reads as a typo.
   const labelSize = ext.length <= 3 ? 9.4 : ext.length === 4 ? 8 : 6.6;
 
@@ -78,16 +81,16 @@ function FileArt({
       />
       <path d="M29.5 4 39 13.5h-6.5a3 3 0 0 1-3-3Z" className="fold" />
 
-      {/* A colour band tucked into the sheet's bottom corners: readable at a
-          glance across a grid, and the thing carrying the file's type. */}
-      {showBand && <path d="M9 29h30v12a3 3 0 0 1-3 3H12a3 3 0 0 1-3-3Z" className="band" />}
-
-      {showLines && <path d="M15 17h18M15 23h12" className="lines" />}
+      {/* A colour band across the head of the sheet, hung off the fold's lower
+          edge: readable at a glance across a grid, the thing carrying the file's
+          type, and — being up here — the part still showing when a sheet is
+          fanned out of a folder with its foot behind the flap. */}
+      {showBand && <path d="M9 13.5h30v13H9Z" className="band" />}
 
       {showText && (
         <text
           x="24"
-          y="39.4"
+          y="23.3"
           textAnchor="middle"
           className="band-text"
           style={{ fontSize: labelSize }}
@@ -95,6 +98,8 @@ function FileArt({
           {ext.toUpperCase()}
         </text>
       )}
+
+      {showLines && <path d="M15 32h18M15 38h12" className="lines" />}
 
       {!showBand && size >= 44 && <path d="M15 22h18M15 29h18M15 36h11" className="lines" />}
     </>
@@ -211,11 +216,11 @@ const PEEK_MIN = 48;
 const PEEK_CARD = { x: 16.5, y: 2.5, w: 15, h: 18 } as const;
 /**
  * An icon is square and needs no crop, so it stands in the same slot without the
- * print's extra height. It rides high in it on purpose: a sheet carries its type
- * colour across the bottom third, and tucked any deeper every file in the fan
- * would come out the same blank white.
+ * print's extra height — head aligned with a print's, so a fan of the two lines
+ * up. What the flap takes is the sheet's foot; its type band is up at the head,
+ * and stays showing.
  */
-const PEEK_ICON = { x: 16.5, y: 0.5, size: 15 } as const;
+const PEEK_ICON = { x: 16.5, y: 2.5, size: 15 } as const;
 /** The pivot the fan swings around, well below the flap's top edge. */
 const PIVOT = { x: 24, y: 30 } as const;
 
@@ -422,6 +427,7 @@ export function GlyphDefs() {
         <CatGradient id="g-media" from="#fb7185" to="#d61f60" />
         <CatGradient id="g-doc" from="#4facff" to="#0060df" />
         <CatGradient id="g-archive" from="#fbbf4d" to="#e07b00" />
+        <CatGradient id="g-link" from="#2dd4bf" to="#0d8a80" />
         <CatGradient id="g-plain" from="#b4b4bb" to="#84848c" />
       </defs>
     </svg>
