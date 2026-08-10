@@ -2111,6 +2111,32 @@ li.md-task {
   padding: 24px;
 }
 
+.ql-media {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 22px;
+  padding: 24px;
+}
+
+.ql-media audio {
+  width: min(100%, 560px);
+}
+
+.ql-video {
+  padding: 18px;
+}
+
+.ql-video video {
+  max-width: 100%;
+  max-height: 100%;
+  border-radius: var(--r-sm);
+  background: #000;
+  box-shadow: var(--shadow-2);
+}
+
 /* A folder gets the room a picture would. The glyph is drawn at 512 and scaled
    here, so it fills the window instead of sitting small in the middle of it. */
 .ql-folder {

@@ -51,10 +51,11 @@ it so the app can browse shared storage, then use **Internal storage** or the
 Downloads/Documents shortcuts. DeX keyboards accept both `Ctrl` and `⌘` for the
 existing shortcuts.
 
-The Android build keeps browsing, Git status, folder creation, rename, text
-previews and image previews. It opens other file types in installed Android apps.
-System Trash, terminal launching, macOS Quick Look thumbnails, and in-app PDF
-rendering are not available on Android yet.
+The Android build keeps browsing, Git status, folder creation, rename, bounded
+text previews, image previews, cached in-app PDF pages, and streaming audio/video
+previews for formats Android can decode. Other binary formats still open in their
+installed Android apps. System Trash, terminal launching, and macOS Quick Look
+thumbnails are not available on Android.
 
 ## Keys
 
