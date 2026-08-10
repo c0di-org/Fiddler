@@ -24,6 +24,8 @@ export const {
   nearbyDevices,
   nearbyPairingInfo,
   pairNearbyDevice,
+  nearbyRequests,
+  respondNearbyRequest,
   usbDevices,
   onUsbDevices,
   onUsbEntries,

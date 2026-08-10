@@ -143,6 +143,10 @@ const backend: Backend = {
 
   pairNearbyDevice: unavailable("Pairing"),
 
+  nearbyRequests: async () => [],
+
+  respondNearbyRequest: unavailable("Pairing"),
+
   // A browser tab is not a USB host, so there is never a device to report and
   // never a stage to change. Empty and silent rather than `unavailable`: the
   // sidebar asks for these unprompted on every start, and a rejected promise

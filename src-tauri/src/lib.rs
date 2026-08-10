@@ -66,6 +66,8 @@ pub fn run() {
             commands::release_usb_device,
             commands::nearby_pairing_info,
             commands::pair_nearby_device,
+            commands::nearby_requests,
+            commands::respond_nearby_request,
             commands::search_contents,
             commands::repo_info,
             commands::refresh_repo,

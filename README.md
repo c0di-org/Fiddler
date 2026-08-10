@@ -102,12 +102,19 @@ Android.
 ## Nearby devices
 
 When Fiddler is open on a Mac and Android device on the same Wi-Fi network, the
-phone appears under **Devices** within a few seconds. The first time, enter the
-six-digit code shown in Fiddler on the device being shared; later visits are
-immediate. The paired Android device is a normal navigable Fiddler location,
-using the same list/icon views, folder navigation, search, and bounded text
-reading as a local folder. Discovery shares only a device name and temporary
-LAN address; storage is never listed until the device is explicitly paired.
+phone appears under **Devices** within a few seconds. Pairing is two taps and no
+code: tap the device you want, and a card appears on *that* device naming yours
+and asking whether it may browse. Nothing is readable until someone taps Allow
+there, and later visits are immediate. The paired device is then a normal
+navigable Fiddler location, using the same list/icon views, folder navigation,
+search, and bounded text reading as a local folder.
+
+Being visible on the network authorises nothing. A broadcast is trivial to forge
+on a shared network, so discovery decides only what appears in a sidebar —
+sharing a device name and a temporary LAN address — while the gate on anyone's
+files is the tap. An ask is refused unless it arrives from an address Fiddler
+can currently see broadcasting, it expires unanswered after a minute, and it is
+answered again from scratch the next time that device asks.
 
 ## Keys
 

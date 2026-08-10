@@ -22,14 +22,57 @@ use crate::git::GitCache;
 /// Quiet period before a burst of filesystem events is turned into one refresh.
 const DEBOUNCE: Duration = Duration::from_millis(220);
 /// Upper bound on live watches, so a session that wanders across hundreds of
-/// directories cannot exhaust the process's descriptor budget.
+/// directories cannot exhaust the process's descriptor budget. Reaching it drops
+/// the least recently visited watch rather than refusing new ones — going quiet
+/// about the folder someone is actually looking at is the worse failure.
 const MAX_WATCHES: usize = 192;
 
 pub struct FsWatcher {
     inner: Mutex<Option<RecommendedWatcher>>,
-    /// Paths currently watched, and whether the watch is recursive.
-    watched: Mutex<HashMap<PathBuf, bool>>,
+    watched: Mutex<Watched>,
     dirty_tx: Sender<PathBuf>,
+}
+
+/// Live watches, in the order they were last asked for.
+#[derive(Default)]
+struct Watched {
+    /// Paths currently watched, and whether the watch is recursive.
+    modes: HashMap<PathBuf, bool>,
+    /// The same paths, least recently visited first.
+    order: Vec<PathBuf>,
+}
+
+impl Watched {
+    fn touch(&mut self, dir: &Path) {
+        if let Some(at) = self.order.iter().position(|p| p == dir) {
+            let path = self.order.remove(at);
+            self.order.push(path);
+        }
+    }
+
+    fn insert(&mut self, dir: PathBuf, recursive: bool) {
+        self.modes.insert(dir.clone(), recursive);
+        self.order.retain(|p| p != &dir);
+        self.order.push(dir);
+    }
+
+    /// The watch to give up when we're full: the oldest plain directory, or the
+    /// oldest of anything if every watch is a repo. Never `keep`, which is the
+    /// folder being opened right now.
+    fn victim(&self, keep: &Path) -> Option<PathBuf> {
+        let oldest = |recursive: bool| {
+            self.order
+                .iter()
+                .find(|p| p.as_path() != keep && self.modes.get(*p) == Some(&recursive))
+                .cloned()
+        };
+        oldest(false).or_else(|| oldest(true))
+    }
+
+    fn remove(&mut self, dir: &Path) {
+        self.modes.remove(dir);
+        self.order.retain(|p| p.as_path() != dir);
+    }
 }
 
 impl FsWatcher {
@@ -48,7 +91,7 @@ impl FsWatcher {
 
         let me = Arc::new(FsWatcher {
             inner: Mutex::new(watcher),
-            watched: Mutex::new(HashMap::new()),
+            watched: Mutex::new(Watched::default()),
             dirty_tx,
         });
 
@@ -64,18 +107,21 @@ impl FsWatcher {
     pub fn watch(&self, dir: &Path, recursive: bool) {
         let mut watched = self.watched.lock().unwrap();
 
-        // Already covered by this or a broader watch?
-        match watched.get(dir) {
-            Some(&existing) if existing || !recursive => return,
+        // Already covered by this or a broader watch? Still worth marking as
+        // visited, so the folder someone keeps returning to is never the one
+        // given up when the budget runs out.
+        match watched.modes.get(dir) {
+            Some(&existing) if existing || !recursive => {
+                watched.touch(dir);
+                return;
+            }
             _ => {}
         }
         if watched
+            .modes
             .iter()
             .any(|(p, &rec)| rec && p != dir && dir.starts_with(p))
         {
-            return;
-        }
-        if watched.len() >= MAX_WATCHES {
             return;
         }
 
@@ -86,10 +132,16 @@ impl FsWatcher {
         };
 
         let mut guard = self.inner.lock().unwrap();
-        if let Some(w) = guard.as_mut() {
-            if w.watch(dir, mode).is_ok() {
-                watched.insert(dir.to_path_buf(), recursive);
-            }
+        let Some(w) = guard.as_mut() else { return };
+
+        while watched.modes.len() >= MAX_WATCHES {
+            let Some(victim) = watched.victim(dir) else { break };
+            let _ = w.unwatch(&victim);
+            watched.remove(&victim);
+        }
+
+        if w.watch(dir, mode).is_ok() {
+            watched.insert(dir.to_path_buf(), recursive);
         }
     }
 
@@ -225,4 +277,45 @@ fn is_noise(path: &Path, repo: &crate::git::discover::RepoPaths, cache: &GitCach
     let rel = rel.to_string_lossy();
     let (code, _) = st.lookup(&rel, path.is_dir());
     code.map(|c| c.is_ignored()).unwrap_or(false)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_least_recently_visited_plain_folder_is_given_up_first() {
+        let mut watched = Watched::default();
+        watched.insert(PathBuf::from("/repo"), true);
+        watched.insert(PathBuf::from("/a"), false);
+        watched.insert(PathBuf::from("/b"), false);
+
+        assert_eq!(watched.victim(Path::new("/new")), Some(PathBuf::from("/a")));
+
+        // Revisiting /a moves it to the back of the queue.
+        watched.touch(Path::new("/a"));
+        assert_eq!(watched.victim(Path::new("/new")), Some(PathBuf::from("/b")));
+
+        // The folder being opened is never the one dropped.
+        assert_eq!(watched.victim(Path::new("/b")), Some(PathBuf::from("/a")));
+    }
+
+    #[test]
+    fn a_repo_watch_is_only_given_up_when_nothing_else_is_left() {
+        let mut watched = Watched::default();
+        watched.insert(PathBuf::from("/repo"), true);
+        watched.insert(PathBuf::from("/other-repo"), true);
+        watched.insert(PathBuf::from("/plain"), false);
+
+        assert_eq!(watched.victim(Path::new("/new")), Some(PathBuf::from("/plain")));
+        watched.remove(Path::new("/plain"));
+        assert_eq!(watched.victim(Path::new("/new")), Some(PathBuf::from("/repo")));
+    }
+
+    #[test]
+    fn removing_the_only_watch_leaves_nothing_to_give_up() {
+        let mut watched = Watched::default();
+        watched.insert(PathBuf::from("/only"), false);
+        assert_eq!(watched.victim(Path::new("/only")), None);
+    }
 }

@@ -13,7 +13,7 @@ use crate::model::{DirListing, Entry, Kind, Place, RepoInfo, Rollup, WorktreeInf
 #[cfg(not(target_os = "android"))]
 use crate::mtp::{self, MtpService, UsbDevice};
 use crate::nearby::{self, NearbySearch};
-use crate::peers::{self, PairingInfo, PeerDevice, PeerService};
+use crate::peers::{self, PairOutcome, PairRequest, PairingInfo, PeerDevice, PeerService};
 use crate::thumb_pool::{ThumbPool, ThumbReady, ThumbReq};
 use crate::watcher::FsWatcher;
 
@@ -59,8 +59,15 @@ pub async fn list_dir(
     path: String,
     show_hidden: bool,
 ) -> Result<DirListing, String> {
+    // A paired device is at the end of a network round trip, so it belongs on the
+    // blocking pool for the same reason a cable does.
     if let Some((device, remote_path)) = peers::parse_remote_path(&path) {
-        return state.peers.remote_listing(&device, &remote_path, show_hidden);
+        let peers = state.peers.clone();
+        return tauri::async_runtime::spawn_blocking(move || {
+            peers.remote_listing(&device, &remote_path, show_hidden)
+        })
+        .await
+        .map_err(|e| e.to_string())?;
     }
     // A USB device listing crosses a cable and a worker thread, so it goes to the
     // blocking pool rather than parking the async executor behind a phone.
@@ -190,12 +197,31 @@ pub fn release_usb_device(state: State<'_, AppState>, serial: String) -> Result<
     }
 }
 
-/// Show this short code on the device that is being browsed for the first time.
+/// This device's own name, as the devices around it see it in their sidebars.
 #[tauri::command]
 pub fn nearby_pairing_info(state: State<'_, AppState>) -> PairingInfo { state.peers.pairing_info() }
 
+/// Ask a device for permission to browse it.
+///
+/// Async on purpose: this crosses the network, and a phone that has just left
+/// Wi-Fi takes the full connect timeout to say so. Answering is a tap over
+/// there, so `Waiting` is the ordinary first reply and the caller asks again.
 #[tauri::command]
-pub fn pair_nearby_device(state: State<'_, AppState>, id: String, code: String) -> Result<(), String> { state.peers.pair(&id, &code) }
+pub async fn pair_nearby_device(state: State<'_, AppState>, id: String) -> Result<PairOutcome, String> {
+    let peers = state.peers.clone();
+    tauri::async_runtime::spawn_blocking(move || peers.pair(&id))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// Devices asking to browse this one. They have no access while they wait.
+#[tauri::command]
+pub fn nearby_requests(state: State<'_, AppState>) -> Vec<PairRequest> { state.peers.requests() }
+
+/// Answer one of those asks. This is the only thing that ever grants a device
+/// access to this one's files.
+#[tauri::command]
+pub fn respond_nearby_request(state: State<'_, AppState>, id: String, allow: bool) { state.peers.respond(&id, allow) }
 
 /// Scan just below the visible folder when its local search has no match. This
 /// is deliberately a separate IPC route: normal typing never invokes it.
@@ -465,7 +491,12 @@ pub async fn read_text(
     max_bytes: usize,
 ) -> Result<TextHead, String> {
     if let Some((device, remote_path)) = peers::parse_remote_path(&path) {
-        return state.peers.read_remote_text(&device, &remote_path, max_bytes);
+        let peers = state.peers.clone();
+        return tauri::async_runtime::spawn_blocking(move || {
+            peers.read_remote_text(&device, &remote_path, max_bytes)
+        })
+        .await
+        .map_err(|e| e.to_string())?;
     }
     let cap = max_bytes.clamp(1024, 4 * 1024 * 1024);
     // A file on a phone has no `stat` and no `open`, so the head arrives through
@@ -817,7 +848,11 @@ pub fn rename_path(
     let src = PathBuf::from(&path);
     let parent = src.parent().ok_or("cannot rename the filesystem root")?;
     let dst = safe_child(&parent.to_string_lossy(), &new_name)?;
-    if dst.exists() {
+    // `exists()` alone is wrong on a case-insensitive filesystem, which is the
+    // default on macOS: `readme.md` → `README.md` finds the file being renamed
+    // and refuses to rename it to itself. Compare what the two names actually
+    // resolve to instead, so changing only the case is the no-op it looks like.
+    if occupied(&dst, &src) {
         return Err(format!("“{new_name}” already exists here"));
     }
     std::fs::rename(&src, &dst).map_err(|e| e.to_string())?;
@@ -881,6 +916,11 @@ pub async fn copy_paths(
         for source in paths {
             let source = PathBuf::from(source);
             let name = source.file_name().and_then(|name| name.to_str()).ok_or("Invalid file name")?;
+            // A folder cannot be copied inside itself: the walk would keep
+            // finding the copy it had just made, until the disk filled.
+            if contains(&source, &destination) {
+                return Err(format!("“{name}” can’t be copied into itself"));
+            }
             let target = copy_name(&destination, name);
             copy_tree(&source, &target)?;
             copied.push(target.to_string_lossy().into_owned());
@@ -912,6 +952,16 @@ fn copy_onto_device(
         copied.push(usb.upload(destination, Path::new(source))?);
     }
     Ok(copied)
+}
+
+/// Is `inner` the same folder as `outer`, or somewhere below it? Resolved on
+/// both sides so a symlinked route into a folder is still recognised as being
+/// inside it.
+fn contains(outer: &Path, inner: &Path) -> bool {
+    match (outer.canonicalize(), inner.canonicalize()) {
+        (Ok(outer), Ok(inner)) => inner.starts_with(&outer),
+        _ => inner.starts_with(outer),
+    }
 }
 
 fn copy_tree(source: &Path, target: &Path) -> Result<(), String> {
@@ -1082,6 +1132,22 @@ fn local_only(path: &str) -> Result<(), String> {
     Err(format!("Fiddler cannot change files on {space} yet"))
 }
 
+/// Is something other than `self_path` already sitting at `target`?
+///
+/// Both sides are resolved before they are compared, so a filesystem that folds
+/// case — or a path reached through a symlink — answers about the item rather
+/// than about the spelling.
+fn occupied(target: &Path, self_path: &Path) -> bool {
+    match (target.canonicalize(), self_path.canonicalize()) {
+        (Ok(existing), Ok(mine)) => existing != mine,
+        // Nothing resolves at the target: the name is free.
+        (Err(_), _) => false,
+        // Something is there and the item we hold has gone. Refuse rather than
+        // overwrite whatever took its place.
+        (Ok(_), Err(_)) => true,
+    }
+}
+
 /// Join `name` onto `parent`, rejecting anything that would escape it.
 fn safe_child(parent: &str, name: &str) -> Result<PathBuf, String> {
     let trimmed = name.trim();
@@ -1097,6 +1163,47 @@ fn safe_child(parent: &str, name: &str) -> Result<PathBuf, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn scratch(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("fiddler-cmd-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn renaming_only_the_case_is_not_a_collision() {
+        let dir = scratch("case");
+        let src = dir.join("readme.md");
+        std::fs::write(&src, b"hi").unwrap();
+
+        // The same item under a different spelling, which is what macOS hands
+        // back for a case-only rename.
+        assert!(!occupied(&dir.join("README.md"), &src));
+        // A different item that really is in the way.
+        let other = dir.join("notes.md");
+        std::fs::write(&other, b"hi").unwrap();
+        assert!(occupied(&other, &src));
+        // A free name.
+        assert!(!occupied(&dir.join("nothing-here.md"), &src));
+
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_folder_is_recognised_inside_itself() {
+        let dir = scratch("inside");
+        let outer = dir.join("project");
+        let inner = outer.join("assets");
+        std::fs::create_dir_all(&inner).unwrap();
+
+        assert!(contains(&outer, &outer));
+        assert!(contains(&outer, &inner));
+        assert!(!contains(&inner, &outer));
+        assert!(!contains(&outer, &dir));
+
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 
     #[test]
     fn the_mutating_commands_only_accept_real_paths() {

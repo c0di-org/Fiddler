@@ -14,6 +14,8 @@ import type {
   EntryBatch,
   Inspect,
   NearbySearch,
+  PairOutcome,
+  PairRequest,
   PairingInfo,
   PdfMeta,
   PeekItem,
@@ -57,7 +59,11 @@ const backend: Backend = {
 
   nearbyPairingInfo: () => invoke<PairingInfo>("nearby_pairing_info"),
 
-  pairNearbyDevice: (id, code) => invoke<void>("pair_nearby_device", { id, code }),
+  pairNearbyDevice: (id) => invoke<PairOutcome>("pair_nearby_device", { id }),
+
+  nearbyRequests: () => invoke<PairRequest[]>("nearby_requests"),
+
+  respondNearbyRequest: (id, allow) => invoke<void>("respond_nearby_request", { id, allow }),
 
   usbDevices: () => invoke<UsbDevice[]>("usb_devices"),
 
