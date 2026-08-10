@@ -1,8 +1,8 @@
 import { useState } from "react";
 
 import { FAVORITE_DRAG_TYPE, FOLDER_DRAG_TYPE, currentFolderDrag } from "../favorites";
-import type { Favorite, Place } from "../types";
-import { CloseIcon, FolderIcon, HeartIcon, SparkIcon, placeIcon } from "./icons";
+import type { Favorite, PeerDevice, Place } from "../types";
+import { CloseIcon, DeviceIcon, FolderIcon, HeartIcon, LaptopIcon, LockIcon, SparkIcon, placeIcon } from "./icons";
 
 interface Props {
   places: Place[];
@@ -14,6 +14,9 @@ interface Props {
   onMoveFavorite: (path: string, at: number) => void;
   /** The current Android touch drag, if it is over a Favorites drop target. */
   touchFolderDropIndex?: number | null;
+  devices: PeerDevice[];
+  onOpenDevice: (device: PeerDevice) => void;
+  selfDeviceName: string | null;
 }
 
 type DragKind = "folder" | "favorite";
@@ -50,6 +53,9 @@ export function Sidebar({
   onRemoveFavorite,
   onMoveFavorite,
   touchFolderDropIndex = null,
+  devices,
+  onOpenDevice,
+  selfDeviceName,
 }: Props) {
   const [dropIndex, setDropIndex] = useState<number | null>(null);
   const [draggingFavorite, setDraggingFavorite] = useState(false);
@@ -91,6 +97,18 @@ export function Sidebar({
       {places.map((place) => (
         <PlaceButton key={place.path} place={place} active={place.path === current} onPick={onPick} />
       ))}
+
+      {devices.length > 0 && <div className="sidebar-devices">
+        <SidebarHeading icon={<DeviceIcon size={13} />}>Devices</SidebarHeading>
+        {devices.map((device) => (
+          <button className={`place device ${current.startsWith(`fiddler://${device.id}/`) ? "active" : ""}`} key={device.id} onClick={() => onOpenDevice(device)} title={device.paired ? "Browse this device" : "Pair with this device"}>
+            <span className="place-icon">{device.platform === "macos" || device.platform === "desktop" ? <LaptopIcon size={18} /> : <DeviceIcon size={18} />}</span>
+            <span className="place-label">{device.name}</span>
+            {!device.paired && <LockIcon size={12} className="device-lock" />}
+          </button>
+        ))}
+        {selfDeviceName && <div className="device-self">This device: {selfDeviceName}</div>}
+      </div>}
 
       <div className="sidebar-favorites">
         <SidebarHeading icon={<HeartIcon size={13} />}>Favorites</SidebarHeading>

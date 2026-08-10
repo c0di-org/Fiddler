@@ -162,6 +162,20 @@ export const HeartIcon = stroked(
   <path d="M8 13.1 3.1 8.4A3.3 3.3 0 0 1 7.8 3.8L8 4l.2-.2a3.3 3.3 0 0 1 4.7 4.6Z" />
 );
 
+export const DeviceIcon = stroked(
+  <>
+    <rect x="4.5" y="1.75" width="7" height="12.5" rx="1.4" />
+    <path d="M7 11.7h2" />
+  </>
+);
+
+export const LaptopIcon = stroked(
+  <>
+    <rect x="2.75" y="3" width="10.5" height="7.25" rx=".9" />
+    <path d="M1.75 12.5h12.5" />
+  </>
+);
+
 export const CloseIcon = stroked(<path d="m4.25 4.25 7.5 7.5m0-7.5-7.5 7.5" />);
 
 /** Empty-state artwork: an open, and pointedly empty, folder. */
@@ -178,4 +192,5 @@ export const placeIcon: Record<string, (p: P) => React.ReactElement> = {
   desktop: DesktopIcon,
   doc: DocIcon,
   download: DownloadIcon,
+  device: DeviceIcon,
 };

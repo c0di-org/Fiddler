@@ -5,6 +5,7 @@ mod fs_scan;
 mod git;
 mod model;
 mod nearby;
+mod peers;
 #[cfg(target_os = "macos")]
 mod page;
 #[cfg(not(target_os = "macos"))]
@@ -37,16 +38,22 @@ pub fn run() {
             let cache = Arc::new(GitCache::new());
             let watcher = FsWatcher::start(app.handle().clone(), cache.clone());
             let thumbs = ThumbPool::start(app.handle().clone());
+            let peer_dir = app.path().app_data_dir().map_err(|e| e.to_string())?.join("peers");
+            let peers = peers::PeerService::start(peer_dir, cache.clone())?;
             app.manage(AppState {
                 cache,
                 watcher,
                 thumbs,
+                peers,
             });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             commands::list_dir,
             commands::nearby_entries,
+            commands::nearby_devices,
+            commands::nearby_pairing_info,
+            commands::pair_nearby_device,
             commands::search_contents,
             commands::repo_info,
             commands::refresh_repo,
@@ -65,6 +72,7 @@ pub fn run() {
             commands::create_text_file,
             commands::write_text_file,
             commands::rename_path,
+            commands::copy_paths,
             commands::trash_paths,
         ])
         .run(tauri::generate_context!())

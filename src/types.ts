@@ -121,6 +121,24 @@ export interface Place {
   icon: string;
 }
 
+/** A Fiddler device visible on the local network. It is never browsable until paired. */
+export interface PeerDevice {
+  id: string;
+  name: string;
+  host: string;
+  port: number;
+  paired: boolean;
+  platform: "android" | "macos" | "desktop" | "";
+}
+
+export interface PairingInfo {
+  id: string;
+  name: string;
+  /** A fresh six-digit code for another nearby Fiddler to enter. */
+  code: string;
+  root: string;
+}
+
 /** A user-pinned folder. Unlike Places, favorites are personal and reorderable. */
 export interface Favorite {
   name: string;

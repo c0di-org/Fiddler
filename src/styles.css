@@ -317,6 +317,15 @@ button {
   margin-top: 6px;
 }
 
+.sidebar-devices {
+  margin-top: 12px;
+}
+
+.place.device { position: relative; }
+.device-lock { margin-left: auto; color: var(--fg-faint); }
+.device-self { margin: 5px 6px 1px; color: var(--fg-faint); font-size: 11px; }
+.crumb svg { vertical-align: -2px; margin-right: 4px; }
+
 .favorites-list {
   position: relative;
   min-height: 16px;
