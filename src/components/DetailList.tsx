@@ -7,7 +7,7 @@ import { Thumb } from "./Thumb";
 import { GitDot } from "./GitDot";
 import { EmptyState } from "./EmptyState";
 import { Chevron, ForkIcon, LockIcon, WarnIcon } from "./icons";
-import { FOLDER_DRAG_TYPE } from "../favorites";
+import { beginFolderDrag, endFolderDrag, FOLDER_DRAG_TYPE } from "../favorites";
 import { type FolderTouchDragHandlers, useFolderTouchDrag } from "./folder-touch-drag";
 
 /** Finder's list view: dense, sortable, with disclosure triangles. */
@@ -202,13 +202,15 @@ function RowView({
       }`}
       data-row-id={row.id}
       style={{ height: ROW_H }}
-      draggable={isFolder && !touchFolderDrag}
+      draggable={isFolder}
       onDragStart={(event) => {
         if (!isFolder || !path) return;
+        beginFolderDrag({ name, path });
         event.dataTransfer.effectAllowed = "copy";
         event.dataTransfer.setData(FOLDER_DRAG_TYPE, JSON.stringify({ name, path }));
         event.dataTransfer.setData("text/plain", path);
       }}
+      onDragEnd={endFolderDrag}
       onPointerDown={touchDrag.onPointerDown}
       onPointerMove={touchDrag.onPointerMove}
       onPointerUp={touchDrag.onPointerUp}

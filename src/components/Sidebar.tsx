@@ -1,6 +1,6 @@
 import { useState } from "react";
 
-import { FAVORITE_DRAG_TYPE, FOLDER_DRAG_TYPE } from "../favorites";
+import { FAVORITE_DRAG_TYPE, FOLDER_DRAG_TYPE, currentFolderDrag } from "../favorites";
 import type { Favorite, Place } from "../types";
 import { CloseIcon, FolderIcon, HeartIcon, SparkIcon, placeIcon } from "./icons";
 
@@ -22,7 +22,7 @@ function dragKind(event: React.DragEvent): DragKind | null {
   const types = event.dataTransfer.types;
   if (Array.from(types).includes(FAVORITE_DRAG_TYPE)) return "favorite";
   if (Array.from(types).includes(FOLDER_DRAG_TYPE)) return "folder";
-  return null;
+  return currentFolderDrag() ? "folder" : null;
 }
 
 function favoriteFrom(event: React.DragEvent, type: string): Favorite | null {
@@ -37,9 +37,8 @@ function favoriteFrom(event: React.DragEvent, type: string): Favorite | null {
       return null;
     }
     return value as Favorite;
-  } catch {
-    return null;
-  }
+  } catch {}
+  return type === FOLDER_DRAG_TYPE ? currentFolderDrag() : null;
 }
 
 export function Sidebar({

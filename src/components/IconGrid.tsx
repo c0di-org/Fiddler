@@ -5,7 +5,7 @@ import { EmptyState } from "./EmptyState";
 import { FolderGlyph } from "./FileGlyph";
 import { GitDot } from "./GitDot";
 import { Thumb } from "./Thumb";
-import { FOLDER_DRAG_TYPE } from "../favorites";
+import { beginFolderDrag, endFolderDrag, FOLDER_DRAG_TYPE } from "../favorites";
 import { type FolderTouchDragHandlers, useFolderTouchDrag } from "./folder-touch-drag";
 
 /**
@@ -252,13 +252,15 @@ function Cell({
       data-cell-id={cell.id}
       style={{ width }}
       title={cell.path}
-      draggable={isFolder && !touchFolderDrag}
+      draggable={isFolder}
       onDragStart={(event) => {
         if (!isFolder) return;
+        beginFolderDrag({ name: cell.name, path: cell.path });
         event.dataTransfer.effectAllowed = "copy";
         event.dataTransfer.setData(FOLDER_DRAG_TYPE, JSON.stringify({ name: cell.name, path: cell.path }));
         event.dataTransfer.setData("text/plain", cell.path);
       }}
+      onDragEnd={endFolderDrag}
       onPointerDown={touchDrag.onPointerDown}
       onPointerMove={touchDrag.onPointerMove}
       onPointerUp={touchDrag.onPointerUp}

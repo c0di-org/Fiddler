@@ -5,6 +5,21 @@ export const FOLDER_DRAG_TYPE = "application/x-fiddler-folder";
 export const FAVORITE_DRAG_TYPE = "application/x-fiddler-favorite";
 
 const STORAGE_KEY = "fiddler.favorites";
+// Android WebView can omit custom DataTransfer types (and sometimes data) while
+// a native drag is in progress. Keep the in-page payload as a narrow fallback.
+let activeFolderDrag: Favorite | null = null;
+
+export function beginFolderDrag(folder: Favorite) {
+  activeFolderDrag = folder;
+}
+
+export function currentFolderDrag() {
+  return activeFolderDrag;
+}
+
+export function endFolderDrag() {
+  activeFolderDrag = null;
+}
 
 function safeFavorites(value: unknown): Favorite[] {
   if (!Array.isArray(value)) return [];
