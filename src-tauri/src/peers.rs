@@ -64,6 +64,8 @@ struct KnownPeer {
 #[derive(Debug, Serialize, Deserialize, Default)]
 struct SavedPeers {
     id: String,
+    #[serde(default)]
+    name: String,
     known: BTreeMap<String, KnownPeer>,
     clients: BTreeMap<String, String>,
 }
@@ -118,11 +120,12 @@ impl PeerService {
             .and_then(|bytes| serde_json::from_slice::<SavedPeers>(&bytes).ok())
             .unwrap_or_default();
         let id = if saved.id.is_empty() { Uuid::new_v4().to_string() } else { saved.id };
+        let name = if saved.name.is_empty() { friendly_name(&id) } else { saved.name };
         let root = share_root();
         let service = Arc::new(Self {
             state: Arc::new(Mutex::new(PeerState {
                 id,
-                name: device_name(),
+                name,
                 code: pairing_code(),
                 port: 0,
                 known: saved.known,
@@ -175,8 +178,8 @@ impl PeerService {
 
     pub fn pair(&self, id: &str, code: &str) -> Result<(), String> {
         let peer = self.state.lock().unwrap().seen.get(id).cloned().ok_or("That device is no longer nearby")?;
-        let local_id = self.state.lock().unwrap().id.clone();
-        let query = format!("deviceId={}&name={}&code={}", enc(&local_id), enc(&device_name()), enc(code));
+        let (local_id, local_name) = { let state = self.state.lock().unwrap(); (state.id.clone(), state.name.clone()) };
+        let query = format!("deviceId={}&name={}&code={}", enc(&local_id), enc(&local_name), enc(code));
         let bytes = request(&peer.host, peer.port, &format!("/v1/pair?{query}"), None)?;
         let reply: PairResponse = serde_json::from_slice(&bytes).map_err(|_| "The device returned an invalid pairing response")?;
         let mut st = self.state.lock().unwrap();
@@ -220,7 +223,7 @@ impl PeerService {
 
     fn save(&self) {
         let st = self.state.lock().unwrap();
-        let saved = SavedPeers { id: st.id.clone(), known: st.known.clone(), clients: st.clients.clone() };
+        let saved = SavedPeers { id: st.id.clone(), name: st.name.clone(), known: st.known.clone(), clients: st.clients.clone() };
         let temp = self.config.with_extension("json.tmp");
         if let Ok(bytes) = serde_json::to_vec(&saved) {
             if fs::write(&temp, bytes).is_ok() { let _ = fs::rename(temp, &self.config); }
@@ -366,7 +369,17 @@ pub fn parse_remote_path(path: &str) -> Option<(String, String)> {
 
 fn remote_path(id: &str, path: &str) -> String { format!("fiddler://{id}/{}", path.trim_start_matches('/')) }
 fn share_root() -> PathBuf { #[cfg(target_os = "android")] { PathBuf::from("/storage/emulated/0") } #[cfg(not(target_os = "android"))] { dirs::home_dir().unwrap_or_default() } }
-fn device_name() -> String { #[cfg(target_os = "android")] { "Fiddler on Android".into() } #[cfg(not(target_os = "android"))] { std::env::var("HOSTNAME").unwrap_or_else(|_| "Fiddler on Mac".into()) } }
+/// A friendly, deterministic identity rather than a hostname or hardware model.
+/// It is seeded by the installation UUID and persisted, so two nearby phones are
+/// easy to tell apart without leaking a person's account or device name.
+fn friendly_name(id: &str) -> String {
+    const ADJECTIVES: &[&str] = &["Amber", "Brisk", "Cozy", "Dapper", "Ember", "Fuzzy", "Golden", "Happy", "Ivy", "Jolly", "Kind", "Lively", "Mellow", "Nimble", "Peachy", "Quiet", "Rosy", "Sunny", "Tidy", "Velvet"];
+    const FRUITS: &[&str] = &["Apple", "Apricot", "Banana", "Berry", "Cherry", "Clementine", "Fig", "Grape", "Guava", "Kiwi", "Lemon", "Lychee", "Mango", "Melon", "Nectarine", "Papaya", "Peach", "Pear", "Plum", "Tangerine"];
+    let bytes = Uuid::parse_str(id).map(|uuid| uuid.as_bytes().to_vec()).unwrap_or_else(|_| id.as_bytes().to_vec());
+    let first = bytes.first().copied().unwrap_or(0) as usize % ADJECTIVES.len();
+    let second = bytes.get(1).copied().unwrap_or(0) as usize % FRUITS.len();
+    format!("{} {}", ADJECTIVES[first], FRUITS[second])
+}
 fn pairing_code() -> String { format!("{:06}", (Uuid::new_v4().as_u128() % 1_000_000)) }
 fn now_secs() -> u64 { SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs() }
 
