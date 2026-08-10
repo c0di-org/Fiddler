@@ -138,7 +138,9 @@ html,
 body,
 #root {
   height: 100%;
+  min-height: 0;
   margin: 0;
+  overflow: hidden;
 }
 
 body {
@@ -205,6 +207,17 @@ button {
 .app {
   display: flex;
   height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  /* Android WebView exposes system-bar and cutout insets through these CSS
+     environment variables. Keeping the inset in the app's border box means
+     the toolbar and status bar stay fixed while only their content panes
+     scroll. The fallback keeps desktop WebViews unchanged. */
+  padding:
+    env(safe-area-inset-top, 0px)
+    env(safe-area-inset-right, 0px)
+    env(safe-area-inset-bottom, 0px)
+    env(safe-area-inset-left, 0px);
 }
 
 /* DeX keeps the desktop layout, while a phone remains usable instead of
@@ -1669,7 +1682,7 @@ button {
 .toast {
   position: fixed;
   left: 50%;
-  bottom: 48px;
+  bottom: calc(48px + env(safe-area-inset-bottom, 0px));
   max-width: 70%;
   padding: 11px 20px;
   border-radius: var(--r-pill);
@@ -1719,6 +1732,11 @@ button {
   display: flex;
   flex-direction: column;
   min-width: 0;
+  padding:
+    env(safe-area-inset-top, 0px)
+    env(safe-area-inset-right, 0px)
+    env(safe-area-inset-bottom, 0px)
+    env(safe-area-inset-left, 0px);
   background: var(--glass-strong);
   backdrop-filter: blur(34px) saturate(150%);
   -webkit-backdrop-filter: blur(34px) saturate(150%);
@@ -2364,7 +2382,11 @@ li.md-task {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 44px 40px 40px;
+  padding:
+    calc(44px + env(safe-area-inset-top, 0px))
+    calc(40px + env(safe-area-inset-right, 0px))
+    calc(40px + env(safe-area-inset-bottom, 0px))
+    calc(40px + env(safe-area-inset-left, 0px));
   background: rgba(0, 0, 0, 0.28);
   backdrop-filter: blur(20px) saturate(140%);
   animation: ql-in var(--fast) var(--ease);
