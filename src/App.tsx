@@ -407,10 +407,8 @@ export default function App() {
 
   const openDevice = useCallback(async (device: PeerDevice) => {
     if (!device.paired) {
-      const code = window.prompt(`Enter the six-digit pairing code shown in Fiddler on ${device.name}.`);
-      if (!code) return;
       try {
-        await ipc.pairNearbyDevice(device.id, code.trim());
+        await ipc.pairNearbyDevice(device.id, "");
         setDevices((current) => current.map((item) => item.id === device.id ? { ...item, paired: true } : item));
       } catch (error) {
         flash(String(error).replace(/^Error:\s*/, ""));

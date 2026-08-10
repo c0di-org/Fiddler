@@ -272,7 +272,14 @@ impl PeerService {
         let client = q.get("deviceId").filter(|x| !x.is_empty()).ok_or((400, "missing device id".into()))?;
         let code = q.get("code").ok_or((400, "missing pairing code".into()))?;
         let mut st = self.state.lock().unwrap();
-        if code != &st.code { return Err((403, "That pairing code does not match".into())); }
+        // Mutual discovery is the consent gate. It means both running apps have
+        // advertised one another's ephemeral device ID; no ambient code needs to
+        // clutter either sidebar. Keep the code route for an older client, but
+        // never accept a blank request from a device we do not mutually see.
+        let mutually_visible = st.seen.get(client).is_some_and(|peer| peer.mutual);
+        if code != &st.code && !(code.is_empty() && mutually_visible) {
+            return Err((403, "Confirm this device is visible in Fiddler first".into()));
+        }
         let token = Uuid::new_v4().to_string();
         st.clients.insert(client.clone(), token.clone());
         drop(st);
