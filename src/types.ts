@@ -204,6 +204,18 @@ export interface Favorite {
   path: string;
 }
 
+/** One item that went to the Trash, and where it went.
+ *
+ * The pair is what makes deletion undoable at all: the Trash renames what it
+ * takes when the name is already in use, so the only way to put something back
+ * is to have been told where it landed at the time. A backend that can't say —
+ * Android, which has no Trash, and the browser, whose delete is a real delete —
+ * reports nothing, and the UI offers no undo rather than a broken one. */
+export interface Trashed {
+  trashed: string;
+  original: string;
+}
+
 export const emptyRollup: Rollup = {
   staged: 0,
   modified: 0,

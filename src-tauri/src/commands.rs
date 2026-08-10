@@ -1096,33 +1096,125 @@ fn copy_name(parent: &Path, name: &str) -> PathBuf {
     parent.join(format!("{stem} copy-{}{}", std::process::id(), extension))
 }
 
+/// One item that went to the Trash, and where it went.
+///
+/// The pair is the whole point: the Trash renames what it takes when the name
+/// is already in use, so the only way to put something back afterwards is to
+/// have been told at the time. An empty answer means the deletion happened but
+/// cannot be walked back, and the UI must not offer an undo for it.
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Trashed {
+    /// Where the item is now, inside the Trash.
+    pub trashed: String,
+    /// Where it came from.
+    pub original: String,
+}
+
 #[tauri::command]
 #[cfg(not(target_os = "android"))]
-pub fn trash_paths(state: State<'_, AppState>, paths: Vec<String>) -> Result<(), String> {
+pub fn trash_paths(state: State<'_, AppState>, paths: Vec<String>) -> Result<Vec<Trashed>, String> {
     for path in &paths {
         local_only(path)?;
     }
     // Always the Trash, never `remove_file` — a file browser must not make deletions
     // that the user cannot walk back.
-    trash::delete_all(&paths).map_err(|e| e.to_string())?;
+    let trashed = trash_reporting(&paths)?;
     for p in &paths {
         if let Some(parent) = Path::new(p).parent() {
             state.cache.forget_discovery_under(parent);
             state.watcher.poke(parent);
         }
     }
-    Ok(())
+    Ok(trashed)
+}
+
+/// macOS hands back where each item landed, so `restore_trashed` can put it
+/// exactly there again. This is the same call Finder makes, which is why it
+/// gets the per-volume Trash and the de-duplicating rename right for free.
+#[cfg(target_os = "macos")]
+fn trash_reporting(paths: &[String]) -> Result<Vec<Trashed>, String> {
+    use objc2_foundation::{NSFileManager, NSString, NSURL};
+
+    let manager = NSFileManager::defaultManager();
+    let mut out = Vec::with_capacity(paths.len());
+    for path in paths {
+        let url = NSURL::fileURLWithPath(&NSString::from_str(path));
+        let mut landed = None;
+        manager
+            .trashItemAtURL_resultingItemURL_error(&url, Some(&mut landed))
+            .map_err(|error| error.localizedDescription().to_string())?;
+        // No resulting URL is not an error — the item is gone either way. It
+        // only means this one can't be offered back.
+        if let Some(trashed) = landed.and_then(|url| url.path()) {
+            out.push(Trashed { trashed: trashed.to_string(), original: path.clone() });
+        }
+    }
+    Ok(out)
+}
+
+/// Everywhere else the `trash` crate does the deletion and says nothing about
+/// where it put things, so nothing can be restored.
+#[cfg(all(not(target_os = "macos"), not(target_os = "android")))]
+fn trash_reporting(paths: &[String]) -> Result<Vec<Trashed>, String> {
+    trash::delete_all(paths).map_err(|e| e.to_string())?;
+    Ok(Vec::new())
+}
+
+/// Put trashed items back where they came from.
+///
+/// Refuses rather than overwrites: if something has taken the original name in
+/// the meantime, that item stays in the Trash and says so. Undo has to be the
+/// one operation that cannot itself lose anything.
+#[tauri::command]
+#[cfg(not(target_os = "android"))]
+pub fn restore_trashed(
+    state: State<'_, AppState>,
+    items: Vec<Trashed>,
+) -> Result<Vec<String>, String> {
+    let mut restored = Vec::new();
+    let mut touched: Vec<PathBuf> = Vec::new();
+    for Trashed { trashed, original } in items {
+        local_only(&original)?;
+        let from = PathBuf::from(&trashed);
+        let to = PathBuf::from(&original);
+        let name = to.file_name().and_then(|n| n.to_str()).unwrap_or(&original).to_owned();
+        if !from.exists() {
+            return Err(format!("“{name}” is no longer in the Trash"));
+        }
+        if to.exists() {
+            return Err(format!("Something else is called “{name}” now"));
+        }
+        let parent = to.parent().ok_or("cannot restore to the filesystem root")?;
+        if !parent.is_dir() {
+            return Err(format!("The folder “{name}” came from is gone"));
+        }
+        move_one(&from, &to).map_err(|e| format!("Couldn’t put “{name}” back: {e}"))?;
+        if !touched.iter().any(|seen| seen == parent) {
+            touched.push(parent.to_path_buf());
+        }
+        restored.push(original);
+    }
+    for dir in touched {
+        state.cache.forget_discovery_under(&dir);
+        state.watcher.poke(&dir);
+    }
+    Ok(restored)
 }
 
 #[tauri::command]
 #[cfg(target_os = "android")]
-pub fn trash_paths(state: State<'_, AppState>, paths: Vec<String>) -> Result<(), String> {
+pub fn trash_paths(state: State<'_, AppState>, paths: Vec<String>) -> Result<Vec<Trashed>, String> {
     // Android does not expose a general-purpose Trash API for arbitrary paths.
     // The UI calls this only after an explicit permanent-delete confirmation.
     // Use `symlink_metadata` so deleting a symlink removes the link itself,
     // never the directory it happens to point at.
+    //
+    // Nothing comes back, and nothing can: there is no Trash for the deleted
+    // item to be sitting in. `caps.trash` is already false here, so the UI has
+    // asked before getting this far.
     if paths.is_empty() {
-        return Ok(());
+        return Ok(Vec::new());
     }
 
     let mut parents = Vec::with_capacity(paths.len());
@@ -1150,7 +1242,18 @@ pub fn trash_paths(state: State<'_, AppState>, paths: Vec<String>) -> Result<(),
         state.cache.forget_discovery_under(&parent);
         state.watcher.poke(&parent);
     }
-    Ok(())
+    Ok(Vec::new())
+}
+
+/// Nothing here ever reported a trashed location, so nothing can ask to have
+/// one back. Present only so the command list is the same shape on both targets.
+#[tauri::command]
+#[cfg(target_os = "android")]
+pub fn restore_trashed(
+    _state: State<'_, AppState>,
+    _items: Vec<Trashed>,
+) -> Result<Vec<String>, String> {
+    Err("Deleting on Android is permanent, so there is nothing to put back".into())
 }
 
 /// The user's macOS accent colour (System Settings › Appearance), as sRGB bytes.
@@ -1372,6 +1475,30 @@ mod tests {
             std::fs::read_to_string(target.join("src/main.rs")).unwrap(),
             "fn main() {}"
         );
+
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// The one thing that makes deletion undoable: the Trash has to say where
+    /// it put the item. Round-trips through the real Trash, because a fake one
+    /// would only prove the fake works — and puts the file back on the way out,
+    /// so nothing is left behind either way.
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn the_trash_says_where_it_put_things_and_they_can_be_put_back() {
+        let dir = scratch("trash");
+        let original = dir.join("undo-me.txt");
+        std::fs::write(&original, b"still here").unwrap();
+
+        let reported = trash_reporting(&[original.to_string_lossy().into_owned()]).unwrap();
+        assert_eq!(reported.len(), 1, "the Trash reported nothing to put back");
+        let landed = PathBuf::from(&reported[0].trashed);
+        assert!(!original.exists(), "the original should have gone to the Trash");
+        assert!(landed.exists(), "the reported Trash path should hold the item");
+
+        move_one(&landed, &original).unwrap();
+        assert_eq!(std::fs::read_to_string(&original).unwrap(), "still here");
+        assert!(!landed.exists(), "nothing should be left in the Trash");
 
         std::fs::remove_dir_all(dir).unwrap();
     }

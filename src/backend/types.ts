@@ -28,6 +28,7 @@ import type {
   TextHead,
   ThumbReady,
   ThumbReq,
+  Trashed,
   UsbDevice,
 } from "../types";
 
@@ -98,7 +99,12 @@ export interface Backend {
    * copy, and because it must never overwrite: a name already taken at the
    * destination refuses the whole batch rather than moving part of it. */
   movePaths(paths: string[], destination: string): Promise<string[]>;
-  trashPaths(paths: string[]): Promise<void>;
+  /** Resolves with where each item landed, which is what lets the deletion be
+   * undone. An empty answer means it happened but can't be walked back. */
+  trashPaths(paths: string[]): Promise<Trashed[]>;
+  /** Put trashed items back. Refuses rather than overwrites — undo has to be
+   * the one operation that cannot itself lose anything. */
+  restoreTrashed(items: Trashed[]): Promise<string[]>;
   /** Fires with the directories whose contents changed. Every mutation above is
    * expected to produce one of these — the UI does not refresh itself. */
   onDirsChanged(fn: (dirs: string[]) => void): Promise<Unlisten>;

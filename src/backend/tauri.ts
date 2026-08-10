@@ -26,6 +26,7 @@ import type {
   TextHead,
   ThumbReady,
   ThumbReq,
+  Trashed,
   UsbDevice,
 } from "../types";
 import type { Backend } from "./types";
@@ -86,7 +87,9 @@ const backend: Backend = {
 
   movePaths: (paths, destination) => invoke<string[]>("move_paths", { paths, destination }),
 
-  trashPaths: (paths) => invoke<void>("trash_paths", { paths }),
+  trashPaths: (paths) => invoke<Trashed[]>("trash_paths", { paths }),
+
+  restoreTrashed: (items) => invoke<string[]>("restore_trashed", { items }),
 
   onDirsChanged: (fn) => listen<string[]>("fiddler:dirs-changed", (e) => fn(e.payload)),
 

@@ -25,6 +25,7 @@ import { parseShortcut } from "./preview/link";
 import { routeOf } from "./preview/route";
 import { contentTerms, prepareSearch, search, type SearchKind, type SearchRecord } from "./search";
 import { TreeStore, type Row } from "./store/tree";
+import { invert, remember, take as takeUndo, undoStore } from "./undo";
 import { applyTint, hasSystemAccent, loadTint, saveTint, watchTint, type Tint } from "./tint";
 import type { ContentSearch, Entry, Favorite, NearbyEntry, NearbySearch, PairRequest, PairingInfo, PeerDevice, Place, UsbDevice, WorktreeInfo } from "./types";
 
@@ -70,6 +71,8 @@ type ContentState = { query: string; root: string; result: ContentSearch };
 
 export default function App() {
   useSyncExternalStore(store.subscribe, store.getSnapshot);
+  const undoable = useSyncExternalStore(undoStore.subscribe, undoStore.getSnapshot);
+  const undoNext = undoable[undoable.length - 1] ?? null;
 
   const [places, setPlaces] = useState<Place[]>([]);
   const [devices, setDevices] = useState<PeerDevice[]>([]);
@@ -798,8 +801,14 @@ export default function App() {
       if (!window.confirm(`Permanently delete ${noun}? This cannot be undone.`)) return;
     }
     try {
-      await ipc.trashPaths(paths);
+      // Where each item landed is the only thing that can put it back, and
+      // only a backend with a real Trash can say. An empty answer means the
+      // deletion stands, so nothing is offered up to ⌘Z.
+      const trashed = await ipc.trashPaths(paths);
       setSelection(new Set());
+      if (trashed.length > 0) {
+        remember({ label: caps.trash ? "Move to Trash" : "Delete", action: { kind: "trash", items: trashed } });
+      }
     } catch (e) {
       flash(String(e));
     }
@@ -837,6 +846,7 @@ export default function App() {
       // just arrived if we go and ask again.
       if (device) await store.invalidateDirs([destination]);
       setSelection(new Set(copied));
+      remember({ label: "Paste", action: { kind: "create", paths: copied } });
       flash(`Pasted ${copied.length} item${copied.length === 1 ? "" : "s"}`);
     } catch (error) {
       flash(String(error).replace(/^Error:\s*/, ""));
@@ -868,20 +878,27 @@ export default function App() {
       const what = describeItems(items);
       try {
         if (verb === "move") {
-          await ipc.movePaths(items.paths, destination);
+          const moved = await ipc.movePaths(items.paths, destination);
           // The originals are gone; keeping them selected would leave the
           // status bar describing files that aren't there.
           setSelection(new Set());
+          // Paired with the sources in order, which is the order `move_paths`
+          // works in — and what lets each one find its own way home.
+          remember({
+            label: "Move",
+            action: { kind: "move", moves: moved.map((to, at) => ({ from: items.paths[at], to })) },
+          });
           flash(`Moved ${what}`);
           return;
         }
         // A cable is slow enough that silence reads as nothing happening.
         const device = destination.startsWith("mtp://");
         if (device) flash(`Copying ${what} to the device…`);
-        await ipc.copyPaths(items.paths, destination);
+        const copied = await ipc.copyPaths(items.paths, destination);
         // Nothing watches a folder on a device, so the listing only shows what
         // just arrived if we go and ask again.
         if (device) await store.invalidateDirs([destination]);
+        remember({ label: "Copy", action: { kind: "create", paths: copied } });
         flash(`Copied ${what}`);
       } catch (error) {
         flash(String(error).replace(/^Error:\s*/, ""));
@@ -937,12 +954,54 @@ export default function App() {
       try {
         const moved = await ipc.renamePath(path, name);
         setSelection(new Set([moved]));
+        remember({ label: "Rename", action: { kind: "rename", from: path, to: moved } });
       } catch (e) {
         flash(String(e));
       }
     },
     [flash]
   );
+
+  /**
+   * ⌘Z. `invert` decided what the steps are; this runs them and says what
+   * happened.
+   *
+   * The entry comes off the stack before the first step, and stays off even if
+   * a step fails: the usual reason a restore can't happen is that something
+   * else has taken the name, which pressing ⌘Z again will not improve.
+   */
+  const undo = useCallback(async () => {
+    const entry = takeUndo();
+    if (!entry) return;
+    const landed: string[] = [];
+    try {
+      for (const step of invert(entry)) {
+        switch (step.do) {
+          case "rename":
+            landed.push(await ipc.renamePath(step.path, step.name));
+            break;
+          case "trash":
+            await ipc.trashPaths(step.paths);
+            break;
+          case "move":
+            landed.push(...(await ipc.movePaths(step.paths, step.into)));
+            break;
+          case "restore":
+            landed.push(...(await ipc.restoreTrashed(step.items)));
+            break;
+        }
+      }
+      // Selecting what came back is the confirmation: the item is visibly
+      // where it was, rather than the folder merely having changed somehow.
+      if (landed.length > 0) {
+        setSelection(new Set(landed));
+        revealCursor();
+      }
+      flash(`Undid ${entry.label}`);
+    } catch (error) {
+      flash(`Couldn’t undo ${entry.label} — ${String(error).replace(/^Error:\s*/, "")}`);
+    }
+  }, [flash, revealCursor]);
 
   const buildMenu = useCallback(
     (t: Target | null, x: number, y: number) => {
@@ -986,6 +1045,9 @@ export default function App() {
           });
         }
       } else {
+        if (undoNext) {
+          items.push({ label: `Undo ${undoNext.label}`, onPick: () => void undo() });
+        }
         if (copiedPaths.length > 0 && at.paste) items.push({ label: "Paste", onPick: () => void paste() });
         if (at.create) {
           items.push({ label: "New Text File", onPick: newTextFile });
@@ -1007,7 +1069,7 @@ export default function App() {
       // empty menu is a blank box that has to be dismissed.
       if (items.length > 0) setMenu({ x, y, items });
     },
-    [openTarget, selected.length, copySelected, trashSelected, copiedPaths.length, paste, newFolder, newTextFile, mountFolder]
+    [openTarget, selected.length, copySelected, trashSelected, copiedPaths.length, paste, newFolder, newTextFile, mountFolder, undoNext, undo]
   );
 
   // ------------------------------------------------------------- keyboard
@@ -1045,8 +1107,8 @@ export default function App() {
     [targets, selection, revealCursor]
   );
 
-  const kb = useRef({ targets, selection, moveCursor, openTarget, copySelected, paste, trashSelected, newFolder, newTextFile, go, jumpTo, quickLook });
-  kb.current = { targets, selection, moveCursor, openTarget, copySelected, paste, trashSelected, newFolder, newTextFile, go, jumpTo, quickLook };
+  const kb = useRef({ targets, selection, moveCursor, openTarget, copySelected, paste, trashSelected, newFolder, newTextFile, go, jumpTo, quickLook, undo });
+  kb.current = { targets, selection, moveCursor, openTarget, copySelected, paste, trashSelected, newFolder, newTextFile, go, jumpTo, quickLook, undo };
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -1066,6 +1128,9 @@ export default function App() {
       if (editorActive.current) return;
       if (modifier && e.key.toLowerCase() === "c") { e.preventDefault(); s.copySelected(); return; }
       if (modifier && e.key.toLowerCase() === "v") { e.preventDefault(); void s.paste(); return; }
+      // Before the switch, and before type-to-jump: ⌘Z is the first thing a
+      // hand reaches for, and it must not depend on where the selection is.
+      if (modifier && !e.shiftKey && e.key.toLowerCase() === "z") { e.preventDefault(); void s.undo(); return; }
       const lead = [...s.selection].pop();
       const target = lead ? s.targets.find((t) => t.id === lead) : undefined;
       const perRow = store.view === "icons" ? iconsPerRow() : 1;

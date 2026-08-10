@@ -37,6 +37,7 @@ export const {
   copyPaths,
   movePaths,
   trashPaths,
+  restoreTrashed,
   onDirsChanged,
   thumbnail,
   thumbnails,

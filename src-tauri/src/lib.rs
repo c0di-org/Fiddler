@@ -90,6 +90,7 @@ pub fn run() {
             commands::copy_paths,
             commands::move_paths,
             commands::trash_paths,
+            commands::restore_trashed,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Fiddler");

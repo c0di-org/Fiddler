@@ -25,18 +25,23 @@ being `false` is what lets HTML5 drag work inside the webview — documented for
 Windows, unverified on macOS. Prototype whether the two can coexist before
 promising drop-in, because the answer decides whether internal drag survives it.
 
-### There is no undo
+### Undo doesn't reach everything
 
-Rename, paste and Move to Trash are all one-way. ⌘Z is the first thing a hand
-reaches for after a mis-drop, and its absence is what makes drag-to-move feel
-risky to ship.
+⌘Z now walks back a rename, a paste, a drag, and a trip to the Trash, with an
+`Undo <thing>` item in the background menu saying which. `undo.ts` holds the
+stack — twenty deep, in memory, gone on quit, like Finder's — and `invert` is a
+pure function from a recorded operation to the steps that reverse it, so adding
+an operation means adding a case there rather than a closure at the call site.
 
-The three operations that need it are all reversible without new backend work:
-a rename is a rename back, a paste is a trash of what was created, a trash is a
-restore. Only the last needs anything new — `trash` (the crate) can delete but
-not put back, so restoring means either shelling out to Finder or keeping the
-trashed paths and moving them home from `~/.Trash`. A stack of the last ~20
-operations in the store, and a toast that says what was undone.
+Deletion is undoable because `trash_paths` now goes through `NSFileManager`'s
+`trashItemAtURL:resultingItemURL:` and reports back where each item landed. The
+`trash` crate couldn't: it deletes and says nothing, which is why the two other
+targets report an empty list and get no undo rather than a broken one.
+
+What's left out: New Folder and New Text File aren't recorded, and there is no
+redo. Both were deliberate — a new folder is created straight into a rename, so
+undoing it means reasoning about two stacked entries for one gesture, and redo
+doubles the state for a case that comes up far less often than ⌘Z does.
 
 ### The session doesn't survive a quit
 

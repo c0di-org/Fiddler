@@ -192,12 +192,18 @@ const backend: Backend = {
     return moved;
   },
 
+  // A tab has nowhere to put a deleted file, so this really is a delete and
+  // reports nothing to put back. The empty answer is what stops the UI from
+  // offering an undo it could not honour.
   async trashPaths(paths) {
     for (const path of paths) {
       await vfs.remove(path);
       invalidate(path);
     }
+    return [];
   },
+
+  restoreTrashed: unavailable("Undoing a delete"),
 
   onDirsChanged: async (fn) => vfs.onDirsChanged(fn),
 
