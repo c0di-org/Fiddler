@@ -1703,6 +1703,29 @@ button {
 .editor-title > svg { flex: 0 0 auto; color: var(--accent-ink); }
 .editor-title i { width: 6px; height: 6px; flex: 0 0 auto; border-radius: 50%; background: var(--accent); }
 
+.editor-actions {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.editor-preview-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--r-md);
+  background: var(--fill);
+  color: var(--fg-dim);
+  font-size: 12px;
+  font-weight: 620;
+}
+
+.editor-preview-toggle:hover { background: var(--fill-hover); color: var(--fg); }
+.editor-preview-toggle.on { background: var(--sel-cell); color: var(--accent-ink); }
+
 .editor-save {
   min-width: 58px;
   height: 32px;
@@ -1755,6 +1778,12 @@ button {
 .editor-types button.on { background: var(--sel-cell); color: var(--accent-ink); font-weight: 700; }
 
 .editor-body { flex: 1; min-height: 0; padding: clamp(14px, 3vw, 36px); }
+.editor-body.split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: clamp(16px, 2vw, 28px);
+}
+.editor-source { min-width: 0; min-height: 0; }
 .editor-text {
   display: block;
   width: 100%;
@@ -1770,6 +1799,22 @@ button {
   user-select: text;
 }
 .editor-text::placeholder { color: var(--fg-faint); }
+.editor-markdown-preview {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  padding: 2px clamp(2px, 1vw, 12px) 2px clamp(16px, 2vw, 28px);
+  border-left: 1px solid var(--hair-soft);
+  user-select: text;
+}
+.editor-markdown-preview::-webkit-scrollbar { width: 10px; height: 10px; }
+.editor-markdown-preview::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: var(--r-pill);
+  background-clip: padding-box;
+  background-color: rgba(120, 120, 128, 0.3);
+}
+.editor-markdown-preview::-webkit-scrollbar-thumb:hover { background-color: rgba(120, 120, 128, 0.5); }
 .editor-foot {
   display: flex;
   justify-content: space-between;
@@ -1784,12 +1829,17 @@ button {
 
 @media (max-width: 640px) {
   .editor-bar { height: 56px; flex-basis: 56px; padding: 0 8px; }
+  .editor-actions { gap: 5px; }
+  .editor-preview-toggle { width: 32px; justify-content: center; padding: 0; }
+  .editor-preview-toggle span { display: none; }
   .editor-file-meta { display: block; padding: 12px; }
   .editor-file-meta label { display: grid; grid-template-columns: 72px minmax(0, 1fr); }
   .editor-file-meta input { width: 100%; }
   .editor-types { margin-top: 10px; }
   .editor-types button { flex: 0 0 auto; min-height: 30px; }
   .editor-body { padding: 14px; }
+  .editor-body.split { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; }
+  .editor-markdown-preview { padding: 14px 2px 2px; border-top: 1px solid var(--hair-soft); border-left: 0; }
   .editor-text { font-size: 15px; line-height: 1.62; }
   .editor-foot { min-height: 38px; padding: 10px 14px; }
 }

@@ -57,6 +57,8 @@ export default function App() {
   const [editor, setEditor] = useState<EditorState | null>(null);
   const anchorRef = useRef<string | null>(null);
   const typeAhead = useRef({ buffer: "", at: 0 });
+  const editorActive = useRef(false);
+  editorActive.current = !!editor;
 
   const home = places.find((p) => p.icon === "home")?.path ?? "";
 
@@ -419,6 +421,9 @@ export default function App() {
       // The viewer owns the keyboard while it's up: it has already handled the
       // keys it cares about, and the rest must not reach the folder behind it.
       if (s.quickLook) return;
+      // Same rule for the editor overlay. In particular, its Markdown preview
+      // shortcut must not also toggle the Finder preview behind it.
+      if (editorActive.current) return;
       const lead = [...s.selection].pop();
       const target = lead ? s.targets.find((t) => t.id === lead) : undefined;
       const perRow = store.view === "icons" ? iconsPerRow() : 1;
