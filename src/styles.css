@@ -221,45 +221,9 @@ button {
     env(safe-area-inset-left, 0px);
 }
 
-/* DeX keeps the desktop layout, while a phone remains usable instead of
-   squeezing a 228px Finder sidebar beside the file grid. */
-@media (max-width: 640px) {
-  .sidebar {
-    width: 76px;
-    flex-basis: 76px;
-    padding-inline: 8px;
-  }
-
-  .sidebar-head {
-    justify-content: center;
-    margin-top: 0;
-  }
-
-  .sidebar-wordmark,
-  .sidebar-title,
-  .place-label,
-  .crumbs,
-  .crumb-branch,
-  .tb-spacer {
-    display: none;
-  }
-
-  .place {
-    justify-content: center;
-    padding: 0;
-  }
-
-  .toolbar {
-    height: 54px;
-    flex-basis: 54px;
-    gap: 5px;
-    padding: 0 8px;
-  }
-
-  .tb-tools {
-    gap: 3px;
-  }
-}
+/* The narrow-phone layout lives at the bottom of this file, under "narrow":
+   every rule in it overrides one defined here, and at equal specificity the
+   later declaration is the one that wins. */
 
 /* Gradients and filters for the file glyphs, defined once for the document
    rather than re-emitted inside every icon. */
@@ -881,8 +845,12 @@ button {
 /**
  * Narrowing the window sheds toolbar content in order of what you can most
  * afford to lose: the branch chip, then the path's ancestors, then the search
- * field's resting width. Thresholds are viewport-wide because the sidebar left
- * of the toolbar is a fixed 228px.
+ * field's resting width, then the three tools with somewhere else to be. Below
+ * the last of them the sidebar itself gives way — see "narrow" at the end of
+ * the file.
+ *
+ * Thresholds are viewport-wide because the sidebar left of the toolbar is a
+ * fixed 228px down to that point.
  */
 @media (max-width: 1110px) {
   .crumb-branch {
@@ -896,7 +864,14 @@ button {
   }
 }
 
-@media (max-width: 820px) {
+/**
+ * The search field's resting width goes next. Each of these thresholds is the
+ * width at which the rung below it starts to overflow, plus about 60px so that
+ * a folder with a longer name than the one measured still clears the tools:
+ * with all five tools and a 152px field the toolbar needs 883px, so this fires
+ * at 940.
+ */
+@media (max-width: 940px) {
   .tb-search {
     width: 44px;
   }
@@ -911,6 +886,25 @@ button {
 
   .tb-search:focus-within input {
     opacity: 1;
+  }
+}
+
+/**
+ * Collapsing the field is not enough on its own — the tools still measure
+ * 264px, and below about 775px they stop clearing a path that is not allowed
+ * to shrink, so everything to the right of the folder name slides off the
+ * edge. Three more pieces go, each with somewhere else to be: Forward is the
+ * rarest of the three arrows, New File is in the background's context menu,
+ * and the preview toggle's 296px pane would by now be claiming more than half
+ * of what is left of the folder. The pane goes with its toggle, so a window
+ * dragged narrow can't strand it open with no way to shut it again.
+ */
+@media (max-width: 820px) {
+  .tb-forward,
+  .tb-new-file,
+  .tb-preview,
+  .preview {
+    display: none;
   }
 }
 
@@ -2116,23 +2110,6 @@ body.column-resizing * {
 }
 .editor-error { color: var(--git-conflict); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-@media (max-width: 640px) {
-  .editor-bar { height: 56px; flex-basis: 56px; padding: 0 8px; }
-  .editor-actions { gap: 5px; }
-  .editor-preview-toggle { width: 32px; justify-content: center; padding: 0; }
-  .editor-preview-toggle span { display: none; }
-  .editor-file-meta { display: block; padding: 12px; }
-  .editor-file-meta label { display: grid; grid-template-columns: 72px minmax(0, 1fr); }
-  .editor-file-meta input { width: 100%; }
-  .editor-types { margin-top: 10px; }
-  .editor-types button { flex: 0 0 auto; min-height: 30px; }
-  .editor-body { padding: 14px; }
-  .editor-body.split { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; }
-  .editor-markdown-preview { padding: 14px 2px 2px; border-top: 1px solid var(--hair-soft); border-left: 0; }
-  .editor-text { font-size: 15px; line-height: 1.62; }
-  .editor-foot { min-height: 38px; padding: 10px 14px; }
-}
-
 .preview {
   flex: 0 0 296px;
   width: 296px;
@@ -3008,6 +2985,179 @@ li.md-task {
 .pdf-holding {
   height: 100%;
   background: var(--fill);
+}
+
+/* ============================================================== narrow ==
+ *
+ * A folding phone opened out, a tablet or a DeX desktop all keep the layout
+ * above. Folded shut — roughly 410 CSS pixels across — none of it fits: a
+ * 228px Finder sidebar and a 296px preview pane leave the files themselves a
+ * sliver in between.
+ *
+ * The threshold is where a 228px sidebar stops leaving the toolbar room for
+ * the folder name and the tools it has not already shed: measured, that is
+ * about 690px, and 760 buys enough slack for a folder whose name is longer
+ * than "Fiddler Demo". Both of a folding phone's screens sit well clear of it,
+ * one either side.
+ *
+ * This section must stay last in the file. Every rule in it restates a
+ * property set earlier at the same specificity, so it only wins by coming
+ * after. (It used to sit up beside `.app`, where the width, height and padding
+ * overrides were all quietly dead and only the `display: none`s took effect —
+ * which is why a phone got a full-width sidebar full of unlabelled icons.)
+ */
+@media (max-width: 760px) {
+  /* ------------------------------------------------- sidebar, as a rail -- */
+
+  .sidebar {
+    width: 76px;
+    flex: 0 0 76px;
+    padding: 6px 8px 10px;
+  }
+
+  /* Nothing floats over this column on a phone, so it needs no room for the
+     traffic lights. */
+  .sidebar-head {
+    justify-content: center;
+    margin-top: 0;
+  }
+
+  /* At 60px of usable width there is room for the icon and nothing else. Each
+     control keeps its title, so a long press still names it. */
+  .sidebar-wordmark,
+  .sidebar-title,
+  .place-label,
+  .favorites-empty,
+  .device-self,
+  .usb-stage,
+  .usb-storage-body {
+    display: none;
+  }
+
+  /* `.place.usb-storage` is listed separately because it out-specifies a bare
+     `.place` and would otherwise keep its taller auto height. */
+  .place,
+  .place.usb-storage {
+    justify-content: center;
+    gap: 0;
+    padding: 0;
+    height: 44px;
+    flex-basis: 44px;
+  }
+
+  /* The lock and the throttle bolt hang off the end of a label that is no
+     longer there, and would sit on top of the icon. */
+  .device-lock,
+  .usb-slow {
+    display: none;
+  }
+
+  /* --------------------------------------------------------- toolbar --- */
+
+  .toolbar {
+    height: 54px;
+    flex: 0 0 54px;
+    gap: 4px;
+    padding: 0 6px;
+  }
+
+  /* Forward, New File, the preview toggle and the preview pane itself have
+     already gone at 820px; see the rung above. */
+
+  /* The current folder's name is the only thing left saying where you are, so
+     unlike on the desktop it is allowed to shrink and ellipsise rather than
+     push the tools off the edge. `.crumbs` clips so that focusing the search
+     field — which takes the width it needs — can squeeze it away entirely. */
+  .crumbs {
+    flex: 0 1 auto;
+    min-width: 0;
+    margin-left: 0;
+    overflow: hidden;
+  }
+
+  .crumbs .crumb.here {
+    flex: 0 1 auto;
+    min-width: 0;
+    padding: 5px 4px;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .tb-spacer {
+    min-width: 0;
+  }
+
+  .tb-tools {
+    gap: 3px;
+  }
+
+  .tb-seg button,
+  .tb-seg::before {
+    width: 34px;
+  }
+
+  .tb-seg[data-at="1"]::before {
+    transform: translateX(34px);
+  }
+
+  .tb-search {
+    width: 40px;
+    padding: 0 11px;
+  }
+
+  .tb-search:focus-within {
+    width: 132px;
+  }
+
+  /* ------------------------------------------------------- icon grid --- */
+
+  /* Matches the tighter edge the grid measures with at this width; see NARROW
+     in IconGrid. */
+  .grid-section {
+    left: 18px;
+    right: 12px;
+  }
+
+  /* -------------------------------------------------------- statusbar --- */
+
+  /* Same three tracks, still symmetric so the count stays optically centred —
+     but every one of them may now shrink below its content. An `auto` middle
+     wrapped the count onto a second line that the bar's fixed height clipped;
+     with a 0 floor it gives way and ellipsises instead. */
+  .statusbar {
+    grid-template-columns: minmax(0, 1fr) minmax(0, auto) minmax(0, 1fr);
+    height: 38px;
+    flex: 0 0 38px;
+    padding: 0 8px;
+  }
+
+  .status-text {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .status-zoom input {
+    width: 68px;
+  }
+
+  /* ----------------------------------------------------- text editor --- */
+
+  .editor-bar { height: 56px; flex-basis: 56px; padding: 0 8px; }
+  .editor-actions { gap: 5px; }
+  .editor-preview-toggle { width: 32px; justify-content: center; padding: 0; }
+  .editor-preview-toggle span { display: none; }
+  .editor-file-meta { display: block; padding: 12px; }
+  .editor-file-meta label { display: grid; grid-template-columns: 72px minmax(0, 1fr); }
+  .editor-file-meta input { width: 100%; }
+  .editor-types { margin-top: 10px; }
+  .editor-types button { flex: 0 0 auto; min-height: 30px; }
+  .editor-body { padding: 14px; }
+  .editor-body.split { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; }
+  .editor-markdown-preview { padding: 14px 2px 2px; border-top: 1px solid var(--hair-soft); border-left: 0; }
+  .editor-text { font-size: 15px; line-height: 1.62; }
+  .editor-foot { min-height: 38px; padding: 10px 14px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

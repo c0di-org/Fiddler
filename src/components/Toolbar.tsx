@@ -52,7 +52,7 @@ export function Toolbar(p: Props) {
           <ChevronLeft size={18} />
         </button>
         <button
-          className="tb-btn"
+          className="tb-btn tb-forward"
           disabled={!p.canForward}
           onClick={p.onForward}
           title="Forward (⌘])"
@@ -115,7 +115,7 @@ export function Toolbar(p: Props) {
         </div>
 
         <button
-          className={`tb-btn ${p.previewOpen ? "on" : ""}`}
+          className={`tb-btn tb-preview ${p.previewOpen ? "on" : ""}`}
           onClick={p.onTogglePreview}
           title="Preview (⇧⌘P)"
         >

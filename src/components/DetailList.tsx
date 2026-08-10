@@ -25,6 +25,20 @@ const COLUMNS: { key: SortKey; label: string; min: number; width: number }[] = [
 
 type ColumnKey = (typeof COLUMNS)[number]["key"];
 type ColumnWidths = Record<ColumnKey, number>;
+
+/**
+ * The five columns' minimums come to 596px, so on a phone they cannot all be
+ * on screen — and a fixed track that doesn't fit is worse than one that isn't
+ * there, because the overflow is simply clipped and unreachable. Below this the
+ * list keeps the two columns worth having and drops the rest; the name column
+ * still carries the badges, so what is lost is only the dates and the kind.
+ *
+ * Name leads regardless of the saved order: a phone reads a row from its left
+ * edge, and a lone "Size" out in front of the name reads as noise.
+ */
+const NARROW = 560;
+const NARROW_COLUMNS: ColumnKey[] = ["name", "size"];
+const NARROW_SIZE_W = 76;
 const COLUMN_PREFS_KEY = "fiddler:list-columns:v1";
 
 function defaultWidths(): ColumnWidths {
@@ -85,6 +99,7 @@ export function DetailList(props: Props) {
   const revealed = useRef(0);
   const [scrollTop, setScrollTop] = useState(0);
   const [viewport, setViewport] = useState(600);
+  const [width, setWidth] = useState(900);
   const [columnPrefs, setColumnPrefs] = useState(savedColumnPrefs);
   const draggedColumn = useRef<ColumnKey | null>(null);
   const suppressSort = useRef(false);
@@ -94,19 +109,26 @@ export function DetailList(props: Props) {
     localStorage.setItem(COLUMN_PREFS_KEY, JSON.stringify(columnPrefs));
   }, [columnPrefs]);
 
+  const narrow = width < NARROW;
+
   const columns = useMemo(
-    () => columnPrefs.order.map((key) => COLUMNS.find((column) => column.key === key)!).filter(Boolean),
-    [columnPrefs.order],
+    () =>
+      (narrow ? NARROW_COLUMNS : columnPrefs.order)
+        .map((key) => COLUMNS.find((column) => column.key === key)!)
+        .filter(Boolean),
+    [columnPrefs.order, narrow],
   );
   const columnStyle = useMemo<CSSProperties>(() => ({
-    gridTemplateColumns: columns
-      .map((column) =>
-        column.key === "name"
-          ? `minmax(${columnPrefs.widths[column.key]}px, 1fr)`
-          : `${columnPrefs.widths[column.key]}px`,
-      )
-      .join(" "),
-  }), [columns, columnPrefs.widths]);
+    gridTemplateColumns: narrow
+      ? `minmax(0, 1fr) ${NARROW_SIZE_W}px`
+      : columns
+          .map((column) =>
+            column.key === "name"
+              ? `minmax(${columnPrefs.widths[column.key]}px, 1fr)`
+              : `${columnPrefs.widths[column.key]}px`,
+          )
+          .join(" "),
+  }), [columns, columnPrefs.widths, narrow]);
 
   const resizeColumn = useCallback((key: ColumnKey, clientX: number) => {
     const column = COLUMNS.find((candidate) => candidate.key === key)!;
@@ -182,9 +204,13 @@ export function DetailList(props: Props) {
   useLayoutEffect(() => {
     const el = scrollerRef.current;
     if (!el) return;
-    const ro = new ResizeObserver(() => setViewport(el.clientHeight));
+    const ro = new ResizeObserver(() => {
+      setViewport(el.clientHeight);
+      setWidth(el.clientWidth);
+    });
     ro.observe(el);
     setViewport(el.clientHeight);
+    setWidth(el.clientWidth);
     return () => ro.disconnect();
   }, []);
 
@@ -249,34 +275,40 @@ export function DetailList(props: Props) {
               {c.label}
               {props.sortKey === c.key && <i className={props.sortAsc ? "asc" : "desc"} />}
             </button>
-            <button
-              className="column-drag"
-              draggable
-              aria-label={`Reorder ${c.label} column`}
-              title="Drag to reorder column"
-              onDragStart={(event) => {
-                draggedColumn.current = c.key;
-                event.dataTransfer.effectAllowed = "move";
-                event.dataTransfer.setData("text/plain", c.key);
-              }}
-              onDragEnd={() => {
-                draggedColumn.current = null;
-                window.setTimeout(() => {
-                  suppressSort.current = false;
-                }, 0);
-              }}
-            >
-              <GripIcon size={12} />
-            </button>
-            <div
-              className="column-resizer"
-              role="separator"
-              aria-orientation="vertical"
-              aria-label={`Resize ${c.label} column`}
-              title="Drag to resize column"
-              onDragStart={(event) => event.preventDefault()}
-              onPointerDown={(event) => beginResize(c.key, event)}
-            />
+            {/* Reordering and resizing both assume there is width to spend.
+                Narrow mode picks the columns itself, so neither applies. */}
+            {!narrow && (
+              <>
+                <button
+                  className="column-drag"
+                  draggable
+                  aria-label={`Reorder ${c.label} column`}
+                  title="Drag to reorder column"
+                  onDragStart={(event) => {
+                    draggedColumn.current = c.key;
+                    event.dataTransfer.effectAllowed = "move";
+                    event.dataTransfer.setData("text/plain", c.key);
+                  }}
+                  onDragEnd={() => {
+                    draggedColumn.current = null;
+                    window.setTimeout(() => {
+                      suppressSort.current = false;
+                    }, 0);
+                  }}
+                >
+                  <GripIcon size={12} />
+                </button>
+                <div
+                  className="column-resizer"
+                  role="separator"
+                  aria-orientation="vertical"
+                  aria-label={`Resize ${c.label} column`}
+                  title="Drag to resize column"
+                  onDragStart={(event) => event.preventDefault()}
+                  onPointerDown={(event) => beginResize(c.key, event)}
+                />
+              </>
+            )}
           </div>
         ))}
       </div>
@@ -320,6 +352,7 @@ export function DetailList(props: Props) {
                 searching={searching}
                 columnStyle={columnStyle}
                 columnOrder={columnPrefs.order}
+                narrow={narrow}
                 onRenameCommit={props.onRenameCommit}
                 onRenameCancel={props.onRenameCancel}
                 touchFolderDrag={props.touchFolderDrag}
@@ -342,6 +375,7 @@ function RowView({
   onRenameCancel,
   columnStyle,
   columnOrder,
+  narrow,
   touchFolderDrag,
 }: {
   row: Row;
@@ -352,6 +386,10 @@ function RowView({
   onRenameCancel: () => void;
   columnStyle: CSSProperties;
   columnOrder: ColumnKey[];
+  /** Two grid tracks instead of five; the cells that have no track must not be
+   *  rendered at all, or they wrap onto an implicit row and break the fixed
+   *  row height the virtual scroller measures with. */
+  narrow: boolean;
   touchFolderDrag?: FolderTouchDragHandlers;
 }) {
   const expandable = !searching && (row.kind === "wt-group" || row.dirPath !== null);
@@ -390,7 +428,7 @@ function RowView({
       onPointerUp={touchDrag.onPointerUp}
       onPointerCancel={touchDrag.onPointerCancel}
     >
-      <div className="c-name" style={{ paddingLeft: 6 + row.depth * 17, order: columnOrder.indexOf("name") }}>
+      <div className="c-name" style={{ paddingLeft: 6 + row.depth * 17, order: narrow ? 0 : columnOrder.indexOf("name") }}>
         <span
           className={`twisty ${expandable ? "" : "hidden"} ${row.expanded ? "open" : ""}`}
           data-twisty
@@ -446,18 +484,24 @@ function RowView({
         )}
       </div>
 
-      <div className="c-added" style={{ order: columnOrder.indexOf("added") }}>
-        {e && !e.nearby ? formatStamp(e.added) : ""}
-      </div>
-      <div className="c-when" style={{ order: columnOrder.indexOf("modified") }}>
-        {e && !e.nearby ? formatStamp(e.mtime) : ""}
-      </div>
-      <div className="c-size" style={{ order: columnOrder.indexOf("size") }}>
+      {!narrow && (
+        <>
+          <div className="c-added" style={{ order: columnOrder.indexOf("added") }}>
+            {e && !e.nearby ? formatStamp(e.added) : ""}
+          </div>
+          <div className="c-when" style={{ order: columnOrder.indexOf("modified") }}>
+            {e && !e.nearby ? formatStamp(e.mtime) : ""}
+          </div>
+        </>
+      )}
+      <div className="c-size" style={{ order: narrow ? 1 : columnOrder.indexOf("size") }}>
         {e && !e.nearby ? formatSize(e.size, e.kind === "dir") : ""}
       </div>
-      <div className="c-kind" style={{ order: columnOrder.indexOf("kind") }}>
-        {e ? kindOf(e) : row.kind === "worktree" ? "Worktree" : ""}
-      </div>
+      {!narrow && (
+        <div className="c-kind" style={{ order: columnOrder.indexOf("kind") }}>
+          {e ? kindOf(e) : row.kind === "worktree" ? "Worktree" : ""}
+        </div>
+      )}
     </div>
   );
 }
