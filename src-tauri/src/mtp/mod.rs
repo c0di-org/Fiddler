@@ -143,16 +143,45 @@ enum Request {
     },
 }
 
+/// Size and modification time for one object, remembered from its listing.
+///
+/// The thumbnail cache is keyed on (path, mtime, size, px), and for a local file
+/// those last two come from a `stat`. There is no `stat` for an object on a
+/// phone, and asking the device would put a USB round trip in front of every
+/// cache *probe* — the one operation that has to stay free, because it runs for
+/// every tile on screen before any work is queued. So listings record what they
+/// already saw, and the probe reads a mutex.
+pub type ObjectMeta = (u64, i64);
+
+/// Entries remembered for the cache probe. A few large folders' worth; past that
+/// the map is cleared rather than evicted one at a time, because the cost of
+/// being wrong is one re-listing, not a wrong answer.
+const META_CAP: usize = 20_000;
+
 pub struct MtpService {
     jobs: Sender<Request>,
     devices: Arc<Mutex<Vec<UsbDevice>>>,
+    meta: Arc<Mutex<HashMap<String, ObjectMeta>>>,
+}
+
+/// The running service, for callers too far from `AppState` to be handed one.
+///
+/// `thumb::generate` runs on a pool worker with no application state at all, and
+/// threading a handle down to it would mean widening four signatures that have
+/// nothing else to do with USB.
+static SERVICE: std::sync::OnceLock<Arc<MtpService>> = std::sync::OnceLock::new();
+
+pub fn service() -> Option<&'static Arc<MtpService>> {
+    SERVICE.get()
 }
 
 impl MtpService {
     pub fn start(app: AppHandle) -> Arc<Self> {
         let (jobs, inbox) = channel();
         let devices = Arc::new(Mutex::new(Vec::new()));
-        let service = Arc::new(MtpService { jobs, devices: devices.clone() });
+        let meta = Arc::new(Mutex::new(HashMap::new()));
+        let service = Arc::new(MtpService { jobs, devices: devices.clone(), meta: meta.clone() });
+        let _ = SERVICE.set(service.clone());
 
         thread::Builder::new()
             .name("fiddler-mtp".into())
@@ -167,7 +196,7 @@ impl MtpService {
                         return;
                     }
                 };
-                runtime.block_on(Worker::new(app, devices).run(inbox));
+                runtime.block_on(Worker::new(app, devices, meta).run(inbox));
             })
             .ok();
 
@@ -202,6 +231,15 @@ impl MtpService {
             worktrees: Vec::new(),
             status_pending: false,
         })
+    }
+
+    /// Size and mtime for an object we have listed, without touching the device.
+    ///
+    /// Returns `None` for a path no listing has covered, which is the honest
+    /// answer: we would have to go to the device to find out, and the caller is
+    /// a cache probe that must not block.
+    pub fn meta(&self, path: &str) -> Option<ObjectMeta> {
+        self.meta.lock().ok()?.get(path).copied()
     }
 
     /// A bounded read, which is how previews and thumbnails work: a 4 MB photo
@@ -241,29 +279,37 @@ struct Slot {
 struct Worker {
     app: AppHandle,
     devices: Arc<Mutex<Vec<UsbDevice>>>,
+    meta: Arc<Mutex<HashMap<String, ObjectMeta>>>,
     slots: HashMap<String, Slot>,
 }
 
 impl Worker {
-    fn new(app: AppHandle, devices: Arc<Mutex<Vec<UsbDevice>>>) -> Self {
-        Worker { app, devices, slots: HashMap::new() }
+    fn new(
+        app: AppHandle,
+        devices: Arc<Mutex<Vec<UsbDevice>>>,
+        meta: Arc<Mutex<HashMap<String, ObjectMeta>>>,
+    ) -> Self {
+        Worker { app, devices, meta, slots: HashMap::new() }
     }
 
     async fn run(mut self, inbox: Receiver<Request>) {
         loop {
             self.poll().await;
-            // Serve whatever arrived while we were polling, then go back to
-            // polling. `try_recv` rather than a blocking wait, because the poll
-            // loop is also what notices a phone being unlocked.
+            // Serve requests until the next poll is due.
+            //
+            // This waits on the channel rather than spinning on `try_recv`,
+            // which matters more than it looks: a screen of thumbnails is two
+            // dozen sequential requests, and any per-request delay here is paid
+            // two dozen times. A byte-range read takes ~9ms, so a 20ms poll gap
+            // would have tripled the time a photo grid takes to fill.
             let deadline = Instant::now() + POLL;
-            while Instant::now() < deadline {
-                match inbox.try_recv() {
+            loop {
+                let Some(remaining) = deadline.checked_duration_since(Instant::now()) else { break };
+                match inbox.recv_timeout(remaining) {
                     Ok(request) => self.serve(request).await,
-                    Err(std::sync::mpsc::TryRecvError::Empty) => {
-                        tokio::time::sleep(Duration::from_millis(20)).await;
-                    }
+                    Err(std::sync::mpsc::RecvTimeoutError::Timeout) => break,
                     // Every command handle is gone, so the app is shutting down.
-                    Err(std::sync::mpsc::TryRecvError::Disconnected) => return,
+                    Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => return,
                 }
             }
         }
@@ -338,6 +384,18 @@ impl Worker {
                     Some(slot) => list(slot, &serial, storage, &rel).await,
                     None => Err("That device is not connected".into()),
                 };
+                // Remember what we just saw, so the thumbnail cache probe for
+                // these tiles costs a hash lookup instead of a USB round trip.
+                if let Ok(entries) = &result {
+                    if let Ok(mut meta) = self.meta.lock() {
+                        if meta.len() + entries.len() > META_CAP {
+                            meta.clear();
+                        }
+                        for entry in entries {
+                            meta.insert(entry.path.clone(), (entry.size, entry.mtime));
+                        }
+                    }
+                }
                 let _ = reply.send(result);
             }
             Request::ReadRange { serial, storage, rel, offset, len, reply } => {
@@ -794,6 +852,42 @@ mod tests {
         assert_eq!(&head, b"hello");
         let middle = read_range(&mut slot, storage, "/Download/notes.txt", 6, 4).await.unwrap();
         assert_eq!(&middle, b"from");
+    }
+
+    #[tokio::test]
+    async fn asking_for_more_bytes_than_a_file_has_returns_the_file() {
+        // Thumbnails always ask for 256 KB, and most files on a phone are
+        // smaller than that. If a read past EOF errored instead of clamping,
+        // every small image would silently fall back to a grey glyph.
+        let fake = Fake::new("eof");
+        let mut slot = fake.slot().await;
+        let storage = slot.snapshot.storages[0].id;
+
+        let all = read_range(&mut slot, storage, "/Download/notes.txt", 0, 256 * 1024)
+            .await
+            .expect("a short file must not error on an oversized request");
+        assert_eq!(&all, b"hello from the phone");
+
+        // And a window that starts inside the file but runs off the end.
+        let tail = read_range(&mut slot, storage, "/Download/notes.txt", 15, 4096).await.unwrap();
+        assert_eq!(&tail, b"phone");
+    }
+
+    #[tokio::test]
+    async fn a_listing_is_what_makes_a_thumbnail_key_available() {
+        // The thumbnail cache probe reads sizes and mtimes out of a map the
+        // listing fills, because there is no `stat` for an object on a phone
+        // and a probe runs for every tile on screen.
+        let fake = Fake::new("meta");
+        let mut slot = fake.slot().await;
+        let storage = slot.snapshot.storages[0].id;
+
+        let entries = list(&mut slot, &fake.serial, Some(storage), "/DCIM/Camera").await.unwrap();
+        let photo = entries.iter().find(|e| e.name == "IMG_0001.jpg").unwrap();
+        assert!(photo.size > 0 && photo.thumbable);
+        // Both halves of the key must survive the trip out of the listing.
+        assert_eq!(photo.size, 22);
+        assert_eq!(photo.path, format!("mtp://{}/{storage}/DCIM/Camera/IMG_0001.jpg", fake.serial));
     }
 
     #[tokio::test]

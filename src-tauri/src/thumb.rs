@@ -258,26 +258,59 @@ pub fn keyed(path: &Path, max_px: u32, variant: u64) -> Result<PathBuf, String> 
         .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
         .map(|d| d.as_secs())
         .unwrap_or(0);
+    Ok(keyed_with(path, max_px, variant, mtime, meta.len()))
+}
 
+/// The cache path for content whose mtime and size the caller already knows.
+///
+/// Objects on a USB device have no `stat` to call, but a listing has already
+/// reported both — so a phone's photos land in the same cache, under the same
+/// key shape, as everything else. Same inputs, same file on disk.
+pub fn keyed_with(path: &Path, max_px: u32, variant: u64, mtime: u64, len: u64) -> PathBuf {
     let mut h = DefaultHasher::new();
     path.hash(&mut h);
     mtime.hash(&mut h);
-    meta.len().hash(&mut h);
+    len.hash(&mut h);
     max_px.hash(&mut h);
     variant.hash(&mut h);
 
-    Ok(cache_root().join(format!("{:016x}.png", h.finish())))
+    cache_root().join(format!("{:016x}.png", h.finish()))
 }
 
 /// An already-rendered thumbnail, if we have one. Never renders, so it's safe to
 /// call for every tile on screen before queueing any real work.
 pub fn cached(path: &Path, max_px: u32) -> Option<PathBuf> {
-    let out = cache_path(path, max_px).ok()?;
+    let out = usb_cache_path(path, max_px).unwrap_or_else(|| cache_path(path, max_px).ok())?;
     out.is_file().then_some(out)
+}
+
+/// The cache path for an object on a USB device, or `None` if this isn't one.
+///
+/// The outer `Option` distinguishes "not a device path" from "a device path we
+/// have no listing for" — the second is a miss we can't key, and must not fall
+/// through to `cache_path`, which would try to `stat` a `mtp://` string.
+#[cfg(not(target_os = "android"))]
+fn usb_cache_path(path: &Path, max_px: u32) -> Option<Option<PathBuf>> {
+    let text = path.to_str()?;
+    if crate::mtp::path::parse(text).is_none() {
+        return None;
+    }
+    let meta = crate::mtp::service().and_then(|s| s.meta(text));
+    Some(meta.map(|(len, mtime)| keyed_with(path, max_px, 0, mtime.max(0) as u64, len)))
+}
+
+#[cfg(target_os = "android")]
+fn usb_cache_path(_path: &Path, _max_px: u32) -> Option<Option<PathBuf>> {
+    None
 }
 
 /// Produce (or reuse) a thumbnail and return the cached file's path.
 pub fn generate(path: &Path, max_px: u32) -> Result<PathBuf, String> {
+    #[cfg(not(target_os = "android"))]
+    if let Some(out) = usb_cache_path(path, max_px) {
+        return usb_thumbnail(path, max_px, out.ok_or("that device path has not been listed")?);
+    }
+
     let out = cache_path(path, max_px)?;
     if out.is_file() {
         return Ok(out);
@@ -302,6 +335,65 @@ pub fn generate(path: &Path, max_px: u32) -> Result<PathBuf, String> {
         Lane::QuickLook | Lane::None => quicklook(path, max_px, &out)?,
     }
     Ok(out)
+}
+
+/// How much of a file to pull off a device before trying to draw it.
+///
+/// A phone photo carries a full-size JPEG thumbnail in its EXIF block, within
+/// the first couple of hundred kilobytes. Measured on a Galaxy Z Fold 7 over
+/// USB 2.0: 256 KB arrives in ~8.9ms and contains a ~50 KB embedded thumbnail
+/// every time, where pulling the whole 4-8 MB image would cost over a hundred
+/// milliseconds each and swamp the bus for a screen of tiles.
+const USB_HEAD_BYTES: u32 = 256 * 1024;
+
+/// A thumbnail for an object on a USB device.
+///
+/// ImageIO wants somewhere to read from, so the head of the file lands in a
+/// temporary file and takes the ordinary raster path from there. That costs one
+/// 256 KB write and buys the EXIF-thumbnail extraction, orientation transform
+/// and PNG encoding already tuned for local files.
+///
+/// A truncated file is the normal case here, not an error: ImageIO finds the
+/// embedded thumbnail in the header and never reaches the missing tail. When a
+/// format keeps nothing useful up front, this fails and the tile falls back to
+/// its glyph rather than dragging megabytes over the cable on spec.
+#[cfg(not(target_os = "android"))]
+fn usb_thumbnail(path: &Path, max_px: u32, out: PathBuf) -> Result<PathBuf, String> {
+    if out.is_file() {
+        return Ok(out);
+    }
+    // Raster and text both render from the head alone. A PDF does not — its page
+    // objects can live anywhere in the file, so page one is not reliably in the
+    // first 256 KB, and pulling a whole document per tile is not worth it.
+    let lane = lane_of(path);
+    if !matches!(lane, Lane::Raster | Lane::Text) {
+        return Err("no device preview for this kind of file".into());
+    }
+    let service = crate::mtp::service().ok_or("the USB service is not running")?;
+    let text = path.to_str().ok_or("unrepresentable path")?;
+    let head = service.read_range(text, 0, USB_HEAD_BYTES)?;
+
+    // The scratch file keeps the real extension: `thumb_text` picks its syntax
+    // highlighting from it, and ImageIO uses it as a decoding hint.
+    let suffix = path.extension().and_then(|e| e.to_str()).unwrap_or("bin");
+    let scratch = cache_root().join(format!(
+        ".head-{:016x}.{suffix}",
+        out.file_name().map_or(0, hash_of)
+    ));
+    std::fs::write(&scratch, &head).map_err(|e| e.to_string())?;
+    let result = match lane {
+        Lane::Text => crate::thumb_text::render(&scratch, max_px, &out),
+        _ => image_io(&scratch, max_px, &out),
+    };
+    let _ = std::fs::remove_file(&scratch);
+    result.map(|_| out)
+}
+
+#[cfg(not(target_os = "android"))]
+fn hash_of(name: &std::ffi::OsStr) -> u64 {
+    let mut h = DefaultHasher::new();
+    name.hash(&mut h);
+    h.finish()
 }
 
 /// Decode straight to thumbnail size via ImageIO.
@@ -526,6 +618,37 @@ mod tests {
             "edits must invalidate the cache"
         );
         std::fs::remove_file(&f).ok();
+    }
+
+    #[test]
+    fn a_device_object_keys_the_cache_the_same_way_a_file_does() {
+        // A phone's photos have no `stat`, so their mtime and size arrive from
+        // the listing instead. The key must still turn on all four inputs, or
+        // a replaced photo would show its predecessor's thumbnail forever.
+        let p = Path::new("mtp://RFCY71NMVTA/65537/DCIM/Camera/20260727_102034.jpg");
+        let base = keyed_with(p, 128, 0, 1_786_348_440, 7_828_774);
+
+        assert_eq!(base, keyed_with(p, 128, 0, 1_786_348_440, 7_828_774), "same inputs, same file");
+        assert_ne!(base, keyed_with(p, 256, 0, 1_786_348_440, 7_828_774), "requested size must key it");
+        assert_ne!(base, keyed_with(p, 128, 0, 1_786_348_441, 7_828_774), "a newer mtime must key it");
+        assert_ne!(base, keyed_with(p, 128, 0, 1_786_348_440, 7_828_775), "a changed size must key it");
+
+        let other = Path::new("mtp://RFCY71NMVTA/65537/DCIM/Camera/20260518_162248.jpg");
+        assert_ne!(base, keyed_with(other, 128, 0, 1_786_348_440, 7_828_774), "two photos are two keys");
+    }
+
+    #[test]
+    fn a_device_path_never_falls_through_to_a_filesystem_stat() {
+        // `cache_path` would try to stat the literal string "mtp://…" and fail.
+        // The device branch has to claim the path first, and report "no listing
+        // yet" as a miss it owns rather than letting it escape.
+        let device = Path::new("mtp://SERIAL/1/DCIM/never-listed.jpg");
+        assert!(cache_path(device, 128).is_err(), "a device path has nothing to stat");
+        assert!(
+            usb_cache_path(device, 128).is_some(),
+            "the device branch must claim it rather than deferring"
+        );
+        assert!(usb_cache_path(Path::new("/etc/hosts"), 128).is_none(), "local paths are not claimed");
     }
 }
 
