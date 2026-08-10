@@ -172,6 +172,15 @@ export type UsbDevice = UsbStage & {
   throttled: boolean;
 };
 
+/** A chunk of a device folder, delivered while the rest is still being read. */
+export interface EntryBatch {
+  /** The folder these belong to; a batch for a folder you have left is dropped. */
+  path: string;
+  entries: Entry[];
+  /** No more are coming — the folder ended, or the read was cancelled. */
+  done: boolean;
+}
+
 export interface PairingInfo {
   id: string;
   name: string;

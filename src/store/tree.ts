@@ -330,6 +330,30 @@ export class TreeStore {
     }
   }
 
+  /**
+   * Add a chunk of a folder that is still being read.
+   *
+   * A device folder arrives in pieces because MTP costs a round trip per object
+   * — a camera roll of 1348 photos takes about six seconds — so the first
+   * screenful is drawn immediately and the rest lands here. Dropping the sort
+   * cache re-sorts the whole folder, which keeps the order stable as it grows
+   * rather than appending each batch to the end.
+   */
+  appendEntries(path: string, entries: Entry[], done: boolean) {
+    const listing = this.listings.get(path);
+    // No listing means the folder was never opened or has since been dropped;
+    // a batch that outlived its folder is stale, not an error.
+    if (!listing) return;
+    if (entries.length > 0) {
+      listing.entries = listing.entries.concat(entries);
+    }
+    // `statusPending` is the existing "more is coming" signal, shared with the
+    // git status pass, so the status bar already knows how to render it.
+    listing.statusPending = !done;
+    this.sorted.delete(path);
+    this.bump();
+  }
+
   async invalidateDirs(dirs: string[]) {
     const open = dirs.filter((d) => this.listings.has(d));
     if (open.length === 0) return;

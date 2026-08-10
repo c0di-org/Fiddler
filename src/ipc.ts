@@ -14,6 +14,7 @@ import type {
   TextHead,
   ThumbReady,
   ThumbReq,
+  EntryBatch,
   UsbDevice,
 } from "./types";
 
@@ -45,6 +46,15 @@ export const usbDevices = () => invoke<UsbDevice[]>("usb_devices");
  */
 export const onUsbDevices = (fn: (devices: UsbDevice[]) => void) =>
   listen<UsbDevice[]>("fiddler:usb", (event) => fn(event.payload));
+
+/**
+ * The rest of a device folder, arriving after `listDir` returned its first
+ * screenful. MTP costs one round trip per object, so a big folder is drawn as
+ * it is read instead of after.
+ */
+export const onUsbEntries = (fn: (batch: EntryBatch) => void) =>
+  listen<EntryBatch>("fiddler:usb-entries", (event) => fn(event.payload));
+
 export const nearbyPairingInfo = () => invoke<PairingInfo>("nearby_pairing_info");
 export const pairNearbyDevice = (id: string, code: string) =>
   invoke<void>("pair_nearby_device", { id, code });

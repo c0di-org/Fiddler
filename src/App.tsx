@@ -139,6 +139,14 @@ export default function App() {
     return () => { alive = false; void stop.then((off) => off()); };
   }, []);
 
+  // The rest of a device folder, arriving in batches behind the first screenful.
+  useEffect(() => {
+    const stop = ipc.onUsbEntries((batch) =>
+      store.appendEntries(batch.path, batch.entries, batch.done)
+    );
+    return () => void stop.then((off) => off());
+  }, []);
+
   // The accent follows the OS unless overridden, and has to be re-derived when
   // the appearance flips or the OS accent changes while we're running.
   useEffect(() => {

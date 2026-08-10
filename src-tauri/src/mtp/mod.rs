@@ -37,6 +37,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
 
 use mtp_rs::mtp::{MtpDevice, ObjectHandle, Storage};
+use mtp_rs::CancelToken;
 
 use crate::model::{DirListing, Entry, Kind};
 
@@ -125,13 +126,40 @@ fn describe_link(speed: Option<mtp_rs::UsbSpeed>) -> (Option<String>, Option<u32
     }
 }
 
+/// How many entries come back from the initial `list_dir` call.
+///
+/// Enough to fill a window, so a folder is drawn and scrollable before the rest
+/// arrives, but not so many that the first paint waits on them. At roughly
+/// 4.5ms per object this is about a fifth of a second.
+const FIRST_BATCH: usize = 48;
+
+/// After the first batch, entries are emitted at most this often. A folder of
+/// 1348 photos would otherwise be 1348 IPC messages.
+const BATCH_EVERY: Duration = Duration::from_millis(140);
+
+/// A chunk of a folder, delivered while the rest is still being read.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EntryBatch {
+    /// The folder these belong to, so a late batch for a folder the person has
+    /// already left can be dropped rather than drawn.
+    pub path: String,
+    pub entries: Vec<Entry>,
+    /// No more are coming — either the folder ended or the read was cancelled.
+    pub done: bool,
+}
+
 /// Device I/O, all of it serialised onto the worker thread.
 enum Request {
     List {
         serial: String,
         storage: Option<u64>,
         rel: String,
-        reply: Sender<Result<Vec<Entry>, String>>,
+        /// Flipped when the person navigates away. Checked before each object's
+        /// metadata roundtrip, so leaving a 1348-photo folder stops the read
+        /// within one roundtrip instead of running it to completion.
+        cancel: CancelToken,
+        reply: Sender<Result<(Vec<Entry>, bool), String>>,
     },
     ReadRange {
         serial: String,
@@ -162,6 +190,12 @@ pub struct MtpService {
     jobs: Sender<Request>,
     devices: Arc<Mutex<Vec<UsbDevice>>>,
     meta: Arc<Mutex<HashMap<String, ObjectMeta>>>,
+    /// The listing currently being read, if any.
+    ///
+    /// Held here rather than on the worker because the point is to cancel from
+    /// *outside* it: the worker is busy walking the folder we want to abandon,
+    /// so it cannot notice a new request until it stops.
+    reading: Arc<Mutex<Option<CancelToken>>>,
 }
 
 /// The running service, for callers too far from `AppState` to be handed one.
@@ -180,7 +214,12 @@ impl MtpService {
         let (jobs, inbox) = channel();
         let devices = Arc::new(Mutex::new(Vec::new()));
         let meta = Arc::new(Mutex::new(HashMap::new()));
-        let service = Arc::new(MtpService { jobs, devices: devices.clone(), meta: meta.clone() });
+        let service = Arc::new(MtpService {
+            jobs,
+            devices: devices.clone(),
+            meta: meta.clone(),
+            reading: Arc::new(Mutex::new(None)),
+        });
         let _ = SERVICE.set(service.clone());
 
         thread::Builder::new()
@@ -212,24 +251,44 @@ impl MtpService {
     /// List one directory on a device. At the device root the listing is the
     /// device's storages, so a single-storage phone still has somewhere to land
     /// and a phone with an SD card gets a real choice.
+    /// Returns as soon as the first screenful is known; the rest of the folder
+    /// follows on `fiddler:usb-entries`. A folder of 1348 photos takes about six
+    /// seconds to read in full — one metadata roundtrip per object — and waiting
+    /// for all of it before drawing anything is the difference between a file
+    /// browser and a progress bar.
+    ///
+    /// `status_pending` on the returned listing means "more is coming", which is
+    /// the same signal a git status pass already uses.
     pub fn listing(&self, path: &str, _show_hidden: bool) -> Result<DirListing, String> {
         let parsed = path::parse(path).ok_or("Not a device path")?;
+
+        // Abandon whatever folder we were reading. Navigation is the common
+        // case here: open a camera roll, realise it's the wrong one, leave.
+        let cancel = CancelToken::new();
+        {
+            let mut reading = self.reading.lock().map_err(|_| "USB state is poisoned")?;
+            if let Some(previous) = reading.replace(cancel.clone()) {
+                previous.cancel();
+            }
+        }
+
         let (tx, rx) = channel();
         self.jobs
             .send(Request::List {
                 serial: parsed.serial.clone(),
                 storage: parsed.storage,
                 rel: parsed.rel.clone(),
+                cancel,
                 reply: tx,
             })
             .map_err(|_| "The USB service is not running")?;
-        let entries = rx.recv().map_err(|_| "The USB service stopped responding")??;
+        let (entries, more) = rx.recv().map_err(|_| "The USB service stopped responding")??;
         Ok(DirListing {
             path: path.to_string(),
             entries,
             repo_root: None,
             worktrees: Vec::new(),
-            status_pending: false,
+            status_pending: more,
         })
     }
 
@@ -379,24 +438,16 @@ impl Worker {
 
     async fn serve(&mut self, request: Request) {
         match request {
-            Request::List { serial, storage, rel, reply } => {
-                let result = match self.slots.get_mut(&serial) {
-                    Some(slot) => list(slot, &serial, storage, &rel).await,
-                    None => Err("That device is not connected".into()),
+            Request::List { serial, storage, rel, cancel, reply } => {
+                let Some(slot) = self.slots.get_mut(&serial) else {
+                    let _ = reply.send(Err("That device is not connected".into()));
+                    return;
                 };
-                // Remember what we just saw, so the thumbnail cache probe for
-                // these tiles costs a hash lookup instead of a USB round trip.
-                if let Ok(entries) = &result {
-                    if let Ok(mut meta) = self.meta.lock() {
-                        if meta.len() + entries.len() > META_CAP {
-                            meta.clear();
-                        }
-                        for entry in entries {
-                            meta.insert(entry.path.clone(), (entry.size, entry.mtime));
-                        }
-                    }
-                }
-                let _ = reply.send(result);
+                let app = self.app.clone();
+                let mut emit = move |batch: EntryBatch| {
+                    let _ = app.emit("fiddler:usb-entries", batch);
+                };
+                list(slot, &serial, storage, &rel, &cancel, reply, &mut emit, &self.meta).await;
             }
             Request::ReadRange { serial, storage, rel, offset, len, reply } => {
                 let result = match self.slots.get_mut(&serial) {
@@ -409,55 +460,139 @@ impl Worker {
     }
 }
 
-/// List one directory on an attached device.
+/// Read one directory, answering with the first screenful and streaming the rest.
 ///
-/// Free function rather than a `Worker` method so the tests can drive a `Slot`
-/// against a virtual device without standing up a Tauri app handle.
+/// MTP has no bulk metadata call in this library — `GetObjectPropList` exists as
+/// an opcode and nothing more — so a folder costs one roundtrip per object, and
+/// a camera roll of 1348 photos takes about six seconds. Collecting all of that
+/// before drawing anything turns a file browser into a progress bar, so the
+/// first [`FIRST_BATCH`] entries go back through `reply` and everything after
+/// arrives on `fiddler:usb-entries`.
+///
+/// Sends exactly one reply on `reply` in every path, including errors.
+// The closing `flush!` updates the bookkeeping it shares with the in-loop
+// flushes and then returns; those last writes are genuinely dead.
+#[allow(unused_assignments)]
 async fn list(
     slot: &mut Slot,
     serial: &str,
     storage: Option<u64>,
     rel: &str,
-) -> Result<Vec<Entry>, String> {
+    cancel: &CancelToken,
+    reply: Sender<Result<(Vec<Entry>, bool), String>>,
+    // `emit` takes batches after the first one. It is a sink rather than an
+    // `AppHandle` so the streaming behaviour — batch sizes, pacing, and what a
+    // cancel does to the final batch — is testable without a Tauri app.
+    emit: &mut dyn FnMut(EntryBatch),
+    meta: &Arc<Mutex<HashMap<String, ObjectMeta>>>,
+) {
     if !matches!(slot.snapshot.stage, Stage::Ready) {
-        return Err(stage_message(&slot.snapshot));
+        let _ = reply.send(Err(stage_message(&slot.snapshot)));
+        return;
     }
 
     // The device root lists storages, so one phone with an SD card reads as two
-    // places rather than a mode switch buried in a toolbar.
+    // places rather than a mode switch buried in a toolbar. Always a handful of
+    // entries, already in hand — nothing to stream.
     let Some(storage_id) = storage else {
-        return Ok(slot
-            .snapshot
-            .storages
-            .iter()
-            .map(|s| storage_entry(serial, s))
-            .collect());
+        let entries = slot.snapshot.storages.iter().map(|s| storage_entry(serial, s)).collect();
+        let _ = reply.send(Ok((entries, false)));
+        return;
     };
+    let full_path = path::format(serial, storage_id, rel);
 
     // `Storage` isn't Clone, and the handle cache needs a mutable borrow at the
     // same time. Destructuring splits the slot into disjoint field borrows,
     // which the checker accepts where `slot.x` plus `&mut slot.y` would not.
     let Slot { storages, handles, .. } = slot;
-    let store = storages
-        .iter()
-        .find(|s| s.id().0 == storage_id)
-        .ok_or("That storage is no longer attached")?;
+    let Some(store) = storages.iter().find(|s| s.id().0 == storage_id) else {
+        let _ = reply.send(Err("That storage is no longer attached".into()));
+        return;
+    };
 
     let parent = if rel.is_empty() {
         None
     } else {
-        Some(resolve(store, handles, storage_id, rel).await?)
+        match resolve(store, handles, storage_id, rel).await {
+            Ok(handle) => Some(handle),
+            Err(e) => {
+                let _ = reply.send(Err(e));
+                return;
+            }
+        }
     };
 
-    let objects = store.list_objects(parent).await.map_err(describe)?;
-    let mut entries = Vec::with_capacity(objects.len());
-    for object in objects {
+    let mut listing = match store.list_objects_stream_with_cancel(parent, Some(cancel)).await {
+        Ok(listing) => listing,
+        // Navigating away cancels the read, and that is not a failure the
+        // person caused or can act on. Answering with an error would put "the
+        // operation was cancelled" in the folder they just left, and cache it
+        // there. An empty answer is the honest one: we stopped, ask again.
+        Err(mtp_rs::Error::Cancelled) => {
+            let _ = reply.send(Ok((Vec::new(), false)));
+            return;
+        }
+        Err(e) => {
+            let _ = reply.send(Err(describe(e)));
+            return;
+        }
+    };
+
+    let mut batch: Vec<Entry> = Vec::new();
+    let mut replied = false;
+    let mut last_sent = Instant::now();
+
+    // One reply, then events. `flush` owns that distinction so no path can send
+    // twice or forget to send at all.
+    macro_rules! flush {
+        ($done:expr) => {{
+            let done: bool = $done;
+            if let Ok(mut map) = meta.lock() {
+                if map.len() + batch.len() > META_CAP {
+                    map.clear();
+                }
+                for entry in &batch {
+                    map.insert(entry.path.clone(), (entry.size, entry.mtime));
+                }
+            }
+            batch.sort_by(crate::fs_scan::cmp_entries);
+            if replied {
+                emit(EntryBatch { path: full_path.clone(), entries: std::mem::take(&mut batch), done });
+            } else {
+                let _ = reply.send(Ok((std::mem::take(&mut batch), !done)));
+                replied = true;
+            }
+            last_sent = Instant::now();
+        }};
+    }
+
+    loop {
+        let item = match listing.next().await {
+            Some(Ok(item)) => item,
+            // A single unreadable object is skipped by the stream itself; an
+            // error here ended the whole read, so close the folder out rather
+            // than leaving the UI waiting for a batch that will never come.
+            Some(Err(_)) | None => break,
+        };
+        let mtp_rs::mtp::ListingItem::Object(object) = item else { continue };
+
         let child_rel = format!("{rel}/{}", object.filename);
         handles.insert((storage_id, child_rel.clone()), object.handle);
-        entries.push(entry_of(serial, storage_id, &child_rel, &object));
+        batch.push(entry_of(serial, storage_id, &child_rel, &object));
+
+        // The first screenful goes back as the answer to `list_dir`; after that
+        // batches are paced, so a big folder is a few dozen events, not 1348.
+        if (!replied && batch.len() >= FIRST_BATCH)
+            || (replied && !batch.is_empty() && last_sent.elapsed() >= BATCH_EVERY)
+        {
+            flush!(false);
+        }
+        if cancel.is_cancelled() {
+            break;
+        }
     }
-    entries.sort_by(crate::fs_scan::cmp_entries);
-    Ok(entries)
+
+    flush!(true);
 }
 
 /// A bounded read of one object. See [`list`] on why this is a free function.
@@ -769,11 +904,59 @@ mod tests {
         }
     }
 
+    impl Fake {
+        /// A device whose Camera folder holds `count` files, for exercising the
+        /// paths that only appear once a folder outgrows one batch.
+        fn crowded(name: &str, count: usize) -> Fake {
+            let fake = Fake::new(name);
+            for i in 0..count {
+                fs::write(fake.dir.join(format!("DCIM/Camera/IMG_{i:04}.jpg")), b"x").unwrap();
+            }
+            fake
+        }
+    }
+
     impl Drop for Fake {
         fn drop(&mut self) {
             unregister_virtual_device(self.location);
             let _ = fs::remove_dir_all(&self.dir);
         }
+    }
+
+
+    /// Drive a listing to completion, returning everything it produced: the
+    /// entries from the synchronous reply, the streamed batches, and whether
+    /// the reply said more was coming.
+    async fn drain(
+        slot: &mut Slot,
+        serial: &str,
+        storage: Option<u64>,
+        rel: &str,
+        cancel: &CancelToken,
+    ) -> (Vec<Entry>, Vec<EntryBatch>, bool) {
+        let (tx, rx) = channel();
+        let mut batches = Vec::new();
+        let meta = Arc::new(Mutex::new(HashMap::new()));
+        {
+            let mut emit = |batch: EntryBatch| batches.push(batch);
+            list(slot, serial, storage, rel, cancel, tx, &mut emit, &meta).await;
+        }
+        let (first, more) = rx.recv().expect("list must always reply").expect("listing failed");
+        let mut all = first;
+        for batch in &batches {
+            all.extend(batch.entries.iter().cloned());
+        }
+        (all, batches, more)
+    }
+
+    /// The same, for a listing expected to fail.
+    async fn drain_err(slot: &mut Slot, serial: &str, storage: Option<u64>, rel: &str) -> String {
+        let (tx, rx) = channel();
+        let meta = Arc::new(Mutex::new(HashMap::new()));
+        let cancel = CancelToken::new();
+        let mut emit = |_: EntryBatch| {};
+        list(slot, serial, storage, rel, &cancel, tx, &mut emit, &meta).await;
+        rx.recv().expect("list must always reply").unwrap_err()
     }
 
     #[tokio::test]
@@ -792,7 +975,7 @@ mod tests {
     async fn device_root_lists_storages_as_folders() {
         let fake = Fake::new("root");
         let mut slot = fake.slot().await;
-        let entries = list(&mut slot, &fake.serial, None, "").await.unwrap();
+        let (entries, _, _) = drain(&mut slot, &fake.serial, None, "", &CancelToken::new()).await;
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].name, "Internal storage");
         assert!(matches!(entries[0].kind, Kind::Dir));
@@ -809,13 +992,13 @@ mod tests {
         let mut slot = fake.slot().await;
         let storage = slot.snapshot.storages[0].id;
 
-        let entries = list(&mut slot, &fake.serial, Some(storage), "").await.unwrap();
+        let (entries, _, _) = drain(&mut slot, &fake.serial, Some(storage), "", &CancelToken::new()).await;
         let names: Vec<&str> = entries.iter().map(|e| e.name.as_str()).collect();
         assert_eq!(names, vec!["DCIM", "Download"]);
         assert_eq!(entries[0].path, format!("mtp://{}/{storage}/DCIM", fake.serial));
 
         // And the same call one level down, through the handle the listing cached.
-        let camera = list(&mut slot, &fake.serial, Some(storage), "/DCIM/Camera").await.unwrap();
+        let (camera, _, _) = drain(&mut slot, &fake.serial, Some(storage), "/DCIM/Camera", &CancelToken::new()).await;
         let names: Vec<&str> = camera.iter().map(|e| e.name.as_str()).collect();
         assert_eq!(names, vec!["IMG_0001.jpg", "IMG_0002.jpg"]);
         assert!(camera.iter().all(|e| matches!(e.kind, Kind::File)));
@@ -845,7 +1028,7 @@ mod tests {
         let fake = Fake::new("range");
         let mut slot = fake.slot().await;
         let storage = slot.snapshot.storages[0].id;
-        let _ = list(&mut slot, &fake.serial, Some(storage), "/Download").await.unwrap();
+        let _ = drain(&mut slot, &fake.serial, Some(storage), "/Download", &CancelToken::new()).await;
 
         // This is the thumbnail trick: read the head of a file, not the file.
         let head = read_range(&mut slot, storage, "/Download/notes.txt", 0, 5).await.unwrap();
@@ -882,7 +1065,7 @@ mod tests {
         let mut slot = fake.slot().await;
         let storage = slot.snapshot.storages[0].id;
 
-        let entries = list(&mut slot, &fake.serial, Some(storage), "/DCIM/Camera").await.unwrap();
+        let (entries, _, _) = drain(&mut slot, &fake.serial, Some(storage), "/DCIM/Camera", &CancelToken::new()).await;
         let photo = entries.iter().find(|e| e.name == "IMG_0001.jpg").unwrap();
         assert!(photo.size > 0 && photo.thumbable);
         // Both halves of the key must survive the trip out of the listing.
@@ -899,10 +1082,77 @@ mod tests {
         slot.snapshot.stage = Stage::AwaitingGrant;
         slot.snapshot.name = "Galaxy Z Fold 7".into();
 
-        let error = list(&mut slot, &fake.serial, Some(1), "").await.unwrap_err();
+        let error = drain_err(&mut slot, &fake.serial, Some(1), "").await;
         assert!(error.contains("Unlock Galaxy Z Fold 7"), "{error}");
         assert!(error.contains("File transfer"), "{error}");
         assert!(!error.to_lowercase().contains("not detected"), "{error}");
+    }
+
+
+    #[tokio::test]
+    async fn a_big_folder_answers_with_one_screenful_and_streams_the_rest() {
+        // The whole point: a camera roll costs one metadata roundtrip per photo,
+        // so the first call must come back with something drawable rather than
+        // waiting for all of it.
+        let fake = Fake::crowded("stream", 130);
+        let mut slot = fake.slot().await;
+        let storage = slot.snapshot.storages[0].id;
+
+        let (all, batches, more) =
+            drain(&mut slot, &fake.serial, Some(storage), "/DCIM/Camera", &CancelToken::new()).await;
+
+        assert_eq!(all.len(), 130, "IMG_0001/0002 are among the generated names");
+        assert!(more, "the reply must say more is coming");
+        assert!(!batches.is_empty(), "the rest must arrive as batches");
+        assert!(batches.last().unwrap().done, "the last batch closes the folder");
+        assert_eq!(
+            batches.iter().filter(|b| b.done).count(),
+            1,
+            "exactly one batch may be marked done"
+        );
+        // Every batch must name the folder it belongs to, so a batch that
+        // arrives after the person has navigated away can be dropped.
+        let expected = path::format(&fake.serial, storage, "/DCIM/Camera");
+        assert!(batches.iter().all(|b| b.path == expected));
+    }
+
+    #[tokio::test]
+    async fn a_small_folder_arrives_whole_with_nothing_left_to_stream() {
+        let fake = Fake::new("small");
+        let mut slot = fake.slot().await;
+        let storage = slot.snapshot.storages[0].id;
+
+        let (all, batches, more) =
+            drain(&mut slot, &fake.serial, Some(storage), "/DCIM/Camera", &CancelToken::new()).await;
+
+        assert_eq!(all.len(), 2);
+        assert!(!more, "a folder that fits in one reply must not promise more");
+        // Nothing is streamed: `more: false` on the reply is the completion
+        // signal, so a small folder costs exactly one IPC message.
+        assert!(batches.is_empty(), "a folder that fits in one reply emits no events");
+    }
+
+    #[tokio::test]
+    async fn navigating_away_stops_the_read_instead_of_running_it_out() {
+        // Leaving a folder mid-read is the common case, and the reason the
+        // cancel token lives outside the worker: the worker is busy walking the
+        // folder we want to abandon.
+        let fake = Fake::crowded("cancel", 400);
+        let mut slot = fake.slot().await;
+        let storage = slot.snapshot.storages[0].id;
+
+        let cancel = CancelToken::new();
+        cancel.cancel();
+        let (all, batches, _) =
+            drain(&mut slot, &fake.serial, Some(storage), "/DCIM/Camera", &cancel).await;
+
+        assert!(all.len() < 400, "a cancelled read must not deliver the whole folder");
+        // And it must not report an error: leaving a folder is not a failure.
+        // `drain` unwraps the reply, so reaching here at all is the assertion.
+        assert!(
+            batches.last().map(|b| b.done).unwrap_or(true),
+            "any batch stream must still be closed"
+        );
     }
 
     #[test]
