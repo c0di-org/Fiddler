@@ -774,40 +774,87 @@ pub fn rename_path(
 /// intentionally the one transfer primitive the renderer needs: paste, a drop
 /// target, and later a nearby-device stream can all call the same operation.
 #[tauri::command]
-pub fn copy_paths(
+pub async fn copy_paths(
     state: State<'_, AppState>,
     paths: Vec<String>,
     destination: String,
 ) -> Result<Vec<String>, String> {
-    if peers::parse_remote_path(&destination).is_some() || paths.iter().any(|path| peers::parse_remote_path(path).is_some()) {
-        if peers::parse_remote_path(&destination).is_some() { return Err("Pasting onto Android is not ready yet".into()); }
+    let cache = state.cache.clone();
+    let watcher = state.watcher.clone();
+    let peer_service = state.peers.clone();
+    #[cfg(not(target_os = "android"))]
+    let usb = state.usb.clone();
+
+    // A copy is unbounded work — a folder of photos on disk, a video across a
+    // USB cable — so none of it runs on the thread that draws the window.
+    tauri::async_runtime::spawn_blocking(move || {
+        // A phone on a cable is not a filesystem path: it has no `is_dir`, and
+        // treating it as one is what used to answer "Paste destination is not a
+        // folder" for a perfectly good folder on a device.
+        #[cfg(not(target_os = "android"))]
+        if mtp::path::parse(&destination).is_some() {
+            return copy_onto_device(&usb, &paths, &destination);
+        }
+        if peers::parse_remote_path(&destination).is_some() || paths.iter().any(|path| peers::parse_remote_path(path).is_some()) {
+            if peers::parse_remote_path(&destination).is_some() { return Err("Pasting onto Android is not ready yet".into()); }
+            let destination = PathBuf::from(&destination);
+            if !destination.is_dir() { return Err("Paste destination is not a folder".into()); }
+            let mut copied = Vec::new();
+            for source in paths {
+                let (device, remote_path) = peers::parse_remote_path(&source).ok_or("Mixed local and remote copies are not supported")?;
+                let name = Path::new(&remote_path).file_name().and_then(|name| name.to_str()).ok_or("Invalid file name")?;
+                let target = copy_name(&destination, name);
+                let bytes = peer_service.download(&device, &remote_path)?;
+                std::fs::write(&target, bytes).map_err(|e| e.to_string())?;
+                copied.push(target.to_string_lossy().into_owned());
+            }
+            cache.forget_discovery_under(&destination);
+            watcher.poke(&destination);
+            return Ok(copied);
+        }
+        // Reading off a device is bounded byte-range work the copy path doesn't
+        // do yet. Say that, rather than letting a `mtp://` string reach the
+        // filesystem and come back as "No such file or directory".
+        #[cfg(not(target_os = "android"))]
+        if paths.iter().any(|path| mtp::path::parse(path).is_some()) {
+            return Err("Copying files off a device isn't ready yet".into());
+        }
         let destination = PathBuf::from(&destination);
         if !destination.is_dir() { return Err("Paste destination is not a folder".into()); }
         let mut copied = Vec::new();
         for source in paths {
-            let (device, remote_path) = peers::parse_remote_path(&source).ok_or("Mixed local and remote copies are not supported")?;
-            let name = Path::new(&remote_path).file_name().and_then(|name| name.to_str()).ok_or("Invalid file name")?;
+            let source = PathBuf::from(source);
+            let name = source.file_name().and_then(|name| name.to_str()).ok_or("Invalid file name")?;
             let target = copy_name(&destination, name);
-            let bytes = state.peers.download(&device, &remote_path)?;
-            std::fs::write(&target, bytes).map_err(|e| e.to_string())?;
+            copy_tree(&source, &target)?;
             copied.push(target.to_string_lossy().into_owned());
         }
-        state.cache.forget_discovery_under(&destination);
-        state.watcher.poke(&destination);
-        return Ok(copied);
-    }
-    let destination = PathBuf::from(&destination);
-    if !destination.is_dir() { return Err("Paste destination is not a folder".into()); }
+        cache.forget_discovery_under(&destination);
+        watcher.poke(&destination);
+        Ok(copied)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Paste onto a phone or camera over USB.
+///
+/// Sources have to be local. Two devices cannot be copied between directly —
+/// each one has a single session, and neither can hold the other's bytes — so
+/// say that up front rather than failing partway through the first file.
+#[cfg(not(target_os = "android"))]
+fn copy_onto_device(
+    usb: &MtpService,
+    paths: &[String],
+    destination: &str,
+) -> Result<Vec<String>, String> {
     let mut copied = Vec::new();
     for source in paths {
-        let source = PathBuf::from(source);
-        let name = source.file_name().and_then(|name| name.to_str()).ok_or("Invalid file name")?;
-        let target = copy_name(&destination, name);
-        copy_tree(&source, &target)?;
-        copied.push(target.to_string_lossy().into_owned());
+        if peers::parse_remote_path(source).is_some() || mtp::path::parse(source).is_some() {
+            return Err("Copy that to the Mac first — Fiddler can't move files straight from one device to another".into());
+        }
+        copied.push(usb.upload(destination, Path::new(source))?);
     }
-    state.cache.forget_discovery_under(&destination);
-    state.watcher.poke(&destination);
     Ok(copied)
 }
 
