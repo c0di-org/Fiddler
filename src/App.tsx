@@ -37,6 +37,7 @@ export default function App() {
 
   const [places, setPlaces] = useState<Place[]>([]);
   const [selection, setSelection] = useState<Set<string>>(new Set());
+  const [revealSelection, setRevealSelection] = useState(0);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [filter, setFilter] = useState("");
   const [menu, setMenu] = useState<{ x: number; y: number; items: MenuItem[] } | null>(null);
@@ -53,6 +54,9 @@ export default function App() {
     setToast(msg);
     window.setTimeout(() => setToast(null), 2800);
   }, []);
+
+  /** Ask the current view to reveal a selection made by keyboard navigation. */
+  const revealCursor = useCallback(() => setRevealSelection((n) => n + 1), []);
 
   // ------------------------------------------------------------ bootstrap
 
@@ -221,9 +225,10 @@ export default function App() {
         s.add(id);
         return s;
       });
+      revealCursor();
       if (!extend) anchorRef.current = id;
     },
-    [targets, selection]
+    [targets, selection, revealCursor]
   );
 
   const trashSelected = useCallback(async () => {
@@ -334,12 +339,13 @@ export default function App() {
         const t = targets[(from + i) % targets.length];
         if (t.name.toLowerCase().startsWith(needle)) {
           setSelection(new Set([t.id]));
+          revealCursor();
           anchorRef.current = t.id;
           return;
         }
       }
     },
-    [targets, selection]
+    [targets, selection, revealCursor]
   );
 
   const kb = useRef({ targets, selection, moveCursor, openTarget, trashSelected, newFolder, go, jumpTo, quickLook });
@@ -535,6 +541,7 @@ export default function App() {
               worktrees={gridWorktrees}
               iconSize={store.iconSize}
               selection={selection}
+              revealSelection={revealSelection}
               onSelect={select}
               onOpen={(c: GridCell) => {
                 const t = byId.get(c.id);
@@ -549,6 +556,7 @@ export default function App() {
               loaded={store.loaded}
               rows={listRows}
               selection={selection}
+              revealSelection={revealSelection}
               renamingId={renamingId}
               sortKey={store.sortKey}
               sortAsc={store.sortAsc}

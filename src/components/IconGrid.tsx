@@ -40,6 +40,8 @@ interface Props {
   worktrees: WorktreeInfo[];
   iconSize: number;
   selection: Set<string>;
+  /** Advances when keyboard navigation asks us to reveal the lead selection. */
+  revealSelection: number;
   onSelect: (id: string, e: React.MouseEvent) => void;
   onOpen: (cell: GridCell) => void;
   onContextMenu: (cell: GridCell | null, x: number, y: number) => void;
@@ -52,6 +54,7 @@ interface Props {
 export function IconGrid(props: Props) {
   const { entries, worktrees, iconSize } = props;
   const scrollerRef = useRef<HTMLDivElement>(null);
+  const revealed = useRef(0);
   const [scrollTop, setScrollTop] = useState(0);
   const [box, setBox] = useState({ w: 900, h: 600 });
 
@@ -128,10 +131,13 @@ export function IconGrid(props: Props) {
     if (el) setScrollTop(el.scrollTop);
   }, []);
 
-  // Scroll the lead selection into view so arrow keys and type-to-jump both land
-  // somewhere visible.
+  // Scroll the lead selection into view only for keyboard navigation. Ordinary
+  // list refreshes during a touch scroll must not write scrollTop and snap the
+  // viewport back to an older selection.
   const lead = useMemo(() => [...props.selection].pop() ?? null, [props.selection]);
   useEffect(() => {
+    if (props.revealSelection === revealed.current) return;
+    revealed.current = props.revealSelection;
     const el = scrollerRef.current;
     if (!lead || !el) return;
     const at = rows.findIndex((r) => r.kind === "cells" && r.cells.some((c) => c.id === lead));
@@ -142,7 +148,7 @@ export function IconGrid(props: Props) {
     else if (bottom > el.scrollTop + el.clientHeight) {
       el.scrollTop = bottom - el.clientHeight + GAP;
     }
-  }, [lead, rows, offsets, cellH]);
+  }, [props.revealSelection, lead, rows, offsets, cellH]);
 
   const cellFrom = (e: React.MouseEvent): GridCell | null => {
     const host = (e.target as HTMLElement).closest<HTMLElement>("[data-cell-id]");

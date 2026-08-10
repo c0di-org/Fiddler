@@ -23,6 +23,8 @@ const COLUMNS: { key: SortKey; label: string; cls: string }[] = [
 interface Props {
   rows: Row[];
   selection: Set<string>;
+  /** Advances when keyboard navigation asks us to reveal the lead selection. */
+  revealSelection: number;
   renamingId: string | null;
   sortKey: SortKey;
   sortAsc: boolean;
@@ -40,8 +42,9 @@ interface Props {
 }
 
 export function DetailList(props: Props) {
-  const { rows, selection, renamingId } = props;
+  const { rows, selection, renamingId, revealSelection } = props;
   const scrollerRef = useRef<HTMLDivElement>(null);
+  const revealed = useRef(0);
   const [scrollTop, setScrollTop] = useState(0);
   const [viewport, setViewport] = useState(600);
 
@@ -69,9 +72,14 @@ export function DetailList(props: Props) {
     return m;
   }, [rows]);
 
-  // Keep the keyboard cursor in view.
+  // Keep the keyboard cursor in view. This must be an explicit request rather
+  // than a reaction to every render: list data can refresh while the user is
+  // touch-scrolling, and writing scrollTop then pulls the list back to the
+  // selected row.
   const lead = useMemo(() => [...selection].pop() ?? null, [selection]);
   useEffect(() => {
+    if (revealSelection === revealed.current) return;
+    revealed.current = revealSelection;
     if (!lead) return;
     const idx = rows.findIndex((r) => r.id === lead);
     const el = scrollerRef.current;
@@ -81,7 +89,7 @@ export function DetailList(props: Props) {
     else if (top + ROW_H > el.scrollTop + el.clientHeight) {
       el.scrollTop = top + ROW_H - el.clientHeight;
     }
-  }, [lead, rows]);
+  }, [revealSelection, lead, rows]);
 
   const rowFrom = (e: React.MouseEvent): Row | null => {
     const host = (e.target as HTMLElement).closest<HTMLElement>("[data-row-id]");
