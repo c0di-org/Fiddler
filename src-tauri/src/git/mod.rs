@@ -94,7 +94,10 @@ impl GitCache {
     /// Claim the right to run a status pass for `work_root`. Returns false if one
     /// is already running, so a burst of watcher events produces a single pass.
     pub fn begin_pass(&self, work_root: &Path) -> bool {
-        self.inflight.lock().unwrap().insert(work_root.to_path_buf())
+        self.inflight
+            .lock()
+            .unwrap()
+            .insert(work_root.to_path_buf())
     }
 
     pub fn end_pass(&self, work_root: &Path) {

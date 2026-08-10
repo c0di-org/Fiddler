@@ -36,7 +36,11 @@ pub fn repo_at(dir: &Path) -> Option<RepoPaths> {
         let raw = fs::read_to_string(&dot_git).ok()?;
         let target = raw.strip_prefix("gitdir:")?.trim();
         let p = PathBuf::from(target);
-        if p.is_absolute() { p } else { dir.join(p) }
+        if p.is_absolute() {
+            p
+        } else {
+            dir.join(p)
+        }
     } else {
         return None;
     };

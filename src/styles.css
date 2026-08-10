@@ -207,6 +207,46 @@ button {
   height: 100%;
 }
 
+/* DeX keeps the desktop layout, while a phone remains usable instead of
+   squeezing a 228px Finder sidebar beside the file grid. */
+@media (max-width: 640px) {
+  .sidebar {
+    width: 76px;
+    flex-basis: 76px;
+    padding-inline: 8px;
+  }
+
+  .sidebar-head {
+    justify-content: center;
+    margin-top: 0;
+  }
+
+  .sidebar-wordmark,
+  .sidebar-title,
+  .place-label,
+  .crumbs,
+  .crumb-branch,
+  .tb-spacer {
+    display: none;
+  }
+
+  .place {
+    justify-content: center;
+    padding: 0;
+  }
+
+  .toolbar {
+    height: 54px;
+    flex-basis: 54px;
+    gap: 5px;
+    padding: 0 8px;
+  }
+
+  .tb-tools {
+    gap: 3px;
+  }
+}
+
 /* Gradients and filters for the file glyphs, defined once for the document
    rather than re-emitted inside every icon. */
 .glyph-defs {

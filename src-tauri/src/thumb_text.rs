@@ -106,7 +106,9 @@ fn read_head(path: &Path) -> Result<String, String> {
     // back short and would leave us drawing half a page.
     let mut buf = Vec::with_capacity(HEAD_BYTES);
     let f = std::fs::File::open(path).map_err(|e| e.to_string())?;
-    f.take(HEAD_BYTES as u64).read_to_end(&mut buf).map_err(|e| e.to_string())?;
+    f.take(HEAD_BYTES as u64)
+        .read_to_end(&mut buf)
+        .map_err(|e| e.to_string())?;
 
     // The same test `git` and `grep` use. A file that claims to be text and
     // isn't falls back to Quick Look rather than drawing mojibake.
@@ -177,22 +179,43 @@ fn layout(head: &str, dialect: Dialect, rows: usize) -> Vec<Row> {
             Dialect::Markdown => {
                 if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
                     fenced = !fenced;
-                    Row { text: line, weight: Weight::Quiet }
+                    Row {
+                        text: line,
+                        weight: Weight::Quiet,
+                    }
                 } else if fenced {
-                    Row { text: line, weight: Weight::Quiet }
+                    Row {
+                        text: line,
+                        weight: Weight::Quiet,
+                    }
                 } else if let Some(heading) = heading(trimmed) {
-                    Row { text: heading, weight: Weight::Strong }
+                    Row {
+                        text: heading,
+                        weight: Weight::Strong,
+                    }
                 } else if trimmed.starts_with('>') {
-                    Row { text: line, weight: Weight::Quiet }
+                    Row {
+                        text: line,
+                        weight: Weight::Quiet,
+                    }
                 } else {
-                    Row { text: bullet(&line), weight: Weight::Body }
+                    Row {
+                        text: bullet(&line),
+                        weight: Weight::Body,
+                    }
                 }
             }
             Dialect::Code => {
                 let quiet = is_comment(trimmed);
-                Row { text: line, weight: if quiet { Weight::Quiet } else { Weight::Body } }
+                Row {
+                    text: line,
+                    weight: if quiet { Weight::Quiet } else { Weight::Body },
+                }
             }
-            Dialect::Plain => Row { text: line, weight: Weight::Body },
+            Dialect::Plain => Row {
+                text: line,
+                weight: Weight::Body,
+            },
         };
         out.push(row);
     }
@@ -263,9 +286,15 @@ impl Fonts {
         // Prose reads better in the system face; code has to be monospaced or
         // the indentation — the thing that makes it recognisable — collapses.
         let (body, strong) = if dialect == Dialect::Markdown {
-            (ui_font(CTFontUIFontType::System, size), ui_font(CTFontUIFontType::EmphasizedSystem, size))
+            (
+                ui_font(CTFontUIFontType::System, size),
+                ui_font(CTFontUIFontType::EmphasizedSystem, size),
+            )
         } else {
-            (named_font("Menlo-Regular", size), named_font("Menlo-Bold", size))
+            (
+                named_font("Menlo-Regular", size),
+                named_font("Menlo-Bold", size),
+            )
         };
         Ok(Fonts {
             body: body.ok_or("no body font")?,
@@ -294,8 +323,7 @@ fn named_font(name: &str, size: f64) -> Option<CFRetained<CTFont>> {
 
 fn draw(ctx: &CGContext, row: &Row, fonts: &Fonts, x: f64, y: f64) -> Result<(), String> {
     let (font, color) = fonts.face(row.weight);
-    let keys: [&CFString; 2] =
-        unsafe { [kCTFontAttributeName, kCTForegroundColorAttributeName] };
+    let keys: [&CFString; 2] = unsafe { [kCTFontAttributeName, kCTForegroundColorAttributeName] };
     // Both are CF types; the cast is what lets them share one attribute
     // dictionary, which is how Core Text wants to be handed a run.
     let values: [&CFType; 2] = [
@@ -345,7 +373,10 @@ mod tests {
     fn fenced_code_inside_markdown_reads_as_the_quiet_layer() {
         let rows = layout("text\n```\ncode\n```\nafter\n", Dialect::Markdown, 10);
         assert!(rows[0].weight == Weight::Body);
-        assert!(rows[2].weight == Weight::Quiet, "the fenced line should be quiet");
+        assert!(
+            rows[2].weight == Weight::Quiet,
+            "the fenced line should be quiet"
+        );
         assert!(rows[4].weight == Weight::Body, "the fence has closed again");
     }
 
@@ -364,7 +395,10 @@ mod tests {
 
     #[test]
     fn only_as_many_rows_as_fit_are_laid_out() {
-        let many = (0..500).map(|i| format!("line {i}")).collect::<Vec<_>>().join("\n");
+        let many = (0..500)
+            .map(|i| format!("line {i}"))
+            .collect::<Vec<_>>()
+            .join("\n");
         assert_eq!(layout(&many, Dialect::Plain, 12).len(), 12);
     }
 
@@ -410,4 +444,3 @@ mod tests {
         std::fs::remove_file(&out).ok();
     }
 }
-

@@ -25,11 +25,9 @@ use std::time::Duration;
 use block2::RcBlock;
 use objc2::AllocAnyThread;
 use objc2_core_foundation::{
-    CFBoolean, CFDictionary, CFNumber, CFRetained, CFString, CFType, CFURL, CGPoint, CGRect, CGSize,
+    CFBoolean, CFDictionary, CFNumber, CFRetained, CFString, CFType, CGPoint, CGRect, CGSize, CFURL,
 };
-use objc2_core_graphics::{
-    CGBitmapContextCreateImage, CGColor, CGColorSpace, CGContext, CGImage,
-};
+use objc2_core_graphics::{CGBitmapContextCreateImage, CGColor, CGColorSpace, CGContext, CGImage};
 use objc2_foundation::{NSError, NSString, NSURL};
 use objc2_image_io::{
     kCGImageSourceCreateThumbnailFromImageAlways, kCGImageSourceCreateThumbnailWithTransform,
@@ -70,21 +68,121 @@ const QUICKLOOK: &[&str] = &[
 /// the user can recognise by its shape is worth far more than another grey
 /// document glyph, and the render is cheap enough that breadth costs nothing.
 const TEXT: &[&str] = &[
-    "md", "mdx", "markdown", "rst", "txt", "text", "log", "csv", "tsv", "diff", "patch", "tex",
-    "srt", "vtt", "json", "jsonc", "json5", "yaml", "yml", "toml", "ini", "cfg", "conf", "env",
-    "properties", "xml", "plist", "html", "htm", "css", "scss", "sass", "less", "sql", "graphql",
-    "sh", "zsh", "bash", "fish", "ps1", "bat", "rs", "go", "py", "rb", "swift", "java", "kt",
-    "kts", "gradle", "c", "h", "cpp", "cc", "cxx", "hpp", "hh", "cs", "m", "mm", "php", "lua",
-    "pl", "r", "ts", "tsx", "js", "jsx", "mjs", "cjs", "vue", "svelte", "dart", "ex", "exs",
-    "erl", "hs", "scala", "clj", "zig", "nim", "sol", "proto", "cmake", "mk", "lock",
+    "md",
+    "mdx",
+    "markdown",
+    "rst",
+    "txt",
+    "text",
+    "log",
+    "csv",
+    "tsv",
+    "diff",
+    "patch",
+    "tex",
+    "srt",
+    "vtt",
+    "json",
+    "jsonc",
+    "json5",
+    "yaml",
+    "yml",
+    "toml",
+    "ini",
+    "cfg",
+    "conf",
+    "env",
+    "properties",
+    "xml",
+    "plist",
+    "html",
+    "htm",
+    "css",
+    "scss",
+    "sass",
+    "less",
+    "sql",
+    "graphql",
+    "sh",
+    "zsh",
+    "bash",
+    "fish",
+    "ps1",
+    "bat",
+    "rs",
+    "go",
+    "py",
+    "rb",
+    "swift",
+    "java",
+    "kt",
+    "kts",
+    "gradle",
+    "c",
+    "h",
+    "cpp",
+    "cc",
+    "cxx",
+    "hpp",
+    "hh",
+    "cs",
+    "m",
+    "mm",
+    "php",
+    "lua",
+    "pl",
+    "r",
+    "ts",
+    "tsx",
+    "js",
+    "jsx",
+    "mjs",
+    "cjs",
+    "vue",
+    "svelte",
+    "dart",
+    "ex",
+    "exs",
+    "erl",
+    "hs",
+    "scala",
+    "clj",
+    "zig",
+    "nim",
+    "sol",
+    "proto",
+    "cmake",
+    "mk",
+    "lock",
 ];
 
 /// Files everyone recognises that carry no extension to key off.
 const TEXT_NAMES: &[&str] = &[
-    "Makefile", "Dockerfile", "Justfile", "Rakefile", "Gemfile", "Procfile", "Brewfile",
-    "CODEOWNERS", "LICENCE", "LICENSE", "README", "CHANGELOG", "AUTHORS", "NOTICE", ".gitignore",
-    ".gitattributes", ".gitmodules", ".env", ".zshrc", ".bashrc", ".profile", ".editorconfig",
-    ".prettierrc", ".eslintrc", ".npmrc",
+    "Makefile",
+    "Dockerfile",
+    "Justfile",
+    "Rakefile",
+    "Gemfile",
+    "Procfile",
+    "Brewfile",
+    "CODEOWNERS",
+    "LICENCE",
+    "LICENSE",
+    "README",
+    "CHANGELOG",
+    "AUTHORS",
+    "NOTICE",
+    ".gitignore",
+    ".gitattributes",
+    ".gitmodules",
+    ".env",
+    ".zshrc",
+    ".bashrc",
+    ".profile",
+    ".editorconfig",
+    ".prettierrc",
+    ".eslintrc",
+    ".npmrc",
 ];
 
 pub fn can_thumbnail(path: &Path) -> bool {
@@ -188,11 +286,15 @@ pub fn generate(path: &Path, max_px: u32) -> Result<PathBuf, String> {
     match lane_of(path) {
         // A text file that turns out to be binary, or a PDF that turns out to be
         // damaged, still gets Quick Look's opinion before we give up on it.
-        Lane::Text => crate::thumb_text::render(path, max_px, &out).or_else(|_| quicklook(path, max_px, &out))?,
-        Lane::Page => crate::page::render(path, 1, max_px, &out).or_else(|_| quicklook(path, max_px, &out))?,
+        Lane::Text => crate::thumb_text::render(path, max_px, &out)
+            .or_else(|_| quicklook(path, max_px, &out))?,
+        Lane::Page => {
+            crate::page::render(path, 1, max_px, &out).or_else(|_| quicklook(path, max_px, &out))?
+        }
         Lane::Raster => {
-            let small_enough =
-                std::fs::metadata(path).map(|m| m.len() <= MAX_INLINE_DECODE).unwrap_or(false);
+            let small_enough = std::fs::metadata(path)
+                .map(|m| m.len() <= MAX_INLINE_DECODE)
+                .unwrap_or(false);
             if !(small_enough && image_io(path, max_px, &out).is_ok()) {
                 quicklook(path, max_px, &out)?;
             }
@@ -330,7 +432,10 @@ pub fn save(ctx: &CGContext, out: &Path) -> Result<(), String> {
 /// Fill the whole context with one colour.
 pub fn wash(ctx: &CGContext, w: f64, h: f64, gray: f64) {
     CGContext::set_fill_color_with_color(Some(ctx), Some(&CGColor::new_generic_gray(gray, 1.0)));
-    CGContext::fill_rect(Some(ctx), CGRect::new(CGPoint::new(0.0, 0.0), CGSize::new(w, h)));
+    CGContext::fill_rect(
+        Some(ctx),
+        CGRect::new(CGPoint::new(0.0, 0.0), CGSize::new(w, h)),
+    );
 }
 
 /// Write a CGImage out as PNG, via a unique temp name so a half-written file is
@@ -397,7 +502,10 @@ mod tests {
 
     #[test]
     fn extensions_are_matched_case_insensitively() {
-        assert_eq!(ext_of(Path::new("/a/IMG_0001.HEIC")).as_deref(), Some("heic"));
+        assert_eq!(
+            ext_of(Path::new("/a/IMG_0001.HEIC")).as_deref(),
+            Some("heic")
+        );
         assert_eq!(ext_of(Path::new("/a/noext")), None);
     }
 
@@ -406,9 +514,17 @@ mod tests {
         let f = std::env::temp_dir().join("fiddler-cache-key-probe.txt");
         std::fs::write(&f, b"one").unwrap();
         let a = cache_path(&f, 128).unwrap();
-        assert_ne!(a, cache_path(&f, 256).unwrap(), "requested size must key the cache");
+        assert_ne!(
+            a,
+            cache_path(&f, 256).unwrap(),
+            "requested size must key the cache"
+        );
         std::fs::write(&f, b"a different length").unwrap();
-        assert_ne!(a, cache_path(&f, 128).unwrap(), "edits must invalidate the cache");
+        assert_ne!(
+            a,
+            cache_path(&f, 128).unwrap(),
+            "edits must invalidate the cache"
+        );
         std::fs::remove_file(&f).ok();
     }
 }

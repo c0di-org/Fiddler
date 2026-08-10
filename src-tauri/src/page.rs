@@ -12,7 +12,7 @@
 
 use std::path::{Path, PathBuf};
 
-use objc2_core_foundation::{CFRetained, CFURL, CGPoint, CGRect, CGSize};
+use objc2_core_foundation::{CFRetained, CGPoint, CGRect, CGSize, CFURL};
 use objc2_core_graphics::{CGContext, CGInterpolationQuality, CGPDFBox, CGPDFDocument, CGPDFPage};
 
 /// Paper white behind the page, since PDF content is drawn on nothing.
@@ -34,7 +34,10 @@ pub fn meta(path: &Path) -> Result<Meta, String> {
     }
     let page = CGPDFDocument::page(Some(&doc), 1).ok_or("no first page")?;
     let (w, h) = displayed_size(&page);
-    Ok(Meta { pages, aspect: if h > 0.0 { w / h } else { 1.0 } })
+    Ok(Meta {
+        pages,
+        aspect: if h > 0.0 { w / h } else { 1.0 },
+    })
 }
 
 /// Render one 1-based page, longest side `max_px`, and write it to `out`.
@@ -168,4 +171,3 @@ mod tests {
         assert!(first.is_file());
     }
 }
-

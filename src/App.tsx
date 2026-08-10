@@ -18,6 +18,7 @@ import { applyTint, hasSystemAccent, loadTint, saveTint, watchTint, type Tint } 
 import type { Entry, Place } from "./types";
 
 const store = new TreeStore();
+const isAndroid = /Android/i.test(navigator.userAgent);
 
 /** How long a type-to-jump buffer stays alive between keystrokes. */
 const TYPE_AHEAD_MS = 900;
@@ -186,7 +187,7 @@ export default function App() {
   const select = useCallback(
     (id: string, e: React.MouseEvent) => {
       setSelection((prev) => {
-        if (e.metaKey) {
+        if (e.metaKey || e.ctrlKey) {
           const next = new Set(prev);
           next.has(id) ? next.delete(id) : next.add(id);
           anchorRef.current = id;
@@ -269,8 +270,10 @@ export default function App() {
 
       if (t) {
         items.push({ label: t.isDir ? "Open" : "Open", onPick: () => void openTarget(t) });
-        items.push({ label: "Reveal in Finder", onPick: () => void ipc.revealInFinder(t.path) });
-        items.push({ label: "Open in Terminal", onPick: () => void ipc.openTerminalHere(t.path) });
+        if (!isAndroid) {
+          items.push({ label: "Reveal in Finder", onPick: () => void ipc.revealInFinder(t.path) });
+          items.push({ label: "Open in Terminal", onPick: () => void ipc.openTerminalHere(t.path) });
+        }
         items.push({
           label: "Copy Path",
           separatorBefore: true,
@@ -278,16 +281,18 @@ export default function App() {
         });
         if (t.entry) {
           items.push({ label: "Rename…", onPick: () => setRenamingId(t.id) });
-          items.push({
-            label: selected.length > 1 ? `Move ${selected.length} Items to Trash` : "Move to Trash",
-            danger: true,
-            separatorBefore: true,
-            onPick: () => void trashSelected(),
-          });
+          if (!isAndroid) {
+            items.push({
+              label: selected.length > 1 ? `Move ${selected.length} Items to Trash` : "Move to Trash",
+              danger: true,
+              separatorBefore: true,
+              onPick: () => void trashSelected(),
+            });
+          }
         }
       } else {
         items.push({ label: "New Folder", onPick: () => void newFolder() });
-        items.push({ label: "Open in Terminal", onPick: () => void ipc.openTerminalHere(store.path) });
+        if (!isAndroid) items.push({ label: "Open in Terminal", onPick: () => void ipc.openTerminalHere(store.path) });
         const root = store.listing?.repoRoot;
         if (root) {
           items.push({
@@ -349,6 +354,7 @@ export default function App() {
       }
 
       const s = kb.current;
+      const modifier = e.metaKey || e.ctrlKey;
       // The viewer owns the keyboard while it's up: it has already handled the
       // keys it cares about, and the rest must not reach the folder behind it.
       if (s.quickLook) return;
@@ -362,7 +368,7 @@ export default function App() {
           s.moveCursor(perRow, e.shiftKey);
           break;
         case "ArrowUp":
-          if (e.metaKey) {
+          if (modifier) {
             e.preventDefault();
             void store.up();
             setSelection(new Set());
@@ -386,73 +392,73 @@ export default function App() {
         case "Enter":
           if (target) {
             e.preventDefault();
-            if (e.metaKey) void s.openTarget(target);
+            if (modifier) void s.openTarget(target);
             else setRenamingId(target.id);
           }
           break;
         case "o":
-          if (e.metaKey && target) {
+          if (modifier && target) {
             e.preventDefault();
             void s.openTarget(target);
           }
           break;
         case "Backspace":
-          if (e.metaKey) {
+          if (modifier) {
             e.preventDefault();
             void s.trashSelected();
           }
           break;
         case "n":
-          if (e.metaKey && e.shiftKey) {
+          if (modifier && e.shiftKey) {
             e.preventDefault();
             void s.newFolder();
           }
           break;
         case "a":
-          if (e.metaKey) {
+          if (modifier) {
             e.preventDefault();
             setSelection(new Set(s.targets.map((t) => t.id)));
           }
           break;
         case "p":
-          if (e.metaKey && e.shiftKey) {
+          if (modifier && e.shiftKey) {
             e.preventDefault();
             store.togglePreview();
           }
           break;
         case "1":
-          if (e.metaKey) {
+          if (modifier) {
             e.preventDefault();
             store.setView("icons");
           }
           break;
         case "2":
-          if (e.metaKey) {
+          if (modifier) {
             e.preventDefault();
             store.setView("list");
           }
           break;
         case "[":
-          if (e.metaKey) {
+          if (modifier) {
             e.preventDefault();
             void store.back();
           }
           break;
         case "]":
-          if (e.metaKey) {
+          if (modifier) {
             e.preventDefault();
             void store.forward();
           }
           break;
         case ".":
-          if (e.metaKey && e.shiftKey) {
+          if (modifier && e.shiftKey) {
             e.preventDefault();
             void store.setShowHidden(!store.showHidden);
           }
           break;
         case " ":
           // Quick Look, as everywhere else on this OS.
-          if (target?.entry && !e.metaKey) {
+          if (target?.entry && !modifier) {
             e.preventDefault();
             setQuickLook(true);
           }
@@ -480,7 +486,9 @@ export default function App() {
     const err = store.listing?.error;
     if (!err) return q ? "No matches" : "This folder is empty";
     return /denied|not permitted|Operation not permitted/i.test(err)
-      ? "Fiddler doesn’t have permission to read this folder.\nGrant access in System Settings › Privacy & Security › Files and Folders."
+      ? isAndroid
+        ? "Fiddler needs All files access to browse shared storage.\nAllow it in Android Settings, then return here."
+        : "Fiddler doesn’t have permission to read this folder.\nGrant access in System Settings › Privacy & Security › Files and Folders."
       : err.replace(/^Error:\s*/, "");
   }, [store.listing, q]);
 

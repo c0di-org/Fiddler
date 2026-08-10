@@ -97,7 +97,9 @@ pub fn scan(dir: &Path, opts: &ScanOpts, cache: &GitCache) -> Result<Vec<Entry>,
 fn cmp_entries(a: &Entry, b: &Entry) -> Ordering {
     let a_dir = matches!(a.kind, Kind::Dir) || (matches!(a.kind, Kind::Symlink) && a.link_to_dir);
     let b_dir = matches!(b.kind, Kind::Dir) || (matches!(b.kind, Kind::Symlink) && b.link_to_dir);
-    b_dir.cmp(&a_dir).then_with(|| natural_cmp(&a.name, &b.name))
+    b_dir
+        .cmp(&a_dir)
+        .then_with(|| natural_cmp(&a.name, &b.name))
 }
 
 pub fn natural_cmp(a: &str, b: &str) -> Ordering {

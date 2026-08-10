@@ -92,7 +92,11 @@ impl Queue {
             };
 
             if let Some(src) = settled {
-                hits.push(ThumbReady { path: req.path, size: req.size, src });
+                hits.push(ThumbReady {
+                    path: req.path,
+                    size: req.size,
+                    src,
+                });
                 continue;
             }
             if !self.claimed.insert(k) {
@@ -198,10 +202,11 @@ impl ThumbPool {
                 q.failed.insert(k);
             }
         }
-        self.outbox
-            .lock()
-            .unwrap()
-            .push(ThumbReady { path: req.path, size: req.size, src });
+        self.outbox.lock().unwrap().push(ThumbReady {
+            path: req.path,
+            size: req.size,
+            src,
+        });
         self.ready.notify_one();
     }
 }
@@ -247,7 +252,10 @@ mod tests {
     use super::*;
 
     fn req(path: &str) -> ThumbReq {
-        ThumbReq { path: path.into(), size: 128 }
+        ThumbReq {
+            path: path.into(),
+            size: 128,
+        }
     }
 
     fn lane(q: &VecDeque<ThumbReq>) -> Vec<&str> {
@@ -272,7 +280,11 @@ mod tests {
     #[test]
     fn order_within_a_batch_is_preserved() {
         let mut q = Queue::default();
-        q.admit(vec![req("/nope/1.png"), req("/nope/2.png"), req("/nope/3.png")]);
+        q.admit(vec![
+            req("/nope/1.png"),
+            req("/nope/2.png"),
+            req("/nope/3.png"),
+        ]);
         assert_eq!(queued(&q).0, ["/nope/1.png", "/nope/2.png", "/nope/3.png"]);
     }
 
@@ -294,7 +306,11 @@ mod tests {
     #[test]
     fn a_slow_deck_never_holds_up_a_folder_of_source() {
         let mut q = Queue::default();
-        q.admit(vec![req("/nope/huge.key"), req("/nope/main.rs"), req("/nope/lib.rs")]);
+        q.admit(vec![
+            req("/nope/huge.key"),
+            req("/nope/main.rs"),
+            req("/nope/lib.rs"),
+        ]);
         // The deck is alone in its own queue, so the two source files are first
         // in line for a worker rather than third.
         assert_eq!(lane(&q.text), ["/nope/main.rs", "/nope/lib.rs"]);
@@ -318,7 +334,10 @@ mod tests {
         q.raster.pop_front();
 
         q.admit(vec![req("/nope/a.png")]);
-        assert!(queued(&q).0.is_empty(), "in-flight work must not be re-queued");
+        assert!(
+            queued(&q).0.is_empty(),
+            "in-flight work must not be re-queued"
+        );
 
         // Once it finishes and is unclaimed, asking again is allowed.
         q.claimed.remove(&key("/nope/a.png", 128));
@@ -348,8 +367,14 @@ mod tests {
     fn the_same_file_at_two_sizes_is_two_jobs() {
         let mut q = Queue::default();
         q.admit(vec![
-            ThumbReq { path: "/nope/a.png".into(), size: 64 },
-            ThumbReq { path: "/nope/a.png".into(), size: 256 },
+            ThumbReq {
+                path: "/nope/a.png".into(),
+                size: 64,
+            },
+            ThumbReq {
+                path: "/nope/a.png".into(),
+                size: 256,
+            },
         ]);
         assert_eq!(queued(&q).0.len(), 2);
     }

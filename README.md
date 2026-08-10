@@ -35,6 +35,27 @@ produce — build a debug bundle instead:
 npx tauri build --debug --bundles app && open src-tauri/target/debug/bundle/macos/Fiddler.app
 ```
 
+## Android / Samsung DeX
+
+Fiddler also has an Android target, designed primarily for the wide, keyboard-
+and-pointer layout in Samsung DeX. Build an arm64 debug APK with:
+
+```bash
+npm run tauri -- android build --debug --target aarch64
+```
+
+The APK is written to
+`src-tauri/gen/android/app/build/outputs/apk/universal/debug/app-universal-debug.apk`.
+On its first launch, Android opens Fiddler's **All files access** setting. Enable
+it so the app can browse shared storage, then use **Internal storage** or the
+Downloads/Documents shortcuts. DeX keyboards accept both `Ctrl` and `⌘` for the
+existing shortcuts.
+
+The Android build keeps browsing, Git status, folder creation, rename, text
+previews and image previews. It opens other file types in installed Android apps.
+System Trash, terminal launching, macOS Quick Look thumbnails, and in-app PDF
+rendering are not available on Android yet.
+
 ## Keys
 
 | | |

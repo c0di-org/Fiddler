@@ -141,7 +141,14 @@ pub fn parse(bytes: &[u8]) -> RepoStatus {
             }
             'u' => {
                 if let Some(path) = parse_unmerged(field) {
-                    record(&mut st, path, Code { index: 'u', worktree: 'u' });
+                    record(
+                        &mut st,
+                        path,
+                        Code {
+                            index: 'u',
+                            worktree: 'u',
+                        },
+                    );
                 }
             }
             _ => {}
@@ -212,7 +219,10 @@ fn parse_unmerged(field: &str) -> Option<&str> {
 
 fn xy_to_code(xy: &str) -> Option<Code> {
     let mut c = xy.chars();
-    Some(Code { index: c.next()?, worktree: c.next()? })
+    Some(Code {
+        index: c.next()?,
+        worktree: c.next()?,
+    })
 }
 
 fn record(st: &mut RepoStatus, path: &str, code: Code) {
@@ -305,7 +315,13 @@ mod tests {
         let st = parse(&nul(&[
             "1 .M N... 100644 100644 100644 aaa bbb src/audio/mixer.c",
         ]));
-        assert_eq!(st.codes["src/audio/mixer.c"], Code { index: '.', worktree: 'M' });
+        assert_eq!(
+            st.codes["src/audio/mixer.c"],
+            Code {
+                index: '.',
+                worktree: 'M'
+            }
+        );
         assert_eq!(st.rollups["src/audio"].modified, 1);
         assert_eq!(st.rollups["src"].modified, 1);
         assert_eq!(st.rollups[""].modified, 1);
@@ -334,7 +350,10 @@ mod tests {
 
     #[test]
     fn ignored_dirs_shadow_their_contents_without_rolling_up() {
-        let st = parse(&nul(&["! node_modules/", "1 .M N... 100644 100644 100644 a b src/x.c"]));
+        let st = parse(&nul(&[
+            "! node_modules/",
+            "1 .M N... 100644 100644 100644 a b src/x.c",
+        ]));
         assert!(st.ignored_dirs.contains("node_modules"));
         let (code, _) = st.lookup("node_modules/left-pad/index.js", false);
         assert_eq!(code, Some(Code::IGNORED));

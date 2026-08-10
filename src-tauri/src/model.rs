@@ -10,8 +10,14 @@ pub struct Code {
 }
 
 impl Code {
-    pub const UNTRACKED: Code = Code { index: '?', worktree: '?' };
-    pub const IGNORED: Code = Code { index: '!', worktree: '!' };
+    pub const UNTRACKED: Code = Code {
+        index: '?',
+        worktree: '?',
+    };
+    pub const IGNORED: Code = Code {
+        index: '!',
+        worktree: '!',
+    };
 
     pub fn is_ignored(&self) -> bool {
         self.index == '!'

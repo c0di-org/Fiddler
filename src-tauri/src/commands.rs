@@ -91,7 +91,11 @@ pub async fn list_dir(
             let child = PathBuf::from(&e.path);
             match cache.cached_status(&child) {
                 Some(st) => {
-                    e.branch = st.branch.clone().or_else(|| st.head.clone()).or(e.branch.take());
+                    e.branch = st
+                        .branch
+                        .clone()
+                        .or_else(|| st.head.clone())
+                        .or(e.branch.take());
                     let r = st.rollups.get("").copied().unwrap_or_default();
                     e.rollup = (!r.is_empty()).then_some(r);
                 }
@@ -116,7 +120,9 @@ pub async fn list_dir(
         Ok(DirListing {
             path: dir.to_string_lossy().into_owned(),
             entries,
-            repo_root: repo.as_ref().map(|r| r.work_root.to_string_lossy().into_owned()),
+            repo_root: repo
+                .as_ref()
+                .map(|r| r.work_root.to_string_lossy().into_owned()),
             worktrees,
             status_pending,
         })
@@ -145,7 +151,10 @@ fn apply_status(entries: &mut [Entry], work_root: &Path, st: &RepoStatus) {
 }
 
 #[tauri::command]
-pub async fn repo_info(state: State<'_, AppState>, path: String) -> Result<Option<RepoInfo>, String> {
+pub async fn repo_info(
+    state: State<'_, AppState>,
+    path: String,
+) -> Result<Option<RepoInfo>, String> {
     let cache = state.cache.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let dir = PathBuf::from(&path);
@@ -215,9 +224,17 @@ pub async fn inspect(path: String) -> Result<Inspect, String> {
 
         if meta.is_dir() {
             let count = std::fs::read_dir(&p)
-                .map(|rd| rd.flatten().filter(|e| e.file_name() != ".DS_Store").count() as u32)
+                .map(|rd| {
+                    rd.flatten()
+                        .filter(|e| e.file_name() != ".DS_Store")
+                        .count() as u32
+                })
                 .ok();
-            return Ok(Inspect { text: None, child_count: count, binary: false });
+            return Ok(Inspect {
+                text: None,
+                child_count: count,
+                binary: false,
+            });
         }
 
         const PEEK: usize = 8 * 1024;
@@ -229,11 +246,19 @@ pub async fn inspect(path: String) -> Result<Inspect, String> {
         // A NUL byte in the first block is the standard "this is binary" heuristic;
         // it's what `grep` and `git` both use.
         if buf.contains(&0) {
-            return Ok(Inspect { text: None, child_count: None, binary: true });
+            return Ok(Inspect {
+                text: None,
+                child_count: None,
+                binary: true,
+            });
         }
 
         let text: String = String::from_utf8_lossy(&buf).chars().take(4000).collect();
-        Ok(Inspect { text: Some(text), child_count: None, binary: false })
+        Ok(Inspect {
+            text: Some(text),
+            child_count: None,
+            binary: false,
+        })
     })
     .await
     .map_err(|e| format!("inspect task failed: {e}"))?
@@ -274,7 +299,9 @@ pub async fn read_text(path: String, max_bytes: usize) -> Result<TextHead, Strin
         // allowed to come back short, which would silently cut the preview.
         let mut buf = Vec::with_capacity(cap.min(meta.len() as usize + 1));
         let f = std::fs::File::open(&p).map_err(|e| e.to_string())?;
-        f.take(cap as u64).read_to_end(&mut buf).map_err(|e| e.to_string())?;
+        f.take(cap as u64)
+            .read_to_end(&mut buf)
+            .map_err(|e| e.to_string())?;
         let n = buf.len();
 
         if buf.contains(&0) {
@@ -318,7 +345,10 @@ pub struct PdfMeta {
 #[tauri::command]
 pub async fn pdf_meta(path: String) -> Result<PdfMeta, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        crate::page::meta(Path::new(&path)).map(|m| PdfMeta { pages: m.pages, aspect: m.aspect })
+        crate::page::meta(Path::new(&path)).map(|m| PdfMeta {
+            pages: m.pages,
+            aspect: m.aspect,
+        })
     })
     .await
     .map_err(|e| format!("pdf task failed: {e}"))?
@@ -372,27 +402,66 @@ pub async fn thumbnail(path: String, size: u32) -> Result<Option<String>, String
 
 #[tauri::command]
 pub fn sidebar_places() -> Vec<Place> {
-    let home = dirs::home_dir().unwrap_or_default();
-    let mut out = Vec::new();
-    let mut push = |name: &str, p: PathBuf, icon: &str| {
-        if p.is_dir() {
-            out.push(Place {
-                name: name.to_string(),
-                path: p.to_string_lossy().into_owned(),
-                icon: icon.to_string(),
-            });
-        }
-    };
+    #[cfg(target_os = "android")]
+    {
+        // Android app sandboxes have a private home directory, which is not the
+        // place a DeX user keeps projects. Fiddler is a file browser, so begin
+        // at shared storage once the user grants All files access in Android's
+        // settings screen (opened by MainActivity on first launch).
+        let shared = PathBuf::from("/storage/emulated/0");
+        return vec![
+            Place {
+                name: "Internal storage".into(),
+                path: shared
+                    .clone()
+                    .into_os_string()
+                    .to_string_lossy()
+                    .into_owned(),
+                icon: "home".into(),
+            },
+            Place {
+                name: "Downloads".into(),
+                path: shared.join("Download").to_string_lossy().into_owned(),
+                icon: "download".into(),
+            },
+            Place {
+                name: "Documents".into(),
+                path: shared.join("Documents").to_string_lossy().into_owned(),
+                icon: "doc".into(),
+            },
+            Place {
+                name: "Projects".into(),
+                path: shared.join("Projects").to_string_lossy().into_owned(),
+                icon: "folder".into(),
+            },
+        ];
+    }
 
-    push("Developer", home.join("Developer"), "code");
-    push("Home", home.clone(), "home");
-    push("Desktop", home.join("Desktop"), "desktop");
-    push("Documents", home.join("Documents"), "doc");
-    push("Downloads", home.join("Downloads"), "download");
-    out
+    #[cfg(not(target_os = "android"))]
+    {
+        let home = dirs::home_dir().unwrap_or_default();
+        let mut out = Vec::new();
+        let mut push = |name: &str, p: PathBuf, icon: &str| {
+            if p.is_dir() {
+                out.push(Place {
+                    name: name.to_string(),
+                    path: p.to_string_lossy().into_owned(),
+                    icon: icon.to_string(),
+                });
+            }
+        };
+
+        push("Developer", home.join("Developer"), "code");
+        push("Home", home.clone(), "home");
+        push("Desktop", home.join("Desktop"), "desktop");
+        push("Documents", home.join("Documents"), "doc");
+        push("Downloads", home.join("Downloads"), "download");
+        out
+    }
 }
 
 #[tauri::command]
+#[cfg(target_os = "macos")]
 pub fn reveal_in_finder(path: String) -> Result<(), String> {
     std::process::Command::new("open")
         .arg("-R")
@@ -403,6 +472,13 @@ pub fn reveal_in_finder(path: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+#[cfg(not(target_os = "macos"))]
+pub fn reveal_in_finder(_path: String) -> Result<(), String> {
+    Err("Reveal in Finder is only available on macOS".into())
+}
+
+#[tauri::command]
+#[cfg(target_os = "macos")]
 pub fn open_terminal_here(path: String) -> Result<(), String> {
     std::process::Command::new("open")
         .args(["-a", "Terminal"])
@@ -413,7 +489,17 @@ pub fn open_terminal_here(path: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn create_folder(state: State<'_, AppState>, parent: String, name: String) -> Result<String, String> {
+#[cfg(not(target_os = "macos"))]
+pub fn open_terminal_here(_path: String) -> Result<(), String> {
+    Err("Opening a terminal is only available on macOS".into())
+}
+
+#[tauri::command]
+pub fn create_folder(
+    state: State<'_, AppState>,
+    parent: String,
+    name: String,
+) -> Result<String, String> {
     let target = safe_child(&parent, &name)?;
     std::fs::create_dir(&target).map_err(|e| e.to_string())?;
     state.cache.forget_discovery_under(Path::new(&parent));
@@ -422,7 +508,11 @@ pub fn create_folder(state: State<'_, AppState>, parent: String, name: String) -
 }
 
 #[tauri::command]
-pub fn rename_path(state: State<'_, AppState>, path: String, new_name: String) -> Result<String, String> {
+pub fn rename_path(
+    state: State<'_, AppState>,
+    path: String,
+    new_name: String,
+) -> Result<String, String> {
     let src = PathBuf::from(&path);
     let parent = src.parent().ok_or("cannot rename the filesystem root")?;
     let dst = safe_child(&parent.to_string_lossy(), &new_name)?;
@@ -436,6 +526,7 @@ pub fn rename_path(state: State<'_, AppState>, path: String, new_name: String) -
 }
 
 #[tauri::command]
+#[cfg(not(target_os = "android"))]
 pub fn trash_paths(state: State<'_, AppState>, paths: Vec<String>) -> Result<(), String> {
     // Always the Trash, never `remove_file` — a file browser must not make deletions
     // that the user cannot walk back.
@@ -447,6 +538,14 @@ pub fn trash_paths(state: State<'_, AppState>, paths: Vec<String>) -> Result<(),
         }
     }
     Ok(())
+}
+
+#[tauri::command]
+#[cfg(target_os = "android")]
+pub fn trash_paths(_state: State<'_, AppState>, _paths: Vec<String>) -> Result<(), String> {
+    // Android's system trash is mediated by MediaStore/DocumentsUI; silently
+    // deleting from a file manager is worse than refusing the action.
+    Err("Android's Trash is not available to Fiddler yet; use the Files app to delete items".into())
 }
 
 /// The user's macOS accent colour (System Settings › Appearance), as sRGB bytes.
@@ -465,7 +564,9 @@ pub async fn system_accent(app: AppHandle) -> Option<[u8; 3]> {
     .ok()?;
     // Bounded so a wedged event loop can't pin this worker; the caller treats a
     // miss as "no system accent" and carries on with the current colour.
-    rx.recv_timeout(std::time::Duration::from_millis(500)).ok().flatten()
+    rx.recv_timeout(std::time::Duration::from_millis(500))
+        .ok()
+        .flatten()
 }
 
 #[cfg(target_os = "macos")]
@@ -530,6 +631,9 @@ mod tests {
         assert!(safe_child("/tmp", "..").is_err());
         assert!(safe_child("/tmp", "a/b").is_err());
         assert!(safe_child("/tmp", "  ").is_err());
-        assert_eq!(safe_child("/tmp", "ok.txt").unwrap(), PathBuf::from("/tmp/ok.txt"));
+        assert_eq!(
+            safe_child("/tmp", "ok.txt").unwrap(),
+            PathBuf::from("/tmp/ok.txt")
+        );
     }
 }
