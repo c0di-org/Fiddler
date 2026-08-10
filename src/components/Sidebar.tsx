@@ -16,6 +16,7 @@ interface Props {
   touchFolderDropIndex?: number | null;
   devices: PeerDevice[];
   onOpenDevice: (device: PeerDevice) => void;
+  selfDeviceName: string | null;
 }
 
 type DragKind = "folder" | "favorite";
@@ -55,6 +56,7 @@ export function Sidebar({
   touchFolderDropIndex = null,
   devices,
   onOpenDevice,
+  selfDeviceName,
 }: Props) {
   const [dropIndex, setDropIndex] = useState<number | null>(null);
   const [draggingFavorite, setDraggingFavorite] = useState(false);
@@ -100,12 +102,13 @@ export function Sidebar({
       {devices.length > 0 && <div className="sidebar-devices">
         <SidebarHeading icon={<DeviceIcon size={13} />}>Devices</SidebarHeading>
         {devices.map((device) => (
-          <button className="place device" key={device.id} onClick={() => onOpenDevice(device)} title={device.paired ? "Browse this device" : "Pair with this device"}>
+          <button className={`place device ${current.startsWith(`fiddler://${device.id}/`) ? "active" : ""}`} key={device.id} onClick={() => onOpenDevice(device)} title={device.paired ? "Browse this device" : "Pair with this device"}>
             <span className="place-icon">{device.platform === "macos" || device.platform === "desktop" ? <LaptopIcon size={18} /> : <DeviceIcon size={18} />}</span>
             <span className="place-label">{device.name}</span>
             {!device.paired && <LockIcon size={12} className="device-lock" />}
           </button>
         ))}
+        {selfDeviceName && <div className="device-self">This device: {selfDeviceName}</div>}
       </div>}
 
       <div className="sidebar-favorites">

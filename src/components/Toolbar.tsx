@@ -11,7 +11,10 @@ import {
   NewFileIcon,
   SearchIcon,
   UpIcon,
+  DeviceIcon,
+  LaptopIcon,
 } from "./icons";
+import type { PeerDevice } from "../types";
 
 interface Props {
   path: string;
@@ -33,10 +36,12 @@ interface Props {
   onToggleHidden: () => void;
   onTogglePreview: () => void;
   onNewFile: () => void;
+  device?: PeerDevice;
 }
 
 export function Toolbar(p: Props) {
-  const crumbs = buildCrumbs(p.path, p.home);
+  const remote = p.device && p.path.startsWith(`fiddler://${p.device.id}/`);
+  const crumbs = remote ? buildRemoteCrumbs(p.path, p.device!) : buildCrumbs(p.path, p.home);
 
   // "deep" so the gaps between the controls drag the window too; the drag
   // script still refuses to start a drag from buttons, inputs and labels.
@@ -71,6 +76,7 @@ export function Toolbar(p: Props) {
               className={`crumb ${i === all.length - 1 ? "here" : ""}`}
               onClick={() => p.onCrumb(c.path)}
             >
+              {remote && i === 0 && (p.device!.platform === "macos" || p.device!.platform === "desktop" ? <LaptopIcon size={14} /> : <DeviceIcon size={14} />)}
               {c.label}
             </button>
           )
@@ -165,5 +171,13 @@ function buildCrumbs(path: string, home: string) {
     acc = part === "~" ? home : `${acc}/${part}`;
     out.push({ label: part === "~" ? "Home" : part, path: acc });
   }
+  return out;
+}
+
+function buildRemoteCrumbs(path: string, device: PeerDevice): Crumb[] {
+  const rest = path.slice(`fiddler://${device.id}/`.length).split("/").filter(Boolean);
+  const out: Crumb[] = [{ label: device.name, path: `fiddler://${device.id}/` }];
+  let acc = `fiddler://${device.id}`;
+  for (const part of rest) { acc += `/${part}`; out.push({ label: part, path: acc }); }
   return out;
 }
