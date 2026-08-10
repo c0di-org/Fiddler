@@ -2,6 +2,7 @@ mod commands;
 mod fs_scan;
 mod git;
 mod model;
+mod nearby;
 #[cfg(target_os = "macos")]
 mod page;
 #[cfg(not(target_os = "macos"))]
@@ -43,6 +44,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::list_dir,
+            commands::nearby_entries,
             commands::repo_info,
             commands::refresh_repo,
             commands::sidebar_places,

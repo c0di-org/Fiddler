@@ -221,6 +221,12 @@ function RowView({
           <span className="lrow-name">{name}</span>
         )}
 
+        {e?.searchLocation && (
+          <span className="tag alt" title={path ?? undefined}>
+            {e.searchLocation}
+          </span>
+        )}
+
         <GitDot code={e?.code} rollup={e?.rollup} withCount />
 
         {e?.isRepo && e.branch && (
@@ -253,8 +259,8 @@ function RowView({
         )}
       </div>
 
-      <div className="c-when">{e ? formatStamp(e.mtime) : ""}</div>
-      <div className="c-size">{e ? formatSize(e.size, e.kind === "dir") : ""}</div>
+      <div className="c-when">{e && !e.nearby ? formatStamp(e.mtime) : ""}</div>
+      <div className="c-size">{e && !e.nearby ? formatSize(e.size, e.kind === "dir") : ""}</div>
       <div className="c-kind">{e ? kindOf(e) : row.kind === "worktree" ? "Worktree" : ""}</div>
     </div>
   );

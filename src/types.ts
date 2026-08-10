@@ -31,6 +31,10 @@ export interface Entry {
   branch: string | null;
   code: Code | null;
   rollup: Rollup | null;
+  /** Client-only: a lightweight result from the bounded nearby fallback. */
+  nearby?: boolean;
+  /** Client-only relative location shown for a nearby result. */
+  searchLocation?: string;
 }
 
 export interface WorktreeInfo {
@@ -56,6 +60,22 @@ export interface DirListing {
   statusPending: boolean;
   /** Set client-side when the directory could not be read at all. */
   error?: string;
+}
+
+/** Lightweight result from the bounded nearby-folder fallback. */
+export interface NearbyEntry {
+  name: string;
+  path: string;
+  kind: Kind;
+  linkToDir: boolean;
+  hidden: boolean;
+  relativePath: string;
+}
+
+export interface NearbySearch {
+  entries: NearbyEntry[];
+  /** The backend reached its directory or entry budget. */
+  truncated: boolean;
 }
 
 export interface RepoStatusPayload {

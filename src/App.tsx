@@ -18,7 +18,7 @@ import * as ipc from "./ipc";
 import { prepareSearch, search, type SearchKind, type SearchRecord } from "./search";
 import { TreeStore, type Row } from "./store/tree";
 import { applyTint, hasSystemAccent, loadTint, saveTint, watchTint, type Tint } from "./tint";
-import type { Entry, Favorite, Place, WorktreeInfo } from "./types";
+import type { Entry, Favorite, NearbyEntry, NearbySearch, Place, WorktreeInfo } from "./types";
 
 const store = new TreeStore();
 const isAndroid = /Android/i.test(navigator.userAgent);
@@ -41,6 +41,7 @@ interface EditorState {
 }
 
 type GridSearchValue = { kind: "entry"; entry: Entry } | { kind: "worktree"; worktree: WorktreeInfo };
+type NearbyState = { query: string; root: string; result: NearbySearch };
 
 export default function App() {
   useSyncExternalStore(store.subscribe, store.getSnapshot);
@@ -51,6 +52,8 @@ export default function App() {
   const [revealSelection, setRevealSelection] = useState(0);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [filter, setFilter] = useState("");
+  const [nearby, setNearby] = useState<NearbyState | null>(null);
+  const [nearbyBusy, setNearbyBusy] = useState(false);
   const [menu, setMenu] = useState<{ x: number; y: number; items: MenuItem[] } | null>(null);
   const [quickLook, setQuickLook] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
@@ -138,19 +141,88 @@ export default function App() {
     [entries, worktrees]
   );
   const gridMatches = useMemo(() => (searching ? search(gridRecords, filter) : []), [searching, gridRecords, filter]);
+  const localSearchEmpty = searching && gridMatches.length === 0;
+
+  // Local search is always instant. Only a settled zero-result query gets this
+  // bounded fallback; stale replies are ignored when the query or folder moves.
+  useEffect(() => {
+    if (!localSearchEmpty || !store.path) {
+      setNearby(null);
+      setNearbyBusy(false);
+      return;
+    }
+
+    let live = true;
+    setNearby(null);
+    setNearbyBusy(true);
+    const root = store.path;
+    const timer = window.setTimeout(() => {
+      void ipc
+        .nearbyEntries(root, store.showHidden)
+        .then((result) => {
+          if (live) setNearby({ query: filter, root, result });
+        })
+        .catch(() => {
+          // A permission error on a child must not replace the useful empty
+          // state for the folder the user is actually viewing.
+        })
+        .finally(() => {
+          if (live) setNearbyBusy(false);
+        });
+    }, 140);
+
+    return () => {
+      live = false;
+      window.clearTimeout(timer);
+    };
+  }, [localSearchEmpty, filter, store.path, store.showHidden]);
+
+  const nearbyResult = nearby?.query === filter && nearby.root === store.path ? nearby.result : null;
+  const nearbyRecords = useMemo<SearchRecord<GridSearchValue>[]>(
+    () =>
+      (nearbyResult?.entries ?? []).map((candidate) => {
+        const entry = entryFromNearby(candidate);
+        return prepareSearch<GridSearchValue>({
+          value: { kind: "entry", entry },
+          name: entry.name,
+          path: entry.path,
+          kind: entryKind(entry),
+        });
+      }),
+    [nearbyResult]
+  );
+  const nearbyMatches = useMemo(() => (nearbyResult ? search(nearbyRecords, filter) : []), [nearbyResult, nearbyRecords, filter]);
+  const usingNearby = localSearchEmpty && nearbyMatches.length > 0;
+
   const gridEntries = useMemo(
-    () => (searching ? gridMatches.flatMap((record) => (record.value.kind === "entry" ? [record.value.entry] : [])) : entries),
-    [searching, gridMatches, entries]
+    () => {
+      if (!searching) return entries;
+      const matches = usingNearby ? nearbyMatches : gridMatches;
+      return matches.flatMap((record) => (record.value.kind === "entry" ? [record.value.entry] : []));
+    },
+    [searching, usingNearby, nearbyMatches, gridMatches, entries]
   );
   const gridWorktrees = useMemo(
-    () => (searching ? gridMatches.flatMap((record) => (record.value.kind === "worktree" ? [record.value.worktree] : [])) : worktrees),
-    [searching, gridMatches, worktrees]
+    () => {
+      if (!searching) return worktrees;
+      if (usingNearby) return [];
+      return gridMatches.flatMap((record) => (record.value.kind === "worktree" ? [record.value.worktree] : []));
+    },
+    [searching, usingNearby, gridMatches, worktrees]
   );
 
   const listRecords = useMemo(() => rows.flatMap(searchRow), [rows]);
   const listRows = useMemo(
-    () => (searching ? search(listRecords, filter).map((record) => record.value) : rows),
-    [searching, listRecords, filter, rows]
+    () => {
+      if (!searching) return rows;
+      if (usingNearby) {
+        return nearbyMatches.flatMap((record) =>
+          record.value.kind === "entry" ? [searchEntryRow(record.value.entry)] : []
+        );
+      }
+      return search(listRecords, filter).map((record) => record.value);
+    },
+    [searching, usingNearby, nearbyMatches, listRecords, filter, rows]
   );
 
   /** Flat, ordered list of everything selectable in the current view. */
@@ -585,26 +657,36 @@ export default function App() {
 
   const emptyMessage = useMemo(() => {
     const err = store.listing?.error;
-    if (!err) return searching ? "No matches" : "This folder is empty";
+    if (!err) {
+      if (!searching) return "This folder is empty";
+      if (localSearchEmpty && nearbyBusy) return "Searching nearby folders…";
+      if (localSearchEmpty && nearbyResult?.truncated) return "No matches in the first 10,000 nearby items";
+      return "No matches";
+    }
     return /denied|not permitted|Operation not permitted/i.test(err)
       ? isAndroid
         ? "Fiddler needs All files access to browse shared storage.\nAllow it in Android Settings, then return here."
         : "Fiddler doesn’t have permission to read this folder.\nGrant access in System Settings › Privacy & Security › Files and Folders."
       : err.replace(/^Error:\s*/, "");
-  }, [store.listing, searching]);
+  }, [store.listing, searching, localSearchEmpty, nearbyBusy, nearbyResult]);
 
   const statusText = useMemo(() => {
+    if (usingNearby) {
+      return `${targets.length} nearby item${targets.length === 1 ? "" : "s"} — within two levels`;
+    }
+    if (localSearchEmpty && nearbyBusy) return "Searching nearby folders…";
     if (selectedDirectory) {
       if (selectedDirCount === undefined) return `${selectedDirectory.name} — Loading…`;
       if (selectedDirCount === null) return selectedDirectory.name;
       return `${selectedDirectory.name} — ${selectedDirCount} item${selectedDirCount === 1 ? "" : "s"}`;
     }
     if (selected.length === 1 && selected[0].entry && !selected[0].isDir) {
+      if (selected[0].entry.nearby) return selected[0].name;
       return `${selected[0].name} — ${formatSize(selected[0].entry.size, false)}`;
     }
     if (selected.length > 1) return `${selected.length} of ${targets.length} selected`;
     return `${targets.length} item${targets.length === 1 ? "" : "s"}`;
-  }, [selected, selectedDirectory, selectedDirCount, targets.length]);
+  }, [usingNearby, targets.length, localSearchEmpty, nearbyBusy, selected, selectedDirectory, selectedDirCount]);
 
   return (
     <div className="app">
@@ -760,6 +842,32 @@ function iconsPerRow(): number {
 
 function entryKind(entry: Entry): SearchKind {
   return entry.kind === "dir" || (entry.kind === "symlink" && entry.linkToDir) ? "dir" : "file";
+}
+
+/** Nearby scans avoid metadata calls; full details arrive only if the item opens. */
+function entryFromNearby(candidate: NearbyEntry): Entry {
+  return {
+    name: candidate.name,
+    path: candidate.path,
+    kind: candidate.kind,
+    linkToDir: candidate.linkToDir,
+    size: 0,
+    mtime: 0,
+    hidden: candidate.hidden,
+    thumbable: false,
+    isRepo: false,
+    worktreeCount: 0,
+    branch: null,
+    code: null,
+    rollup: null,
+    nearby: true,
+    searchLocation: candidate.relativePath,
+  };
+}
+
+function searchEntryRow(entry: Entry): Row {
+  const navigable = entry.kind === "dir" || (entry.kind === "symlink" && entry.linkToDir);
+  return { kind: "entry", id: entry.path, depth: 0, dirPath: navigable ? entry.path : null, entry, expanded: false };
 }
 
 /** Search results are flat and ranked; the normal list remains a navigable tree. */

@@ -252,6 +252,11 @@ function Cell({
       </div>
       <div className="cell-label">
         <span className="cell-name">{cell.name}</span>
+        {e?.searchLocation && (
+          <span className="cell-sub" title={cell.path}>
+            {e.searchLocation}
+          </span>
+        )}
         {cell.wt && (
           <span className="cell-sub">
             {cell.wt.detached ? cell.wt.head ?? "detached" : cell.wt.branch}

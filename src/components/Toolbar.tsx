@@ -129,7 +129,7 @@ export function Toolbar(p: Props) {
           <input
             value={p.filter}
             placeholder="Search files"
-            title="Search names and paths. Try ext:ts or kind:dir."
+            title="Search names and paths. If there are no local matches, Fiddler looks two folders deep. Try ext:ts or kind:dir."
             spellCheck={false}
             onChange={(e) => p.onFilter(e.target.value)}
           />

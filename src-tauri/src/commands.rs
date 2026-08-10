@@ -8,6 +8,7 @@ use crate::fs_scan::{self, ScanOpts};
 use crate::git::status::RepoStatus;
 use crate::git::{self, GitCache};
 use crate::model::{DirListing, Entry, Kind, Place, RepoInfo, Rollup, WorktreeInfo};
+use crate::nearby::{self, NearbySearch};
 use crate::thumb_pool::{ThumbPool, ThumbReady, ThumbReq};
 use crate::watcher::FsWatcher;
 
@@ -129,6 +130,21 @@ pub async fn list_dir(
     })
     .await
     .map_err(|e| format!("listing task failed: {e}"))?
+}
+
+/// Scan just below the visible folder when its local search has no match. This
+/// is deliberately a separate IPC route: normal typing never invokes it.
+#[tauri::command]
+pub async fn nearby_entries(
+    path: String,
+    show_hidden: bool,
+    max_depth: u8,
+) -> Result<NearbySearch, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        nearby::scan(&PathBuf::from(path), show_hidden, max_depth)
+    })
+    .await
+    .map_err(|e| format!("nearby search task failed: {e}"))?
 }
 
 /// Badge each entry from the repo's cached status.
@@ -542,7 +558,11 @@ pub fn create_text_file(
 /// place. Both Android's shared storage and desktop filesystems see either the
 /// old complete document or the new complete document, never a partial save.
 #[tauri::command]
-pub fn write_text_file(state: State<'_, AppState>, path: String, text: String) -> Result<(), String> {
+pub fn write_text_file(
+    state: State<'_, AppState>,
+    path: String,
+    text: String,
+) -> Result<(), String> {
     use std::io::Write;
 
     let target = PathBuf::from(&path);
@@ -551,7 +571,10 @@ pub fn write_text_file(state: State<'_, AppState>, path: String, text: String) -
         return Err("that is not a regular file".into());
     }
     let parent = target.parent().ok_or("cannot write the filesystem root")?;
-    let file_name = target.file_name().and_then(|n| n.to_str()).ok_or("invalid file name")?;
+    let file_name = target
+        .file_name()
+        .and_then(|n| n.to_str())
+        .ok_or("invalid file name")?;
     let temp = parent.join(format!(".{file_name}.fiddler-save-{}", std::process::id()));
     if temp.exists() {
         return Err("a previous save is still being finalized; please try again".into());

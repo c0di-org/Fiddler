@@ -7,6 +7,8 @@
 export type SearchKind = "file" | "dir" | "worktree";
 
 export interface SearchSource<T> {
+  // Local directory rows, bounded nearby candidates, and future recent-file
+  // records all share this small contract and therefore this exact scorer.
   value: T;
   name: string;
   path: string;

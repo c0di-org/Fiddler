@@ -3,6 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import type {
   DirListing,
   Inspect,
+  NearbySearch,
   PdfMeta,
   Place,
   RepoInfo,
@@ -14,6 +15,10 @@ import type {
 
 export const listDir = (path: string, showHidden: boolean) =>
   invoke<DirListing>("list_dir", { path, showHidden });
+
+/** A hard-capped, no-symlink fallback used only after local search finds nothing. */
+export const nearbyEntries = (path: string, showHidden: boolean, maxDepth = 2) =>
+  invoke<NearbySearch>("nearby_entries", { path, showHidden, maxDepth });
 
 export const repoInfo = (path: string) => invoke<RepoInfo | null>("repo_info", { path });
 
