@@ -13,6 +13,7 @@ import type {
   DirListing,
   EntryBatch,
   Inspect,
+  NearbyAccess,
   NearbySearch,
   PairOutcome,
   PairRequest,
@@ -65,6 +66,12 @@ const backend: Backend = {
   nearbyRequests: () => invoke<PairRequest[]>("nearby_requests"),
 
   respondNearbyRequest: (id, allow) => invoke<void>("respond_nearby_request", { id, allow }),
+
+  nearbyAccess: () => invoke<NearbyAccess>("nearby_access"),
+
+  withdrawNearbyDevice: (id) => invoke<void>("withdraw_nearby_device", { id }),
+
+  forgetNearbyDevice: (id) => invoke<void>("forget_nearby_device", { id }),
 
   usbDevices: () => invoke<UsbDevice[]>("usb_devices"),
 

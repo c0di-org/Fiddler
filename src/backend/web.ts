@@ -147,6 +147,13 @@ const backend: Backend = {
 
   respondNearbyRequest: unavailable("Pairing"),
 
+  // Nothing can be allowed here, so there is never anything to withdraw.
+  nearbyAccess: async () => ({ allowed: [], trusted: [], selfName: "" }),
+
+  withdrawNearbyDevice: unavailable("Nearby devices"),
+
+  forgetNearbyDevice: unavailable("Nearby devices"),
+
   // A browser tab is not a USB host, so there is never a device to report and
   // never a stage to change. Empty and silent rather than `unavailable`: the
   // sidebar asks for these unprompted on every start, and a rejected promise

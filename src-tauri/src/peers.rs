@@ -57,6 +57,35 @@ pub struct PairingInfo {
     pub root: String,
 }
 
+/// A device holding access, in one direction or the other.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceAccess {
+    pub id: String,
+    pub name: String,
+    /// Empty where it was never recorded, or where the device isn't around to
+    /// say. Only decides which glyph is drawn.
+    pub platform: String,
+    /// Unix seconds when access was granted; zero when it predates Fiddler
+    /// writing that down, and always zero for the outbound direction.
+    pub since: u64,
+    /// On the network right now. A device being away is not a reason to hide
+    /// it here — an absent device holding a key is the case this list is for.
+    pub online: bool,
+}
+
+/// Both directions, which are two different questions.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NearbyAccess {
+    /// Devices allowed to browse this one.
+    pub allowed: Vec<DeviceAccess>,
+    /// Devices this one kept a key to.
+    pub trusted: Vec<DeviceAccess>,
+    /// What this device calls itself, for the sentence naming what is shared.
+    pub self_name: String,
+}
+
 /// A device asking to browse this one. It holds no access at all: this is a
 /// question on someone's screen until they answer it.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -97,13 +126,52 @@ struct KnownPeer {
     token: String,
 }
 
+/// A device that has been allowed to browse this one.
+///
+/// It used to be nothing but the token. That was enough to *check* access and
+/// not nearly enough to *show* it: a list of opaque UUIDs is not something
+/// anyone can make a decision about, so the grant now records who it was for
+/// and when.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct Client {
+    token: String,
+    #[serde(default)]
+    name: String,
+    #[serde(default)]
+    platform: String,
+    /// Unix seconds. Zero for a grant made before Fiddler wrote this down.
+    #[serde(default)]
+    at: u64,
+}
+
+/// Reads both shapes of `peers.json`: the bare token this file used to hold,
+/// and the record it holds now. Untagged, so a string falls through to `Token`
+/// once it fails to be a map — which is the whole migration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+enum SavedClient {
+    Full(Client),
+    Token(String),
+}
+
+impl From<SavedClient> for Client {
+    fn from(saved: SavedClient) -> Self {
+        match saved {
+            SavedClient::Full(client) => client,
+            // An older grant. The name is recoverable — it is derived from the
+            // device id, which is the one thing we did keep.
+            SavedClient::Token(token) => Client { token, name: String::new(), platform: String::new(), at: 0 },
+        }
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize, Default)]
 struct SavedPeers {
     id: String,
     #[serde(default)]
     name: String,
     known: BTreeMap<String, KnownPeer>,
-    clients: BTreeMap<String, String>,
+    clients: BTreeMap<String, SavedClient>,
 }
 
 #[derive(Clone)]
@@ -120,7 +188,7 @@ struct PeerState {
     name: String,
     port: u16,
     known: BTreeMap<String, KnownPeer>,
-    clients: BTreeMap<String, String>,
+    clients: BTreeMap<String, Client>,
     seen: BTreeMap<String, SeenPeer>,
     asks: BTreeMap<String, Ask>,
 }
@@ -176,7 +244,7 @@ impl PeerService {
                 name,
                 port: 0,
                 known: saved.known,
-                clients: saved.clients,
+                clients: saved.clients.into_iter().map(|(id, client)| (id, client.into())).collect(),
                 seen: BTreeMap::new(),
                 asks: BTreeMap::new(),
             })),
@@ -272,6 +340,70 @@ impl PeerService {
         }
     }
 
+    /// Everything currently holding access, in both directions.
+    ///
+    /// They are two different questions and the answer to one says nothing
+    /// about the other: `allowed` is who can read the files on this machine,
+    /// `trusted` is whose files this machine kept a key to. A list showing only
+    /// one of them invites exactly the wrong conclusion about what was revoked.
+    pub fn access(&self) -> NearbyAccess {
+        let now = now_secs();
+        let st = self.state.lock().unwrap();
+        let live = |id: &str| {
+            st.seen
+                .get(id)
+                .is_some_and(|peer| now.saturating_sub(peer.seen_at) < 8)
+        };
+        NearbyAccess {
+            allowed: st
+                .clients
+                .iter()
+                .map(|(id, client)| DeviceAccess {
+                    // A grant made before Fiddler recorded names still has one:
+                    // the device's name is derived from its id, which is the
+                    // part that was always kept.
+                    name: if client.name.is_empty() { friendly_name(id) } else { client.name.clone() },
+                    id: id.clone(),
+                    platform: client.platform.clone(),
+                    since: client.at,
+                    online: live(id),
+                })
+                .collect(),
+            trusted: st
+                .known
+                .iter()
+                .map(|(id, peer)| DeviceAccess {
+                    name: peer.name.clone(),
+                    id: id.clone(),
+                    platform: st.seen.get(id).map(|seen| seen.platform.clone()).unwrap_or_default(),
+                    since: 0,
+                    online: live(id),
+                })
+                .collect(),
+            self_name: st.name.clone(),
+        }
+    }
+
+    /// Stop letting a device browse this one. Its token stops authorising
+    /// immediately, and any answer we remember for it is dropped too — so if it
+    /// asks again it is a stranger putting a fresh question on screen, which is
+    /// the same rule a collected ask already follows.
+    pub fn withdraw(&self, id: &str) {
+        let mut st = self.state.lock().unwrap();
+        st.clients.remove(id);
+        st.asks.remove(id);
+        drop(st);
+        self.save();
+    }
+
+    /// Drop our own key to a device. Nothing over there changes — it still has
+    /// us on its list until someone withdraws it — but browsing it from here
+    /// means asking again.
+    pub fn forget(&self, id: &str) {
+        self.state.lock().unwrap().known.remove(id);
+        self.save();
+    }
+
     pub fn remote_listing(&self, device_id: &str, path: &str, show_hidden: bool) -> Result<DirListing, String> {
         let peer = self.known(device_id)?;
         let route = format!("/v1/list?path={}&hidden={}", enc(path), show_hidden as u8);
@@ -306,7 +438,12 @@ impl PeerService {
 
     fn save(&self) {
         let st = self.state.lock().unwrap();
-        let saved = SavedPeers { id: st.id.clone(), name: st.name.clone(), known: st.known.clone(), clients: st.clients.clone() };
+        let saved = SavedPeers {
+            id: st.id.clone(),
+            name: st.name.clone(),
+            known: st.known.clone(),
+            clients: st.clients.iter().map(|(id, client)| (id.clone(), SavedClient::Full(client.clone()))).collect(),
+        };
         drop(st);
         let temp = self.config.with_extension("json.tmp");
         if let Ok(bytes) = serde_json::to_vec(&saved) {
@@ -398,7 +535,9 @@ impl PeerService {
         match st.asks.get(client).and_then(|ask| ask.decision) {
             Some(true) => {
                 let token = Uuid::new_v4().to_string();
-                st.clients.insert(client.clone(), token.clone());
+                let named = st.asks.get(client).map(|ask| (ask.name.clone(), ask.platform.clone()));
+                let (name, platform) = named.unwrap_or_else(|| (peer.name.clone(), peer.platform.clone()));
+                st.clients.insert(client.clone(), Client { token: token.clone(), name, platform, at: now });
                 // Forget the ask now it has been collected, so the same device
                 // asking again later is a fresh question rather than an answer
                 // it inherited from last week.
@@ -422,7 +561,7 @@ impl PeerService {
     }
 
     fn authorised(&self, auth: Option<&str>) -> bool {
-        auth.is_some_and(|token| self.state.lock().unwrap().clients.values().any(|saved| saved == token))
+        auth.is_some_and(|token| self.state.lock().unwrap().clients.values().any(|client| client.token == token))
     }
 
     fn handle_list(&self, q: &BTreeMap<String, String>, auth: Option<&str>) -> Result<Vec<u8>, (u16, String)> {
@@ -577,4 +716,63 @@ fn text_head(path: &Path, max_bytes: usize) -> Result<crate::commands::TextHead,
     if bytes.contains(&0) { return Ok(crate::commands::TextHead { text: String::new(), truncated: false, bytes: meta.len(), lines: 0, binary: true }); }
     let text = match std::str::from_utf8(&bytes) { Ok(s) => s.to_owned(), Err(e) => String::from_utf8_lossy(&bytes[..e.valid_up_to()]).into_owned() };
     Ok(crate::commands::TextHead { lines: text.lines().count() as u32, truncated: (bytes.len() as u64) < meta.len(), bytes: meta.len(), binary: false, text })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `peers.json` used to store a bare token per client. Reading it back as
+    /// anything other than that token would silently revoke every device that
+    /// had already been allowed — which is the one outcome this change must not
+    /// produce, since nobody would know to grant access again.
+    #[test]
+    fn an_older_peers_file_keeps_the_devices_it_had_already_allowed() {
+        let old = r#"{
+            "id": "11111111-2222-3333-4444-555555555555",
+            "name": "Rosy Plum",
+            "known": {},
+            "clients": { "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee": "the-token" }
+        }"#;
+        let saved: SavedPeers = serde_json::from_str(old).unwrap();
+        let clients: BTreeMap<String, Client> =
+            saved.clients.into_iter().map(|(id, client)| (id, client.into())).collect();
+
+        let client = &clients["aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"];
+        assert_eq!(client.token, "the-token", "the token has to survive, or access is lost");
+        assert_eq!(client.at, 0, "there is no honest grant time to invent");
+        assert!(client.name.is_empty());
+    }
+
+    #[test]
+    fn a_grant_with_no_recorded_name_is_still_something_a_person_can_read() {
+        // The name is derived from the device id, so a migrated grant is named
+        // exactly what that device calls itself rather than shown as a UUID.
+        let id = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+        let name = friendly_name(id);
+        assert!(name.contains(' '), "expected an adjective and a fruit, got {name}");
+        assert_eq!(name, friendly_name(id), "the same id must always give the same name");
+    }
+
+    #[test]
+    fn what_is_written_now_reads_back_whole() {
+        let mut clients = BTreeMap::new();
+        clients.insert(
+            "device-1".to_string(),
+            SavedClient::Full(Client {
+                token: "t".into(),
+                name: "Sunny Fig".into(),
+                platform: "android".into(),
+                at: 1_760_000_000,
+            }),
+        );
+        let saved = SavedPeers { id: "me".into(), name: "Tidy Kiwi".into(), known: BTreeMap::new(), clients };
+        let round: SavedPeers = serde_json::from_slice(&serde_json::to_vec(&saved).unwrap()).unwrap();
+        let client: Client = round.clients["device-1"].clone().into();
+
+        assert_eq!(client.name, "Sunny Fig");
+        assert_eq!(client.platform, "android");
+        assert_eq!(client.at, 1_760_000_000);
+        assert_eq!(client.token, "t");
+    }
 }

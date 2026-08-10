@@ -42,11 +42,13 @@ export function PairAsk({
       <span className="pair-ask-icon">{phone ? <DeviceIcon size={19} /> : <LaptopIcon size={19} />}</span>
       <div className="pair-ask-body">
         <strong id="pair-ask-title">{request.name} wants to browse this device</strong>
-        {/* Accurate about the duration, which is the part people get wrong:
-            the token is saved to disk, so this outlives the session and there
-            is not yet a way to take it back. Say so while it is still true. */}
+        {/* Accurate about the duration, which is the part people get wrong: the
+            token is saved to disk, so this outlives the session. It can now be
+            taken back, and saying where turns an open-ended grant into one with
+            a visible end. */}
         <span className="pair-ask-detail" id="pair-ask-detail">
-          It will be able to read and copy files in your home folder, on this visit and later ones.
+          It will be able to read and copy files in your home folder, on this visit and later ones,
+          until you withdraw it under Devices.
         </span>
         {waiting > 0 && (
           <span className="pair-ask-queue">

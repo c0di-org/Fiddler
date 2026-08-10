@@ -13,7 +13,7 @@ use crate::model::{DirListing, Entry, Kind, Place, RepoInfo, Rollup, WorktreeInf
 #[cfg(not(target_os = "android"))]
 use crate::mtp::{self, MtpService, UsbDevice};
 use crate::nearby::{self, NearbySearch};
-use crate::peers::{self, PairOutcome, PairRequest, PairingInfo, PeerDevice, PeerService};
+use crate::peers::{self, NearbyAccess, PairOutcome, PairRequest, PairingInfo, PeerDevice, PeerService};
 use crate::thumb_pool::{ThumbPool, ThumbReady, ThumbReq};
 use crate::watcher::FsWatcher;
 
@@ -222,6 +222,19 @@ pub fn nearby_requests(state: State<'_, AppState>) -> Vec<PairRequest> { state.p
 /// access to this one's files.
 #[tauri::command]
 pub fn respond_nearby_request(state: State<'_, AppState>, id: String, allow: bool) { state.peers.respond(&id, allow) }
+
+/// Everything currently holding access, in both directions. Allow is a tap, and
+/// until now that tap was the last time anyone could see or change what it did.
+#[tauri::command]
+pub fn nearby_access(state: State<'_, AppState>) -> NearbyAccess { state.peers.access() }
+
+/// Stop letting a device browse this one.
+#[tauri::command]
+pub fn withdraw_nearby_device(state: State<'_, AppState>, id: String) { state.peers.withdraw(&id) }
+
+/// Drop this device's own key to another one.
+#[tauri::command]
+pub fn forget_nearby_device(state: State<'_, AppState>, id: String) { state.peers.forget(&id) }
 
 /// Scan just below the visible folder when its local search has no match. This
 /// is deliberately a separate IPC route: normal typing never invokes it.

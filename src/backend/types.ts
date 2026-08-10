@@ -15,6 +15,7 @@ import type {
   DirListing,
   EntryBatch,
   Inspect,
+  NearbyAccess,
   NearbySearch,
   PairOutcome,
   PairRequest,
@@ -68,6 +69,13 @@ export interface Backend {
   nearbyRequests(): Promise<PairRequest[]>;
   /** Answer one of them. This is the only thing that grants a device access. */
   respondNearbyRequest(id: string, allow: boolean): Promise<void>;
+  /** Everything currently holding access, in both directions. */
+  nearbyAccess(): Promise<NearbyAccess>;
+  /** Stop letting a device browse this one. Its token stops authorising at
+   * once, and it becomes a stranger again if it asks a second time. */
+  withdrawNearbyDevice(id: string): Promise<void>;
+  /** Drop this device's own key to another one. Nothing changes over there. */
+  forgetNearbyDevice(id: string): Promise<void>;
 
   /** Devices attached by cable, each with the stage it has reached. Always
    * empty where there is no USB host to speak MTP with — a browser tab, or the

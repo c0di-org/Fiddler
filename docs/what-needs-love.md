@@ -80,15 +80,22 @@ submenu. That needs a Rust command to enumerate handlers — LaunchServices'
 makes — and it needs `ContextMenu` to learn to nest, which nothing has needed
 until now.
 
-### A paired device can't be un-paired
+### Nearby access is now visible and revocable
 
-Allow is now an explicit tap, but there's still no list of devices that have
-been allowed and no way to withdraw one. Tokens live in `peers.json` forever.
+The padlock beside the Devices heading opens a panel with both directions in it:
+devices allowed to browse this one, with Withdraw, and devices this one holds a
+key to, with Forget. They are kept apart on purpose — one is about your files,
+the other about a saved token, and a merged list would invite the belief that one
+button did both.
 
-The state is already there (`clients` and `known` in `PeerService`); this is a
-command to list them, a command to drop one, and a small section in the sidebar
-or a settings sheet. Worth doing before anyone relies on nearby devices in a
-shared space.
+`clients` in `PeerService` stored nothing but the token, which was enough to
+*check* access and useless for *showing* it, so the grant now records the name,
+the platform and the day. `peers.json` reads both shapes, and there is a test for
+that: getting the migration wrong would silently revoke every device already
+allowed, and nobody would know to grant it again.
+
+Withdrawing drops the remembered answer along with the token, so a device that
+asks again is a stranger putting a fresh card on screen.
 
 ### Copying is silent and can't be stopped
 

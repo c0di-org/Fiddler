@@ -33,6 +33,11 @@ interface Props {
    * favourite is a bookmark, and dragging a folder there means "remember this",
    * not "put this inside it". */
   onDropItems?: DropItems;
+  /** How many devices hold access in either direction. Keeps the Devices
+   * section — and so the way into the panel — present when a device that was
+   * allowed months ago isn't on the network today. */
+  accessCount?: number;
+  onManageAccess?: () => void;
 }
 
 type DragKind = "folder" | "favorite";
@@ -77,6 +82,8 @@ export function Sidebar({
   onOpenUsb,
   onOpenFolder,
   onDropItems,
+  accessCount = 0,
+  onManageAccess,
 }: Props) {
   const [dropIndex, setDropIndex] = useState<number | null>(null);
   const [draggingFavorite, setDraggingFavorite] = useState(false);
@@ -179,8 +186,27 @@ export function Sidebar({
         </div>
       )}
 
-      {devices.length > 0 && <div className="sidebar-devices">
-        <SidebarHeading icon={<DeviceIcon size={13} />}>Devices</SidebarHeading>
+      {/* Shown when there is anything to say — a device on the network, or one
+          that holds access and isn't here. The second case is the whole reason
+          the panel exists, so it must be reachable with nothing in the list. */}
+      {(devices.length > 0 || accessCount > 0) && <div className="sidebar-devices">
+        <SidebarHeading
+          icon={<DeviceIcon size={13} />}
+          action={
+            onManageAccess && (
+              <button
+                className="sidebar-title-action"
+                onClick={onManageAccess}
+                title="Devices that have been allowed, and devices this one can browse"
+              >
+                {accessCount > 0 ? accessCount : ""}
+                <LockIcon size={11} />
+              </button>
+            )
+          }
+        >
+          Devices
+        </SidebarHeading>
         {devices.map((device) => {
           const asking = device.id === askingDeviceId;
           return (
@@ -273,11 +299,21 @@ export function Sidebar({
   );
 }
 
-function SidebarHeading({ icon, children }: { icon?: React.ReactNode; children: React.ReactNode }) {
+function SidebarHeading({
+  icon,
+  action,
+  children,
+}: {
+  icon?: React.ReactNode;
+  /** A control belonging to the whole section, pushed to the far end. */
+  action?: React.ReactNode;
+  children: React.ReactNode;
+}) {
   return (
     <div className="sidebar-title">
       {icon}
       {children}
+      {action}
     </div>
   );
 }

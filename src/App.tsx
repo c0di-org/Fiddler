@@ -9,6 +9,7 @@ import { QuickLook } from "./components/QuickLook";
 import { Sidebar } from "./components/Sidebar";
 import { TintPicker } from "./components/TintPicker";
 import { TextEditor } from "./components/TextEditor";
+import { NearbyAccessSheet } from "./components/NearbyAccessSheet";
 import { PairAsk } from "./components/PairAsk";
 import { Toolbar } from "./components/Toolbar";
 import { UsbConnecting, UsbLinkBanner } from "./components/UsbPanel";
@@ -28,7 +29,7 @@ import { contentTerms, prepareSearch, search, type SearchKind, type SearchRecord
 import { TreeStore, type Row } from "./store/tree";
 import { invert, remember, take as takeUndo, undoStore } from "./undo";
 import { applyTint, hasSystemAccent, loadTint, saveTint, watchTint, type Tint } from "./tint";
-import type { ContentSearch, Entry, Favorite, NearbyEntry, NearbySearch, PairRequest, PairingInfo, PeerDevice, Place, UsbDevice, WorktreeInfo } from "./types";
+import type { ContentSearch, DeviceAccess, Entry, Favorite, NearbyAccess, NearbyEntry, NearbySearch, PairRequest, PairingInfo, PeerDevice, Place, UsbDevice, WorktreeInfo } from "./types";
 
 /** Read once, at module load, because the store is built from it. */
 const session = loadSession();
@@ -89,6 +90,11 @@ export default function App() {
   const [requests, setRequests] = useState<PairRequest[]>([]);
   /** The device we are currently waiting on an answer from, if any. */
   const [askingId, setAskingId] = useState<string | null>(null);
+  /** Everything pairing has granted, in both directions. Read on demand rather
+   * than polled: it only changes when someone taps Allow or revokes here. */
+  const [access, setAccess] = useState<NearbyAccess | null>(null);
+  const [accessOpen, setAccessOpen] = useState(false);
+  const [revoking, setRevoking] = useState<string | null>(null);
   const [favorites, setFavorites] = useState<Favorite[]>(loadFavorites);
   const [folderTouchDrag, setFolderTouchDrag] = useState<FolderTouchDrag | null>(null);
   const folderTouchDragRef = useRef<FolderTouchDrag | null>(null);
@@ -138,6 +144,24 @@ export default function App() {
 
   /** Ask the current view to reveal a selection made by keyboard navigation. */
   const revealCursor = useCallback(() => setRevealSelection((n) => n + 1), []);
+
+  /** Re-read what pairing has granted. Called when a grant or a revocation
+   * happens and when the panel opens — never polled, because nothing changes it
+   * except a tap here or an Allow here. */
+  const refreshAccess = useCallback(async () => {
+    try {
+      setAccess(await ipc.nearbyAccess());
+    } catch {
+      // A build with no nearby transport has nothing to show, and an error on a
+      // list nobody asked for is noise.
+    }
+  }, []);
+
+  // Once at startup, for the count beside the Devices heading: the panel has to
+  // be reachable when the device holding access isn't on the network today.
+  useEffect(() => {
+    if (caps.nearby) void refreshAccess();
+  }, [refreshAccess]);
 
   // ------------------------------------------------------------ bootstrap
 
@@ -573,17 +597,56 @@ export default function App() {
       // start a rival poll for the same answer.
       if (askingId) return;
       if (!device.paired && !(await askToPair(device))) return;
+      // Pairing succeeded, so this device now holds a key it didn't before.
+      void refreshAccess();
       await go(`fiddler://${device.id}/`);
     },
-    [askToPair, askingId, go]
+    [askToPair, askingId, go, refreshAccess]
   );
 
   /** Answer a device asking to browse this one. Allow is the only thing in
    * Fiddler that grants another machine access to these files. */
-  const respondToAsk = useCallback((request: PairRequest, allow: boolean) => {
-    setRequests((current) => current.filter((item) => item.id !== request.id));
-    void ipc.respondNearbyRequest(request.id, allow).catch(() => {});
-  }, []);
+  const respondToAsk = useCallback(
+    (request: PairRequest, allow: boolean) => {
+      setRequests((current) => current.filter((item) => item.id !== request.id));
+      void ipc
+        .respondNearbyRequest(request.id, allow)
+        .then(() => {
+          // An Allow is a new grant, and this list is the record of grants.
+          if (allow) void refreshAccess();
+        })
+        .catch(() => {});
+    },
+    [refreshAccess]
+  );
+
+  /** Take back access, in whichever direction. Both revocations are local and
+   * immediate; nothing has to be told, and nothing waits on the network. */
+  const revoke = useCallback(
+    async (device: DeviceAccess, direction: "withdraw" | "forget") => {
+      setRevoking(device.id);
+      try {
+        if (direction === "withdraw") {
+          await ipc.withdrawNearbyDevice(device.id);
+          flash(`${device.name} can no longer browse this device`);
+        } else {
+          await ipc.forgetNearbyDevice(device.id);
+          // The sidebar shows a padlock again for a device we no longer hold a
+          // key to, so the list it draws from is now out of date.
+          setDevices((current) =>
+            current.map((item) => (item.id === device.id ? { ...item, paired: false } : item))
+          );
+          flash(`Forgot the key to ${device.name}`);
+        }
+        await refreshAccess();
+      } catch (error) {
+        flash(String(error).replace(/^Error:\s*/, ""));
+      } finally {
+        setRevoking(null);
+      }
+    },
+    [flash, refreshAccess]
+  );
 
   // No pairing step: the cable is the authorisation. A device with exactly one
   // storage skips straight into it, because picking from a list of one is a
@@ -1434,6 +1497,15 @@ export default function App() {
         touchFolderDropIndex={folderTouchDrag?.dropIndex}
         onOpenFolder={mountFolder}
         onDropItems={onDropItems}
+        accessCount={access ? access.allowed.length + access.trusted.length : 0}
+        onManageAccess={
+          caps.nearby
+            ? () => {
+                setAccessOpen(true);
+                void refreshAccess();
+              }
+            : undefined
+        }
       />
 
       <main className="main">
@@ -1568,6 +1640,15 @@ export default function App() {
           total={targets.length}
           onStep={(d) => moveCursor(d, false)}
           onClose={() => setQuickLook(false)}
+        />
+      )}
+      {accessOpen && access && (
+        <NearbyAccessSheet
+          access={access}
+          busy={revoking}
+          onWithdraw={(device) => void revoke(device, "withdraw")}
+          onForget={(device) => void revoke(device, "forget")}
+          onClose={() => setAccessOpen(false)}
         />
       )}
       {requests.length > 0 && (

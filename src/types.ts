@@ -198,6 +198,30 @@ export interface PairRequest {
  * `waiting` is the ordinary first result rather than a failure. */
 export type PairOutcome = "paired" | "waiting" | "declined";
 
+/** A device holding access, in one direction or the other. */
+export interface DeviceAccess {
+  id: string;
+  name: string;
+  /** Empty where it was never recorded, or where the device isn't around to
+   * say. Only decides which glyph is drawn. */
+  platform: string;
+  /** Unix seconds when access was granted; zero when it predates Fiddler
+   * writing that down, and always zero for the outbound direction. */
+  since: number;
+  /** On the network right now. A device being away is not a reason to hide it —
+   * an absent device holding a key is the case this list exists for. */
+  online: boolean;
+}
+
+/** Both directions of nearby access, which are two different questions: who can
+ * read the files on this machine, and whose files this machine kept a key to.
+ * An answer about one says nothing about the other. */
+export interface NearbyAccess {
+  allowed: DeviceAccess[];
+  trusted: DeviceAccess[];
+  selfName: string;
+}
+
 /** A user-pinned folder. Unlike Places, favorites are personal and reorderable. */
 export interface Favorite {
   name: string;
