@@ -25,6 +25,8 @@ const FALLBACK = "#0a84ff";
 const ON_ACCENT_MIN = 3.2;
 /** Accent-coloured text sitting on a surface. */
 const ON_SURFACE_MIN = 4;
+/** A folder face only has to read as a shape against the window behind it. */
+const FOLDER_MIN = 1.6;
 
 /** macOS's own accent palette, for people who want something else. */
 export const PRESETS: { name: string; value: string }[] = [
@@ -107,6 +109,33 @@ function inkFor(accent: RGB, surface: RGB, toward: RGB): RGB {
   return out;
 }
 
+/**
+ * The three stops a folder icon is painted from — its lit front, the body, and
+ * the back panel — as one family around the accent.
+ *
+ * Dark mode sits the folder a little deeper so it doesn't glow against a dark
+ * window. Either way the body is then pushed away from the surface until it
+ * clears a floor, which is what keeps a pale accent (yellow) a folder rather
+ * than a smudge.
+ */
+function folderRamp(accent: RGB, surface: RGB, dark: boolean) {
+  const start = dark ? mix(accent, BLACK, 0.12) : accent;
+
+  let body = start;
+  for (let t = 0.05; contrast(body, surface) < FOLDER_MIN && t <= 1.001; t += 0.05) {
+    body = mix(start, dark ? WHITE : BLACK, t);
+  }
+
+  return {
+    front: mix(body, WHITE, dark ? 0.42 : 0.4),
+    body,
+    back: mix(body, BLACK, dark ? 0.26 : 0.22),
+    /** The debossed mark on a familiar folder's face, and the shadow under it. */
+    mark: mix(body, BLACK, 0.48),
+    markShade: mix(body, BLACK, 0.66),
+  };
+}
+
 // ------------------------------------------------------------------- probe
 
 /** Last value read from the OS; null until the first read, or if there is none. */
@@ -159,6 +188,16 @@ export function applyTint(tint: Tint) {
   root.setProperty("--sel-cell", rgba(base, dark ? 0.26 : 0.15));
   root.setProperty("--sel-ring", rgba(base, dark ? 0.55 : 0.38));
   root.setProperty("--focus-ring", rgba(base, 0.28));
+
+  const folder = folderRamp(base, surface, dark);
+  root.setProperty("--folder-1", rgb(folder.front));
+  root.setProperty("--folder-2", rgb(folder.body));
+  root.setProperty("--folder-3", rgb(folder.back));
+  root.setProperty("--folder-mark", rgba(folder.mark, 0.58));
+  root.setProperty("--folder-mark-shade", rgba(folder.markShade, 0.5));
+  // Marks drawn *on* the folder face rather than into it — the branch dot on a
+  // repository — take whichever of white or near-black the face can carry.
+  root.setProperty("--folder-ink", rgba(inkOn(folder.body), 0.92));
 }
 
 // ------------------------------------------------------------------- store
