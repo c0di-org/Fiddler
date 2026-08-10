@@ -1,3 +1,4 @@
+mod apk;
 mod commands;
 mod fs_scan;
 mod git;
@@ -55,6 +56,7 @@ pub fn run() {
             commands::read_text,
             commands::pdf_meta,
             commands::pdf_page,
+            commands::install_apk,
             commands::reveal_in_finder,
             commands::open_terminal_here,
             commands::create_folder,

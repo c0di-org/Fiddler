@@ -327,6 +327,10 @@ export default function App() {
         return;
       }
       try {
+        if (isAndroid && /\.apk$/i.test(t.name)) {
+          await ipc.installApk(t.path);
+          return;
+        }
         const text = await ipc.readText(t.path, 2 * 1024 * 1024);
         if (!text.binary && !text.truncated) {
           setEditor({ path: t.path, text: text.text });
