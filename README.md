@@ -135,7 +135,8 @@ framework to install.
 
 ## Known gaps
 
-Not built yet: drag and drop, copy/paste/duplicate, tabs, column view,
-multi-select rename, custom sidebar favourites. Quick Look renders documents
+Not built yet: copy/paste/duplicate, tabs, column view, and multi-select rename.
+Folders can be dragged into Favorites in the sidebar, then reordered or removed;
+Quick Look renders documents
 itself rather than hosting the system's previews, so formats outside the list
 above show a still image instead.

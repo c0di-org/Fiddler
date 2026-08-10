@@ -7,6 +7,7 @@ import { Thumb } from "./Thumb";
 import { GitDot } from "./GitDot";
 import { EmptyState } from "./EmptyState";
 import { Chevron, ForkIcon, LockIcon, WarnIcon } from "./icons";
+import { FOLDER_DRAG_TYPE } from "../favorites";
 
 /** Finder's list view: dense, sortable, with disclosure triangles. */
 
@@ -179,6 +180,8 @@ function RowView({
         : row.wt.name;
 
   const muted = e ? e.code?.index === "!" || e.hidden : row.kind === "worktree" && row.wt.prunable;
+  const path = row.kind === "entry" ? row.entry.path : row.kind === "worktree" ? row.wt.path : null;
+  const isFolder = row.dirPath !== null;
 
   return (
     <div
@@ -187,6 +190,13 @@ function RowView({
       }`}
       data-row-id={row.id}
       style={{ height: ROW_H }}
+      draggable={isFolder}
+      onDragStart={(event) => {
+        if (!isFolder || !path) return;
+        event.dataTransfer.effectAllowed = "copy";
+        event.dataTransfer.setData(FOLDER_DRAG_TYPE, JSON.stringify({ name, path }));
+        event.dataTransfer.setData("text/plain", path);
+      }}
     >
       <div className="c-name" style={{ paddingLeft: 6 + row.depth * 17 }}>
         <span

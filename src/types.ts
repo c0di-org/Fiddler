@@ -87,6 +87,12 @@ export interface Place {
   icon: string;
 }
 
+/** A user-pinned folder. Unlike Places, favorites are personal and reorderable. */
+export interface Favorite {
+  name: string;
+  path: string;
+}
+
 export const emptyRollup: Rollup = {
   staged: 0,
   modified: 0,

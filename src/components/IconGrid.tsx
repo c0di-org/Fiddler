@@ -5,6 +5,7 @@ import { EmptyState } from "./EmptyState";
 import { FolderGlyph } from "./FileGlyph";
 import { GitDot } from "./GitDot";
 import { Thumb } from "./Thumb";
+import { FOLDER_DRAG_TYPE } from "../favorites";
 
 /**
  * The default view: big previews in a grid. Virtualized by row, so a folder with
@@ -227,6 +228,7 @@ function Cell({
 }) {
   const e = cell.entry;
   const ignored = e?.code?.index === "!";
+  const isFolder = !!cell.wt || e?.kind === "dir" || (e?.kind === "symlink" && e.linkToDir);
 
   return (
     <div
@@ -234,6 +236,13 @@ function Cell({
       data-cell-id={cell.id}
       style={{ width }}
       title={cell.path}
+      draggable={isFolder}
+      onDragStart={(event) => {
+        if (!isFolder) return;
+        event.dataTransfer.effectAllowed = "copy";
+        event.dataTransfer.setData(FOLDER_DRAG_TYPE, JSON.stringify({ name: cell.name, path: cell.path }));
+        event.dataTransfer.setData("text/plain", cell.path);
+      }}
     >
       <div className="cell-art" style={{ height: iconSize }}>
         {e ? <Thumb entry={e} size={iconSize} /> : <FolderGlyph size={iconSize} repo name={cell.name} />}

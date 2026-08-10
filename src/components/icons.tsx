@@ -153,6 +153,12 @@ export const SparkIcon = stroked(
   </>
 );
 
+export const HeartIcon = stroked(
+  <path d="M8 13.1 3.1 8.4A3.3 3.3 0 0 1 7.8 3.8L8 4l.2-.2a3.3 3.3 0 0 1 4.7 4.6Z" />
+);
+
+export const CloseIcon = stroked(<path d="m4.25 4.25 7.5 7.5m0-7.5-7.5 7.5" />);
+
 /** Empty-state artwork: an open, and pointedly empty, folder. */
 export const EmptyIcon = stroked(
   <>
