@@ -1,15 +1,21 @@
 //! Small, local-first peer transport for Fiddler devices.
 //!
 //! Discovery is broadcast-only and contains no filesystem information. A device
-//! becomes usable only after its short-lived pairing code has been entered once;
-//! thereafter every request carries an opaque per-device bearer token. There is
+//! becomes usable only after someone on it has tapped Allow for the device
+//! asking — two taps, one on each side, and no code to read out. Thereafter
+//! every request carries an opaque per-device bearer token. There is
 //! deliberately no cloud account or relay in this first transport.
+//!
+//! Discovery alone authorises nothing. A broadcast is trivial to forge on a
+//! shared network, so it decides only what appears in the sidebar; the gate on
+//! anyone's files is the tap.
 
 use std::collections::BTreeMap;
 use std::fs;
 use std::io::{Read, Write};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener, TcpStream, UdpSocket};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -23,6 +29,14 @@ use crate::model::{DirListing, Entry};
 
 const DISCOVERY_PORT: u16 = 43_562;
 const MAX_HTTP: usize = 512 * 1024 * 1024;
+/// How long an unanswered ask stays on screen before it is dropped. Long enough
+/// to walk to the other device, short enough that a stale card never lingers.
+const ASK_TTL: u64 = 60;
+/// Connections served at once. A file browser needs a handful; the cap is only
+/// here so a host on the network can't spend our threads.
+const MAX_CONNECTIONS: usize = 32;
+/// Asks held at once, so a device that spams cannot bury a real one.
+const MAX_ASKS: usize = 8;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -40,8 +54,27 @@ pub struct PeerDevice {
 pub struct PairingInfo {
     pub id: String,
     pub name: String,
-    pub code: String,
     pub root: String,
+}
+
+/// A device asking to browse this one. It holds no access at all: this is a
+/// question on someone's screen until they answer it.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PairRequest {
+    pub id: String,
+    pub name: String,
+    pub platform: String,
+}
+
+/// What came back from asking a device to pair. The answer is a tap over there,
+/// so `Waiting` is the normal first reply rather than a failure.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum PairOutcome {
+    Paired,
+    Waiting,
+    Declined,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -79,16 +112,27 @@ pub struct PeerService {
     config: PathBuf,
     root: PathBuf,
     cache: Arc<GitCache>,
+    connections: Arc<AtomicUsize>,
 }
 
 struct PeerState {
     id: String,
     name: String,
-    code: String,
     port: u16,
     known: BTreeMap<String, KnownPeer>,
     clients: BTreeMap<String, String>,
     seen: BTreeMap<String, SeenPeer>,
+    asks: BTreeMap<String, Ask>,
+}
+
+/// One device's request to browse this one, and the answer if it has been given.
+struct Ask {
+    name: String,
+    platform: String,
+    /// When this was last touched — the request arriving, or being answered.
+    at: u64,
+    /// `None` until someone here taps Allow or Not now.
+    decision: Option<bool>,
 }
 
 #[derive(Clone)]
@@ -130,15 +174,16 @@ impl PeerService {
             state: Arc::new(Mutex::new(PeerState {
                 id,
                 name,
-                code: pairing_code(),
                 port: 0,
                 known: saved.known,
                 clients: saved.clients,
                 seen: BTreeMap::new(),
+                asks: BTreeMap::new(),
             })),
             config,
             root,
             cache,
+            connections: Arc::new(AtomicUsize::new(0)),
         });
 
         let listener = TcpListener::bind((Ipv4Addr::UNSPECIFIED, 0)).map_err(|e| e.to_string())?;
@@ -177,20 +222,54 @@ impl PeerService {
 
     pub fn pairing_info(&self) -> PairingInfo {
         let st = self.state.lock().unwrap();
-        PairingInfo { id: st.id.clone(), name: st.name.clone(), code: st.code.clone(), root: self.root.to_string_lossy().into_owned() }
+        PairingInfo { id: st.id.clone(), name: st.name.clone(), root: self.root.to_string_lossy().into_owned() }
     }
 
-    pub fn pair(&self, id: &str, code: &str) -> Result<(), String> {
+    /// Ask a device for permission to browse it.
+    ///
+    /// The answer is a tap on that device, so this returns as soon as the ask
+    /// has been delivered and the caller polls until it stops being `Waiting`.
+    /// Nothing is saved and nothing is readable until the answer is yes.
+    pub fn pair(&self, id: &str) -> Result<PairOutcome, String> {
         let peer = self.state.lock().unwrap().seen.get(id).cloned().ok_or("That device is no longer nearby")?;
         let (local_id, local_name) = { let state = self.state.lock().unwrap(); (state.id.clone(), state.name.clone()) };
-        let query = format!("deviceId={}&name={}&code={}", enc(&local_id), enc(&local_name), enc(code));
-        let bytes = request(&peer.host, peer.port, &format!("/v1/pair?{query}"), None)?;
-        let reply: PairResponse = serde_json::from_slice(&bytes).map_err(|_| "The device returned an invalid pairing response")?;
+        let query = format!("deviceId={}&name={}&platform={}", enc(&local_id), enc(&local_name), enc(&platform_name()));
+        let (status, body) = fetch(&peer.host, peer.port, &format!("/v1/pair?{query}"), None)?;
+        match status {
+            200 => {
+                let reply: PairResponse = serde_json::from_slice(&body).map_err(|_| "The device returned an invalid pairing response")?;
+                let mut st = self.state.lock().unwrap();
+                st.known.insert(id.to_string(), KnownPeer { name: peer.name, host: peer.host, port: peer.port, token: reply.token });
+                drop(st);
+                self.save();
+                Ok(PairOutcome::Paired)
+            }
+            202 => Ok(PairOutcome::Waiting),
+            403 => Ok(PairOutcome::Declined),
+            _ => Err(message(&body, "That device wouldn’t answer")),
+        }
+    }
+
+    /// Devices currently asking to browse this one, for the prompt in the UI.
+    pub fn requests(&self) -> Vec<PairRequest> {
+        let now = now_secs();
         let mut st = self.state.lock().unwrap();
-        st.known.insert(id.to_string(), KnownPeer { name: peer.name, host: peer.host, port: peer.port, token: reply.token });
-        drop(st);
-        self.save();
-        Ok(())
+        st.asks.retain(|_, ask| now.saturating_sub(ask.at) < ASK_TTL);
+        st.asks
+            .iter()
+            .filter(|(_, ask)| ask.decision.is_none())
+            .map(|(id, ask)| PairRequest { id: id.clone(), name: ask.name.clone(), platform: ask.platform.clone() })
+            .collect()
+    }
+
+    /// Answer one. The asking device is still polling `/v1/pair`, and collects
+    /// a token on its next try if the answer was yes.
+    pub fn respond(&self, id: &str, allow: bool) {
+        let mut st = self.state.lock().unwrap();
+        if let Some(ask) = st.asks.get_mut(id) {
+            ask.decision = Some(allow);
+            ask.at = now_secs();
+        }
     }
 
     pub fn remote_listing(&self, device_id: &str, path: &str, show_hidden: bool) -> Result<DirListing, String> {
@@ -228,23 +307,43 @@ impl PeerService {
     fn save(&self) {
         let st = self.state.lock().unwrap();
         let saved = SavedPeers { id: st.id.clone(), name: st.name.clone(), known: st.known.clone(), clients: st.clients.clone() };
+        drop(st);
         let temp = self.config.with_extension("json.tmp");
         if let Ok(bytes) = serde_json::to_vec(&saved) {
-            if fs::write(&temp, bytes).is_ok() { let _ = fs::rename(temp, &self.config); }
+            if fs::write(&temp, bytes).is_ok() {
+                // This file holds bearer tokens in both directions. Nobody but
+                // this account has any business reading it.
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    let _ = fs::set_permissions(&temp, fs::Permissions::from_mode(0o600));
+                }
+                let _ = fs::rename(temp, &self.config);
+            }
         }
     }
 
     fn serve(self: Arc<Self>, listener: TcpListener) {
         loop {
             match listener.accept() {
-                Ok((stream, _)) => { let this = self.clone(); thread::spawn(move || this.handle(stream)); }
+                Ok((stream, from)) => {
+                    if self.connections.fetch_add(1, Ordering::SeqCst) >= MAX_CONNECTIONS {
+                        self.connections.fetch_sub(1, Ordering::SeqCst);
+                        continue; // Dropping the stream closes it.
+                    }
+                    let this = self.clone();
+                    thread::spawn(move || {
+                        this.handle(stream, from.ip());
+                        this.connections.fetch_sub(1, Ordering::SeqCst);
+                    });
+                }
                 Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => thread::sleep(Duration::from_millis(60)),
                 Err(_) => thread::sleep(Duration::from_millis(250)),
             }
         }
     }
 
-    fn handle(&self, mut stream: TcpStream) {
+    fn handle(&self, mut stream: TcpStream, from: IpAddr) {
         let _ = stream.set_read_timeout(Some(Duration::from_secs(4)));
         let mut request_bytes = Vec::new();
         let mut chunk = [0u8; 2048];
@@ -263,7 +362,7 @@ impl PeerService {
         let (route, query) = target.split_once('?').unwrap_or((target, ""));
         let q = query_map(query);
         let result = match route {
-            "/v1/pair" => self.handle_pair(&q),
+            "/v1/pair" => self.handle_pair(&q, from),
             "/v1/list" => self.handle_list(&q, auth),
             "/v1/text" => self.handle_text(&q, auth),
             "/v1/file" => self.handle_file(&q, auth),
@@ -275,23 +374,51 @@ impl PeerService {
         }
     }
 
-    fn handle_pair(&self, q: &BTreeMap<String, String>) -> Result<Vec<u8>, (u16, String)> {
-        let client = q.get("deviceId").filter(|x| !x.is_empty()).ok_or((400, "missing device id".into()))?;
-        let code = q.get("code").ok_or((400, "missing pairing code".into()))?;
+    /// Take a request to browse this device, and answer with whatever the person
+    /// holding it has decided so far.
+    ///
+    /// Nothing here grants access. The first call puts a card on screen and
+    /// replies `202`; only a tap on Allow turns a later call into a token. The
+    /// asking device polls, so waiting costs no held socket on either side.
+    fn handle_pair(&self, q: &BTreeMap<String, String>, from: IpAddr) -> Result<Vec<u8>, (u16, String)> {
+        let client = q.get("deviceId").filter(|x| !x.is_empty()).ok_or((400, "missing device id".to_string()))?;
+        let now = now_secs();
         let mut st = self.state.lock().unwrap();
-        // Mutual discovery is the consent gate. It means both running apps have
-        // advertised one another's ephemeral device ID; no ambient code needs to
-        // clutter either sidebar. Keep the code route for an older client, but
-        // never accept a blank request from a device we do not mutually see.
-        let mutually_visible = st.seen.get(client).is_some_and(|peer| peer.mutual);
-        if code != &st.code && !(code.is_empty() && mutually_visible) {
-            return Err((403, "Confirm this device is visible in Fiddler first".into()));
+
+        // Only a device we can currently see, at the address we last saw it at.
+        // The card names a device the user can point to in their own sidebar,
+        // and an ask from something invisible is one nobody could make sense of.
+        let seen = st.seen.get(client).cloned().filter(|peer| now.saturating_sub(peer.seen_at) < 8);
+        let Some(peer) = seen.filter(|peer| peer.host == from.to_string()) else {
+            return Err((404, "That device isn’t visible here".into()));
+        };
+
+        st.asks.retain(|id, ask| id == client || now.saturating_sub(ask.at) < ASK_TTL);
+
+        match st.asks.get(client).and_then(|ask| ask.decision) {
+            Some(true) => {
+                let token = Uuid::new_v4().to_string();
+                st.clients.insert(client.clone(), token.clone());
+                // Forget the ask now it has been collected, so the same device
+                // asking again later is a fresh question rather than an answer
+                // it inherited from last week.
+                st.asks.remove(client);
+                drop(st);
+                self.save();
+                serde_json::to_vec(&PairResponse { token, root: self.root.to_string_lossy().into_owned() }).map_err(|e| (500, e.to_string()))
+            }
+            Some(false) => Err((403, "That device said no".into())),
+            None => {
+                if !st.asks.contains_key(client) && st.asks.len() >= MAX_ASKS {
+                    return Err((429, "Too many devices are asking at once".into()));
+                }
+                let name = q.get("name").filter(|name| !name.is_empty()).cloned().unwrap_or_else(|| peer.name.clone());
+                let platform = q.get("platform").cloned().unwrap_or_else(|| peer.platform.clone());
+                st.asks.insert(client.clone(), Ask { name, platform, at: now, decision: None });
+                // Not an error: the question is now on someone's screen.
+                Err((202, "waiting".into()))
+            }
         }
-        let token = Uuid::new_v4().to_string();
-        st.clients.insert(client.clone(), token.clone());
-        drop(st);
-        self.save();
-        serde_json::to_vec(&PairResponse { token, root: self.root.to_string_lossy().into_owned() }).map_err(|e| (500, e.to_string()))
     }
 
     fn authorised(&self, auth: Option<&str>) -> bool {
@@ -372,7 +499,15 @@ pub fn parse_remote_path(path: &str) -> Option<(String, String)> {
 }
 
 fn remote_path(id: &str, path: &str) -> String { format!("fiddler://{id}/{}", path.trim_start_matches('/')) }
-fn share_root() -> PathBuf { #[cfg(target_os = "android")] { PathBuf::from("/storage/emulated/0") } #[cfg(not(target_os = "android"))] { dirs::home_dir().unwrap_or_default() } }
+/// Resolved once, because every incoming path is checked against it: a root that
+/// still held a symlink would let `canonicalize` land outside what it names.
+fn share_root() -> PathBuf {
+    #[cfg(target_os = "android")]
+    let root = PathBuf::from("/storage/emulated/0");
+    #[cfg(not(target_os = "android"))]
+    let root = dirs::home_dir().unwrap_or_default();
+    root.canonicalize().unwrap_or(root)
+}
 /// A friendly, deterministic identity rather than a hostname or hardware model.
 /// It is seeded by the installation UUID and persisted, so two nearby phones are
 /// easy to tell apart without leaking a person's account or device name.
@@ -384,11 +519,12 @@ fn friendly_name(id: &str) -> String {
     let second = bytes.get(1).copied().unwrap_or(0) as usize % FRUITS.len();
     format!("{} {}", ADJECTIVES[first], FRUITS[second])
 }
-fn pairing_code() -> String { format!("{:06}", (Uuid::new_v4().as_u128() % 1_000_000)) }
 fn platform_name() -> String { #[cfg(target_os = "android")] { "android".into() } #[cfg(target_os = "macos")] { "macos".into() } #[cfg(not(any(target_os = "android", target_os = "macos")))] { "desktop".into() } }
 fn now_secs() -> u64 { SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs() }
 
-fn request(host: &str, port: u16, route: &str, token: Option<&str>) -> Result<Vec<u8>, String> {
+/// One request, with the status left for the caller to read. Pairing is the only
+/// route where a non-200 is an answer rather than a failure.
+fn fetch(host: &str, port: u16, route: &str, token: Option<&str>) -> Result<(u16, Vec<u8>), String> {
     let addr: SocketAddr = format!("{host}:{port}").parse().map_err(|_| "That device has an invalid address")?;
     let mut stream = TcpStream::connect_timeout(&addr, Duration::from_secs(3)).map_err(|_| "Couldn’t reach that device. Keep Fiddler open on both devices.")?;
     let _ = stream.set_read_timeout(Some(Duration::from_secs(12)));
@@ -398,12 +534,25 @@ fn request(host: &str, port: u16, route: &str, token: Option<&str>) -> Result<Ve
     let mut bytes = Vec::new(); stream.take(MAX_HTTP as u64).read_to_end(&mut bytes).map_err(|_| "The device stopped responding")?;
     let header_end = bytes.windows(4).position(|w| w == b"\r\n\r\n").ok_or("Invalid response from device")?;
     let header = String::from_utf8_lossy(&bytes[..header_end]);
-    if !header.starts_with("HTTP/1.1 200") { return Err(header.lines().next().unwrap_or("Request failed").to_string()); }
-    Ok(bytes[header_end + 4..].to_vec())
+    let status = header.split_whitespace().nth(1).and_then(|code| code.parse().ok()).ok_or("Invalid response from device")?;
+    Ok((status, bytes[header_end + 4..].to_vec()))
+}
+
+fn request(host: &str, port: u16, route: &str, token: Option<&str>) -> Result<Vec<u8>, String> {
+    let (status, body) = fetch(host, port, route, token)?;
+    if status != 200 { return Err(message(&body, "That device refused the request")); }
+    Ok(body)
+}
+
+/// The device's own words when it sent any, rather than a status line the person
+/// reading it can do nothing with.
+fn message(body: &[u8], fallback: &str) -> String {
+    let text = String::from_utf8_lossy(body).trim().to_string();
+    if text.is_empty() { fallback.to_string() } else { text }
 }
 
 fn write_http(stream: &mut TcpStream, code: u16, body: &[u8]) {
-    let reason = match code { 200 => "OK", 401 => "Unauthorized", 403 => "Forbidden", 404 => "Not Found", 405 => "Method Not Allowed", _ => "Error" };
+    let reason = match code { 200 => "OK", 202 => "Accepted", 401 => "Unauthorized", 403 => "Forbidden", 404 => "Not Found", 405 => "Method Not Allowed", 429 => "Too Many Requests", _ => "Error" };
     let header = format!("HTTP/1.1 {code} {reason}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len());
     let _ = stream.write_all(header.as_bytes()); let _ = stream.write_all(body);
 }

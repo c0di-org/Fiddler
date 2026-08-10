@@ -9,6 +9,7 @@ import { QuickLook } from "./components/QuickLook";
 import { Sidebar } from "./components/Sidebar";
 import { TintPicker } from "./components/TintPicker";
 import { TextEditor } from "./components/TextEditor";
+import { PairAsk } from "./components/PairAsk";
 import { Toolbar } from "./components/Toolbar";
 import { UsbConnecting, UsbLinkBanner } from "./components/UsbPanel";
 import type { FolderTouchDragHandlers } from "./components/folder-touch-drag";
@@ -23,12 +24,16 @@ import { routeOf } from "./preview/route";
 import { contentTerms, prepareSearch, search, type SearchKind, type SearchRecord } from "./search";
 import { TreeStore, type Row } from "./store/tree";
 import { applyTint, hasSystemAccent, loadTint, saveTint, watchTint, type Tint } from "./tint";
-import type { ContentSearch, Entry, Favorite, NearbyEntry, NearbySearch, PairingInfo, PeerDevice, Place, UsbDevice, WorktreeInfo } from "./types";
+import type { ContentSearch, Entry, Favorite, NearbyEntry, NearbySearch, PairRequest, PairingInfo, PeerDevice, Place, UsbDevice, WorktreeInfo } from "./types";
 
 const store = new TreeStore();
 
 /** How long a type-to-jump buffer stays alive between keystrokes. */
 const TYPE_AHEAD_MS = 900;
+/** How long to keep asking a device before deciding nobody is there. Long
+ * enough to pick the other device up and look at it. */
+const PAIR_WAIT_MS = 60_000;
+const PAIR_POLL_MS = 1500;
 const MAX_CONTENT_FILE_BYTES = 512 * 1024;
 const TEXT_EXTENSIONS = new Set(
   "txt md mdx markdown json jsonc yaml yml toml xml html htm css scss sass less js jsx mjs cjs ts tsx rs go py rb java kt kts swift c h cc cpp hpp cs sh bash zsh fish sql graphql gql vue svelte astro ini cfg conf env lock gitignore dockerfile makefile gradle properties csv tsv log".split(
@@ -67,6 +72,9 @@ export default function App() {
   const [places, setPlaces] = useState<Place[]>([]);
   const [devices, setDevices] = useState<PeerDevice[]>([]);
   const [pairingInfo, setPairingInfo] = useState<PairingInfo | null>(null);
+  const [requests, setRequests] = useState<PairRequest[]>([]);
+  /** The device we are currently waiting on an answer from, if any. */
+  const [askingId, setAskingId] = useState<string | null>(null);
   const [favorites, setFavorites] = useState<Favorite[]>(loadFavorites);
   const [folderTouchDrag, setFolderTouchDrag] = useState<FolderTouchDrag | null>(null);
   const folderTouchDragRef = useRef<FolderTouchDrag | null>(null);
@@ -85,6 +93,7 @@ export default function App() {
   const [menu, setMenu] = useState<{ x: number; y: number; items: MenuItem[] } | null>(null);
   const [quickLook, setQuickLook] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  const toastTimer = useRef(0);
   const [selectedDirCount, setSelectedDirCount] = useState<number | null | undefined>(undefined);
   const [tint, setTint] = useState<Tint>(loadTint);
   const [systemTint, setSystemTint] = useState(false);
@@ -97,10 +106,15 @@ export default function App() {
 
   const home = places.find((p) => p.icon === "home")?.path ?? "";
 
+  // Each message gets the full dwell: without dropping the previous timer, a
+  // second toast within the window is cleared early by the first one's.
   const flash = useCallback((msg: string) => {
+    window.clearTimeout(toastTimer.current);
     setToast(msg);
-    window.setTimeout(() => setToast(null), 2800);
+    toastTimer.current = window.setTimeout(() => setToast(null), 2800);
   }, []);
+
+  useEffect(() => () => window.clearTimeout(toastTimer.current), []);
 
   /** Ask the current view to reveal a selection made by keyboard navigation. */
   const revealCursor = useCallback(() => setRevealSelection((n) => n + 1), []);
@@ -123,9 +137,15 @@ export default function App() {
 
   // Broadcast discovery is intentionally ephemeral: polling keeps the sidebar
   // honest when a phone sleeps or leaves Wi-Fi without adding another event pipe.
+  // Incoming pair requests ride the same poll — an ask that someone has to walk
+  // to another device to answer is not worth a second pipe either.
   useEffect(() => {
+    if (!caps.nearby) return;
     let alive = true;
-    const refresh = () => void ipc.nearbyDevices().then((found) => alive && setDevices(found)).catch(() => {});
+    const refresh = () => {
+      void ipc.nearbyDevices().then((found) => alive && setDevices(found)).catch(() => {});
+      void ipc.nearbyRequests().then((asks) => alive && setRequests(asks)).catch(() => {});
+    };
     refresh();
     void ipc.nearbyPairingInfo().then((info) => alive && setPairingInfo(info)).catch(() => {});
     const timer = window.setInterval(refresh, 2500);
@@ -441,18 +461,70 @@ export default function App() {
     await store.navigate(path);
   }, []);
 
-  const openDevice = useCallback(async (device: PeerDevice) => {
-    if (!device.paired) {
+  /**
+   * Ask a device for permission to browse it, and wait for someone over there
+   * to answer.
+   *
+   * Tapping a device here is half the handshake; the other half is a tap on that
+   * device, which is what makes this a question rather than a poll of one
+   * backend call. Nothing is remembered and nothing is readable until the answer
+   * comes back `paired`.
+   */
+  const askToPair = useCallback(
+    async (device: PeerDevice) => {
+      setAskingId(device.id);
+      const deadline = Date.now() + PAIR_WAIT_MS;
+      let announced = false;
       try {
-        await ipc.pairNearbyDevice(device.id, "");
-        setDevices((current) => current.map((item) => item.id === device.id ? { ...item, paired: true } : item));
+        for (;;) {
+          const outcome = await ipc.pairNearbyDevice(device.id);
+          if (outcome === "paired") {
+            setDevices((current) =>
+              current.map((item) => (item.id === device.id ? { ...item, paired: true } : item))
+            );
+            return true;
+          }
+          if (outcome === "declined") {
+            flash(`${device.name} declined`);
+            return false;
+          }
+          if (!announced) {
+            announced = true;
+            flash(`Asked ${device.name} — tap Allow on that device`);
+          }
+          if (Date.now() >= deadline) {
+            flash(`${device.name} didn’t answer`);
+            return false;
+          }
+          await pause(PAIR_POLL_MS);
+        }
       } catch (error) {
         flash(String(error).replace(/^Error:\s*/, ""));
-        return;
+        return false;
+      } finally {
+        setAskingId(null);
       }
-    }
-    await go(`fiddler://${device.id}/`);
-  }, [flash, go]);
+    },
+    [flash]
+  );
+
+  const openDevice = useCallback(
+    async (device: PeerDevice) => {
+      // One ask at a time: a second tap while the first is outstanding would
+      // start a rival poll for the same answer.
+      if (askingId) return;
+      if (!device.paired && !(await askToPair(device))) return;
+      await go(`fiddler://${device.id}/`);
+    },
+    [askToPair, askingId, go]
+  );
+
+  /** Answer a device asking to browse this one. Allow is the only thing in
+   * Fiddler that grants another machine access to these files. */
+  const respondToAsk = useCallback((request: PairRequest, allow: boolean) => {
+    setRequests((current) => current.filter((item) => item.id !== request.id));
+    void ipc.respondNearbyRequest(request.id, allow).catch(() => {});
+  }, []);
 
   // No pairing step: the cable is the authorisation. A device with exactly one
   // storage skips straight into it, because picking from a list of one is a
@@ -788,7 +860,7 @@ export default function App() {
       const items: MenuItem[] = [];
 
       if (t) {
-        items.push({ label: t.isDir ? "Open" : "Open", onPick: () => void openTarget(t) });
+        items.push({ label: "Open", onPick: () => void openTarget(t) });
         items.push({ label: selected.length > 1 ? `Copy ${selected.length} Items` : "Copy", onPick: copySelected });
         if (!t.isDir) items.push({ label: "Edit Text File", onPick: () => void openTarget(t) });
         if (caps.reveal) {
@@ -1081,6 +1153,7 @@ export default function App() {
         current={store.path}
         onPick={(p) => void go(p)}
         onOpenDevice={(device) => void openDevice(device)}
+        askingDeviceId={askingId}
         usb={usb}
         onOpenUsb={(device) => void openUsb(device)}
         onAddFavorite={favorite}
@@ -1219,6 +1292,14 @@ export default function App() {
           onClose={() => setQuickLook(false)}
         />
       )}
+      {requests.length > 0 && (
+        <PairAsk
+          key={requests[0].id}
+          request={requests[0]}
+          waiting={requests.length - 1}
+          onRespond={(allow) => respondToAsk(requests[0], allow)}
+        />
+      )}
       {menu && <ContextMenu {...menu} onClose={() => setMenu(null)} />}
       {toast && <div className="toast">{toast}</div>}
       {editor && (
@@ -1236,6 +1317,11 @@ export default function App() {
       )}
     </div>
   );
+}
+
+/** Wait, for a poll that is deliberately paced rather than hammered. */
+function pause(ms: number) {
+  return new Promise<void>((resolve) => window.setTimeout(resolve, ms));
 }
 
 /** Approximate the grid's column count for arrow-key navigation. */

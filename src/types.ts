@@ -184,10 +184,19 @@ export interface EntryBatch {
 export interface PairingInfo {
   id: string;
   name: string;
-  /** A fresh six-digit code for another nearby Fiddler to enter. */
-  code: string;
   root: string;
 }
+
+/** A device asking to browse this one. It can read nothing while it waits. */
+export interface PairRequest {
+  id: string;
+  name: string;
+  platform: PeerDevice["platform"];
+}
+
+/** The answer to asking a device to pair. The reply is a tap over there, so
+ * `waiting` is the ordinary first result rather than a failure. */
+export type PairOutcome = "paired" | "waiting" | "declined";
 
 /** A user-pinned folder. Unlike Places, favorites are personal and reorderable. */
 export interface Favorite {

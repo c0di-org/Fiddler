@@ -18,6 +18,9 @@ interface Props {
   touchFolderDropIndex?: number | null;
   devices: PeerDevice[];
   onOpenDevice: (device: PeerDevice) => void;
+  /** The device we are waiting on an answer from, if any. Pairing is two
+   * taps, and this is the gap between them. */
+  askingDeviceId?: string | null;
   selfDeviceName: string | null;
   /** Devices on the end of a cable. No pairing, so these need no lock state. */
   usb: UsbDevice[];
@@ -63,6 +66,7 @@ export function Sidebar({
   touchFolderDropIndex = null,
   devices,
   onOpenDevice,
+  askingDeviceId,
   selfDeviceName,
   usb,
   onOpenUsb,
@@ -165,13 +169,27 @@ export function Sidebar({
 
       {devices.length > 0 && <div className="sidebar-devices">
         <SidebarHeading icon={<DeviceIcon size={13} />}>Devices</SidebarHeading>
-        {devices.map((device) => (
-          <button className={`place device ${current.startsWith(`fiddler://${device.id}/`) ? "active" : ""}`} key={device.id} onClick={() => onOpenDevice(device)} title={device.paired ? "Browse this device" : "Pair with this device"}>
-            <span className="place-icon">{device.platform === "macos" || device.platform === "desktop" ? <LaptopIcon size={18} /> : <DeviceIcon size={18} />}</span>
-            <span className="place-label">{device.name}</span>
-            {!device.paired && <LockIcon size={12} className="device-lock" />}
-          </button>
-        ))}
+        {devices.map((device) => {
+          const asking = device.id === askingDeviceId;
+          return (
+            <div key={device.id} className="peer-device">
+              <button className={`place device ${current.startsWith(`fiddler://${device.id}/`) ? "active" : ""}`} onClick={() => onOpenDevice(device)} title={device.paired ? "Browse this device" : "Ask to browse this device"} disabled={asking}>
+                <span className="place-icon">{device.platform === "macos" || device.platform === "desktop" ? <LaptopIcon size={18} /> : <DeviceIcon size={18} />}</span>
+                <span className="place-label">{device.name}</span>
+                {!device.paired && !asking && <LockIcon size={12} className="device-lock" />}
+              </button>
+              {/* Under the name rather than replacing it, like a cable's stage:
+                  the answer is a tap on the other device, so this can sit here
+                  for as long as it takes someone to walk over and give it. */}
+              {asking && (
+                <div className="usb-stage waiting">
+                  <span className="usb-pulse" />
+                  Waiting for a tap on that device…
+                </div>
+              )}
+            </div>
+          );
+        })}
         {selfDeviceName && <div className="device-self">This device: {selfDeviceName}</div>}
       </div>}
 

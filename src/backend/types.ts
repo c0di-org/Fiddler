@@ -16,6 +16,8 @@ import type {
   EntryBatch,
   Inspect,
   NearbySearch,
+  PairOutcome,
+  PairRequest,
   PairingInfo,
   PdfMeta,
   PeekItem,
@@ -57,7 +59,14 @@ export interface Backend {
   sidebarPlaces(): Promise<Place[]>;
   nearbyDevices(): Promise<PeerDevice[]>;
   nearbyPairingInfo(): Promise<PairingInfo>;
-  pairNearbyDevice(id: string, code: string): Promise<void>;
+  /** Ask a device for permission to browse it. Nobody's files move on the
+   * strength of this call: the answer is a tap on that device, so the normal
+   * first result is `waiting` and the caller asks again until it changes. */
+  pairNearbyDevice(id: string): Promise<PairOutcome>;
+  /** Devices asking to browse this one, waiting on an answer here. */
+  nearbyRequests(): Promise<PairRequest[]>;
+  /** Answer one of them. This is the only thing that grants a device access. */
+  respondNearbyRequest(id: string, allow: boolean): Promise<void>;
 
   /** Devices attached by cable, each with the stage it has reached. Always
    * empty where there is no USB host to speak MTP with — a browser tab, or the
