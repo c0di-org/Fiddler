@@ -81,3 +81,6 @@ export const pdfMeta = (path: string) => invoke<PdfMeta>("pdf_meta", { path });
 /** One page, rasterised at `maxPx` on its longest side. Returns a cache path. */
 export const pdfPage = (path: string, page: number, maxPx: number) =>
   invoke<string>("pdf_page", { path, page, maxPx });
+
+/** Launch Android's package installer for a selected APK. */
+export const installApk = (path: string) => invoke<void>("install_apk", { path });

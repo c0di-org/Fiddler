@@ -56,8 +56,9 @@ text previews, image previews, cached in-app PDF pages, and streaming audio/vide
 previews for formats Android can decode. It also has a full-screen text editor:
 tap the new-file button, name a `.txt`, `.md`, `.json` (or any other) file, then
 write and save it in place. Existing text files open in that editor; large or
-binary files still open in their installed Android app. System Trash, terminal
-launching, and macOS Quick Look thumbnails are not available on Android.
+binary files still open in their installed Android app; opening an APK launches
+Android's package installer. System Trash, terminal launching, and macOS Quick
+Look thumbnails are not available on Android.
 
 ## Keys
 

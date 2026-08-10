@@ -493,6 +493,18 @@ pub fn sidebar_places() -> Vec<Place> {
 }
 
 #[tauri::command]
+pub fn install_apk(path: String) -> Result<(), String> {
+    let path = PathBuf::from(path);
+    if !path
+        .extension()
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("apk"))
+    {
+        return Err("that file is not an APK".into());
+    }
+    crate::apk::install(&path)
+}
+
+#[tauri::command]
 #[cfg(target_os = "macos")]
 pub fn reveal_in_finder(path: String) -> Result<(), String> {
     std::process::Command::new("open")
