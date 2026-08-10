@@ -32,6 +32,17 @@ type GridRow = { kind: "header"; label: string } | { kind: "cells"; cells: GridC
 const GAP = 24;
 /** Left/right/top breathing room around the whole grid. */
 const EDGE = 20;
+/** Slack around each icon inside its cell, so names have somewhere to run. */
+const GUTTER = 44;
+/**
+ * Below this the desktop's generous spacing costs a whole column: at a phone's
+ * width, 20px margins and a 44px gutter turn two comfortable icons into one
+ * enormous one. Tightening all three is what buys the second column back.
+ */
+const NARROW = 520;
+const NARROW_GAP = 14;
+const NARROW_EDGE = 12;
+const NARROW_GUTTER = 20;
 /** Room under the icon for the name. Cells that also carry a branch pill run a
  *  little taller and lean into the gap, which is why the gap is generous. */
 const LABEL_H = 50;
@@ -76,16 +87,20 @@ export function IconGrid(props: Props) {
     return () => ro.disconnect();
   }, []);
 
+  const narrow = box.w < NARROW;
+  const gap = narrow ? NARROW_GAP : GAP;
+  const edge = narrow ? NARROW_EDGE : EDGE;
+
   const cellH = iconSize + LABEL_H;
-  const minW = iconSize + 44;
-  const avail = Math.max(minW, box.w - EDGE * 2);
-  const cols = Math.max(1, Math.floor((avail + GAP) / (minW + GAP)));
+  const minW = iconSize + (narrow ? NARROW_GUTTER : GUTTER);
+  const avail = Math.max(minW, box.w - edge * 2);
+  const cols = Math.max(1, Math.floor((avail + gap) / (minW + gap)));
   /**
    * Share the leftover width out over the columns instead of leaving a ragged
    * strip on the right — capped, so a wide window doesn't end up with a small
    * icon marooned in an enormous tile.
    */
-  const cellW = Math.min(minW + 64, Math.floor((avail - GAP * (cols - 1)) / cols));
+  const cellW = Math.min(minW + 64, Math.floor((avail - gap * (cols - 1)) / cols));
 
   const rows = useMemo<GridRow[]>(() => {
     const out: GridRow[] = [];
@@ -111,14 +126,14 @@ export function IconGrid(props: Props) {
 
   const offsets = useMemo(() => {
     const tops: number[] = [];
-    let y = EDGE;
+    let y = edge;
     for (const r of rows) {
       tops.push(y);
-      y += r.kind === "header" ? HEADER_H : cellH + GAP;
+      y += r.kind === "header" ? HEADER_H : cellH + gap;
     }
     tops.push(y);
     return tops;
-  }, [rows, cellH]);
+  }, [rows, cellH, edge, gap]);
 
   const totalH = offsets[offsets.length - 1] ?? 0;
 
@@ -158,11 +173,11 @@ export function IconGrid(props: Props) {
     if (at < 0) return;
     const top = offsets[at];
     const bottom = offsets[at + 1] ?? top + cellH;
-    if (top < el.scrollTop) el.scrollTop = top - GAP;
+    if (top < el.scrollTop) el.scrollTop = top - gap;
     else if (bottom > el.scrollTop + el.clientHeight) {
-      el.scrollTop = bottom - el.clientHeight + GAP;
+      el.scrollTop = bottom - el.clientHeight + gap;
     }
-  }, [props.revealSelection, lead, rows, offsets, cellH]);
+  }, [props.revealSelection, lead, rows, offsets, cellH, gap]);
 
   const cellFrom = (e: React.MouseEvent): GridCell | null => {
     const host = (e.target as HTMLElement).closest<HTMLElement>("[data-cell-id]");
@@ -213,7 +228,7 @@ export function IconGrid(props: Props) {
             );
           }
           return (
-            <div key={index} className="grid-row" style={{ top, gap: GAP, paddingLeft: EDGE }}>
+            <div key={index} className="grid-row" style={{ top, gap, paddingLeft: edge }}>
               {row.cells.map((cell) => (
                 <Cell
                   key={cell.id}
