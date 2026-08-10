@@ -663,10 +663,40 @@ pub fn trash_paths(state: State<'_, AppState>, paths: Vec<String>) -> Result<(),
 
 #[tauri::command]
 #[cfg(target_os = "android")]
-pub fn trash_paths(_state: State<'_, AppState>, _paths: Vec<String>) -> Result<(), String> {
-    // Android's system trash is mediated by MediaStore/DocumentsUI; silently
-    // deleting from a file manager is worse than refusing the action.
-    Err("Android's Trash is not available to Fiddler yet; use the Files app to delete items".into())
+pub fn trash_paths(state: State<'_, AppState>, paths: Vec<String>) -> Result<(), String> {
+    // Android does not expose a general-purpose Trash API for arbitrary paths.
+    // The UI calls this only after an explicit permanent-delete confirmation.
+    // Use `symlink_metadata` so deleting a symlink removes the link itself,
+    // never the directory it happens to point at.
+    if paths.is_empty() {
+        return Ok(());
+    }
+
+    let mut parents = Vec::with_capacity(paths.len());
+    for path in &paths {
+        let target = Path::new(path);
+        let parent = target.parent().ok_or("cannot delete the filesystem root")?;
+        // Check every target before making any change. This avoids a stale
+        // multi-selection partly succeeding just because one entry vanished.
+        std::fs::symlink_metadata(target).map_err(|e| e.to_string())?;
+        parents.push(parent.to_path_buf());
+    }
+
+    for path in &paths {
+        let target = Path::new(path);
+        let meta = std::fs::symlink_metadata(target).map_err(|e| e.to_string())?;
+        if meta.file_type().is_dir() {
+            std::fs::remove_dir_all(target).map_err(|e| e.to_string())?;
+        } else {
+            std::fs::remove_file(target).map_err(|e| e.to_string())?;
+        }
+    }
+
+    for parent in parents {
+        state.cache.forget_discovery_under(&parent);
+        state.watcher.poke(&parent);
+    }
+    Ok(())
 }
 
 /// The user's macOS accent colour (System Settings › Appearance), as sRGB bytes.

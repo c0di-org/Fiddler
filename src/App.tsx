@@ -546,6 +546,10 @@ export default function App() {
   const trashSelected = useCallback(async () => {
     const paths = selected.filter((t) => t.entry).map((t) => t.path);
     if (paths.length === 0) return;
+    if (isAndroid) {
+      const noun = paths.length === 1 ? "this item" : `these ${paths.length} items`;
+      if (!window.confirm(`Permanently delete ${noun}? This cannot be undone.`)) return;
+    }
     try {
       await ipc.trashPaths(paths);
       setSelection(new Set());
@@ -603,14 +607,18 @@ export default function App() {
         });
         if (t.entry) {
           items.push({ label: "Rename…", onPick: () => setRenamingId(t.id) });
-          if (!isAndroid) {
-            items.push({
-              label: selected.length > 1 ? `Move ${selected.length} Items to Trash` : "Move to Trash",
-              danger: true,
-              separatorBefore: true,
-              onPick: () => void trashSelected(),
-            });
-          }
+          items.push({
+            label: isAndroid
+              ? selected.length > 1
+                ? `Delete ${selected.length} Items…`
+                : "Delete…"
+              : selected.length > 1
+                ? `Move ${selected.length} Items to Trash`
+                : "Move to Trash",
+            danger: true,
+            separatorBefore: true,
+            onPick: () => void trashSelected(),
+          });
         }
       } else {
         items.push({ label: "New Text File", onPick: newTextFile });
