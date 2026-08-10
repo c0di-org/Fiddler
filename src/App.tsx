@@ -12,7 +12,7 @@ import { TintPicker } from "./components/TintPicker";
 import { TextEditor } from "./components/TextEditor";
 import { Toolbar } from "./components/Toolbar";
 import type { FolderTouchDragHandlers } from "./components/folder-touch-drag";
-import { EyeIcon, GridIcon } from "./components/icons";
+import { GridIcon } from "./components/icons";
 import { addFavorite, loadFavorites, moveFavorite, saveFavorites } from "./favorites";
 import { formatSize } from "./format";
 import * as ipc from "./ipc";
@@ -526,9 +526,19 @@ export default function App() {
     [go, flash]
   );
 
-  /** Click selection with the usual ⌘ / ⇧ semantics. */
+  /** Touch opens immediately; keyboard and pointer selection keep Finder semantics. */
   const select = useCallback(
-    (id: string, e: React.MouseEvent) => {
+    (id: string, e: React.MouseEvent, touch = false) => {
+      if (touch && !e.metaKey && !e.ctrlKey && !e.shiftKey) {
+        const target = targets.find((item) => item.id === id);
+        if (target) {
+          anchorRef.current = id;
+          setSelection(new Set([id]));
+          if (target.isDir) void go(target.path);
+          else if (target.entry) setQuickLook(true);
+          return;
+        }
+      }
       setSelection((prev) => {
         if (e.metaKey || e.ctrlKey) {
           const next = new Set(prev);
@@ -548,7 +558,7 @@ export default function App() {
         return new Set([id]);
       });
     },
-    [targets]
+    [targets, go]
   );
 
   const moveCursor = useCallback(
@@ -640,10 +650,6 @@ export default function App() {
 
       if (t) {
         items.push({ label: t.isDir ? "Open" : "Open", onPick: () => void openTarget(t) });
-        // Space opens Quick Look on a desktop, but a touch-only Android device
-        // has no comparable gesture. Keep the viewer one long-press away too,
-        // in addition to the always-visible action in the status bar.
-        if (isAndroid && t.entry) items.push({ label: "Quick Preview", onPick: () => setQuickLook(true) });
         items.push({ label: selected.length > 1 ? `Copy ${selected.length} Items` : "Copy", onPick: copySelected });
         if (!t.isDir) items.push({ label: "Edit Text File", onPick: () => void openTarget(t) });
         if (!isAndroid) {
@@ -914,7 +920,7 @@ export default function App() {
   }, [usingNearby, targets.length, localSearchEmpty, nearbyBusy, contentBusy, selected, selectedDirectory, selectedDirCount, contentEntries.length]);
 
   return (
-    <div className={`app${isAndroid ? " android" : ""}`}>
+    <div className="app">
       <GlyphDefs />
       <Sidebar
         places={places}
@@ -972,6 +978,7 @@ export default function App() {
               onContextMenu={(c, x, y) => buildMenu(c ? (byId.get(c.id) ?? null) : null, x, y)}
               onBackgroundClick={() => setSelection(new Set())}
               touchFolderDrag={touchFolderDragHandlers}
+              directTouch={isAndroid}
             />
           ) : (
             <DetailList
@@ -1000,6 +1007,7 @@ export default function App() {
               onRenameCancel={() => setRenamingId(null)}
               onBackgroundClick={() => setSelection(new Set())}
               touchFolderDrag={touchFolderDragHandlers}
+              directTouch={isAndroid}
             />
           )}
 
@@ -1021,16 +1029,6 @@ export default function App() {
         <footer className="statusbar">
           <TintPicker tint={tint} systemAvailable={systemTint} onPick={setTint} />
           <span className="status-text" title={statusText}>{statusText}</span>
-          {isAndroid && lead?.target.entry && (
-            <button
-              className="quick-preview"
-              onClick={() => setQuickLook(true)}
-              title={`Preview ${lead.target.name}`}
-            >
-              <EyeIcon size={16} />
-              <span>Preview</span>
-            </button>
-          )}
           {store.view === "icons" && (
             <label className="status-zoom" title="Icon size">
               <GridIcon size={11} />
