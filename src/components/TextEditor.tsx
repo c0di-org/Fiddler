@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 
 import * as ipc from "../ipc";
-import { NewFileIcon } from "./icons";
+import { MarkdownView } from "./MarkdownView";
+import { NewFileIcon, PanelIcon } from "./icons";
 
 const TYPES = [".txt", ".md", ".json", ".js", ".ts", ".csv"];
 
@@ -24,12 +25,23 @@ export function TextEditor({ path: initialPath, parent, initialText, onClose, on
   const [name, setName] = useState(initialPath ? basename(initialPath) : "untitled.txt");
   const [text, setText] = useState(initialText);
   const [savedText, setSavedText] = useState(initialText);
+  const [previewOpen, setPreviewOpen] = useState(() => isMarkdown(initialPath ?? "untitled.txt"));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const editorRef = useRef<HTMLTextAreaElement>(null);
   const dirty = text !== savedText;
   const lines = text ? text.split("\n").length : 1;
+  const markdown = isMarkdown(path ?? name);
+  // A new Markdown document should feel complete as soon as it becomes one,
+  // while an explicit close remains respected for the rest of the edit.
+  const markdownRef = useRef(markdown);
+
+  useEffect(() => {
+    if (markdown && !markdownRef.current) setPreviewOpen(true);
+    if (!markdown) setPreviewOpen(false);
+    markdownRef.current = markdown;
+  }, [markdown]);
 
   useEffect(() => {
     const target = path ? editorRef.current : inputRef.current;
@@ -69,6 +81,10 @@ export function TextEditor({ path: initialPath, parent, initialText, onClose, on
         e.preventDefault();
         void save();
       }
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === "p" && markdown) {
+        e.preventDefault();
+        setPreviewOpen((open) => !open);
+      }
       if (e.key === "Escape") close();
     };
     window.addEventListener("keydown", onKey);
@@ -89,9 +105,23 @@ export function TextEditor({ path: initialPath, parent, initialText, onClose, on
           {path ? <span>{basename(path)}</span> : <span>New text file</span>}
           {dirty && <i title="Unsaved changes" />}
         </div>
-        <button className="editor-save" onClick={() => void save()} disabled={saving || (!dirty && !!path)}>
-          {saving ? "Saving…" : path ? "Save" : "Create"}
-        </button>
+        <div className="editor-actions">
+          {markdown && (
+            <button
+              className={`editor-preview-toggle ${previewOpen ? "on" : ""}`}
+              onClick={() => setPreviewOpen((open) => !open)}
+              title={`${previewOpen ? "Hide" : "Show"} Markdown preview (⇧⌘P)`}
+              aria-label={`${previewOpen ? "Hide" : "Show"} Markdown preview`}
+              aria-pressed={previewOpen}
+            >
+              <PanelIcon size={17} />
+              <span>Preview</span>
+            </button>
+          )}
+          <button className="editor-save" onClick={() => void save()} disabled={saving || (!dirty && !!path)}>
+            {saving ? "Saving…" : path ? "Save" : "Create"}
+          </button>
+        </div>
       </header>
 
       {!path && (
@@ -119,25 +149,32 @@ export function TextEditor({ path: initialPath, parent, initialText, onClose, on
         </div>
       )}
 
-      <div className="editor-body">
-        <textarea
-          ref={editorRef}
-          className="editor-text"
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          spellCheck={false}
-          placeholder="Start typing…"
-          onKeyDown={(e) => {
-            if (e.key !== "Tab") return;
-            e.preventDefault();
-            const node = e.currentTarget;
-            const start = node.selectionStart;
-            const end = node.selectionEnd;
-            const next = `${text.slice(0, start)}  ${text.slice(end)}`;
-            setText(next);
-            requestAnimationFrame(() => node.setSelectionRange(start + 2, start + 2));
-          }}
-        />
+      <div className={`editor-body${markdown && previewOpen ? " split" : ""}`}>
+        <div className="editor-source">
+          <textarea
+            ref={editorRef}
+            className="editor-text"
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            spellCheck={false}
+            placeholder="Start typing…"
+            onKeyDown={(e) => {
+              if (e.key !== "Tab") return;
+              e.preventDefault();
+              const node = e.currentTarget;
+              const start = node.selectionStart;
+              const end = node.selectionEnd;
+              const next = `${text.slice(0, start)}  ${text.slice(end)}`;
+              setText(next);
+              requestAnimationFrame(() => node.setSelectionRange(start + 2, start + 2));
+            }}
+          />
+        </div>
+        {markdown && previewOpen && (
+          <div className="editor-markdown-preview" aria-label="Markdown preview">
+            <MarkdownView path={path ?? previewPath(parent, name)} source={text} />
+          </div>
+        )}
       </div>
       <footer className="editor-foot">
         <span>{lines} {lines === 1 ? "line" : "lines"}</span>
@@ -155,4 +192,12 @@ function withExtension(name: string, extension: string) {
   const clean = name.trim() || "untitled";
   const dot = clean.lastIndexOf(".");
   return dot > 0 ? `${clean.slice(0, dot)}${extension}` : `${clean}${extension}`;
+}
+
+function isMarkdown(fileName: string) {
+  return /\.(?:md|markdown)$/i.test(fileName.trim());
+}
+
+function previewPath(parent: string, fileName: string) {
+  return `${parent.replace(/\/$/, "")}/${fileName.trim() || "untitled.md"}`;
 }
