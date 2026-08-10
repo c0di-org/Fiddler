@@ -4,6 +4,7 @@ use std::sync::Arc;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
 
+use crate::content_search::{self, ContentSearch};
 use crate::fs_scan::{self, ScanOpts};
 use crate::git::status::RepoStatus;
 use crate::git::{self, GitCache};
@@ -145,6 +146,21 @@ pub async fn nearby_entries(
     })
     .await
     .map_err(|e| format!("nearby search task failed: {e}"))?
+}
+
+/// Search the text contents of direct children the client has already listed.
+/// The worker keeps its own byte and file limits; this never walks directories.
+#[tauri::command]
+pub async fn search_contents(
+    path: String,
+    names: Vec<String>,
+    terms: Vec<String>,
+) -> Result<ContentSearch, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        Ok::<_, String>(content_search::search(&PathBuf::from(path), &names, &terms))
+    })
+    .await
+    .map_err(|e| format!("content search task failed: {e}"))?
 }
 
 /// Badge each entry from the repo's cached status.

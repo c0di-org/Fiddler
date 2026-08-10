@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { prepareSearch, search, type SearchRecord } from "./search.ts";
+import { contentTerms, prepareSearch, search, type SearchRecord } from "./search.ts";
 
 const records = [
   item("App.tsx", "/repo/src/App.tsx", "file"),
@@ -33,4 +33,19 @@ test("requires every text term and applies metadata filters", () => {
   assert.deepEqual(search(records, "app ext:ts").map((record) => record.value), ["application.config.ts", "my-app.config.ts"]);
   assert.deepEqual(search(records, "kind:dir").map((record) => record.value), ["components"]);
   assert.deepEqual(search(records, "ext:ts,tsx").map((record) => record.value), ["App.tsx", "application.config.ts", "my-app.config.ts", "RepoPanel.tsx"]);
+});
+
+test("does not match every result through a shared absolute ancestor", () => {
+  const scoped = prepareSearch({
+    value: "notes.md",
+    name: "notes.md",
+    path: "/Users/me/.codex/worktrees/project/notes.md",
+    searchPath: "notes.md",
+    kind: "file" as const,
+  });
+  assert.deepEqual(search([scoped], "trees"), []);
+});
+
+test("content search keeps literal terms but ignores metadata filters and one-letter noise", () => {
+  assert.deepEqual(contentTerms('engine "fast search" ext:ts kind:file a'), ["engine", "fast search"]);
 });

@@ -38,6 +38,8 @@ const HEADER_H = 46;
 
 interface Props {
   entries: Entry[];
+  /** Local-file content matches, shown after filename/path matches. */
+  contentEntries?: Entry[];
   worktrees: WorktreeInfo[];
   iconSize: number;
   selection: Set<string>;
@@ -53,7 +55,7 @@ interface Props {
 }
 
 export function IconGrid(props: Props) {
-  const { entries, worktrees, iconSize } = props;
+  const { entries, contentEntries = [], worktrees, iconSize } = props;
   const scrollerRef = useRef<HTMLDivElement>(null);
   const revealed = useRef(0);
   const [scrollTop, setScrollTop] = useState(0);
@@ -89,12 +91,17 @@ export function IconGrid(props: Props) {
 
     push(entries.map((e) => ({ id: e.path, name: e.name, path: e.path, entry: e })));
 
+    if (contentEntries.length > 0) {
+      out.push({ kind: "header", label: `Contents (${contentEntries.length})` });
+      push(contentEntries.map((e) => ({ id: e.path, name: e.name, path: e.path, entry: e })));
+    }
+
     if (worktrees.length > 0) {
       out.push({ kind: "header", label: `Worktrees (${worktrees.length})` });
       push(worktrees.map((w) => ({ id: `wt:${w.path}`, name: w.name, path: w.path, wt: w })));
     }
     return out;
-  }, [entries, worktrees, cols]);
+  }, [entries, contentEntries, worktrees, cols]);
 
   const offsets = useMemo(() => {
     const tops: number[] = [];

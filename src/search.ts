@@ -11,6 +11,8 @@ export interface SearchSource<T> {
   // records all share this small contract and therefore this exact scorer.
   value: T;
   name: string;
+  /** Path used for matching; normally relative to the searched folder. */
+  searchPath?: string;
   path: string;
   kind: SearchKind;
 }
@@ -34,7 +36,7 @@ export function prepareSearch<T>(source: SearchSource<T>): SearchRecord<T> {
   return {
     ...source,
     nameKey: source.name.toLocaleLowerCase(),
-    pathKey: source.path.toLocaleLowerCase(),
+    pathKey: (source.searchPath ?? source.path).toLocaleLowerCase(),
     extension: extensionOf(source.name),
     initials: initialsOf(source.name),
   };
@@ -65,6 +67,13 @@ export function search<T>(records: readonly SearchRecord<T>[], input: string): S
 
   hits.sort((a, b) => a.score - b.score || a.at - b.at);
   return hits.map((hit) => hit.record);
+}
+
+/** Literal terms suitable for the bounded content-search phase. */
+export function contentTerms(input: string) {
+  // One-character content queries are overwhelmingly noisy and do not justify
+  // touching the disk. Names still respond to them immediately.
+  return parse(input).terms.filter((term) => term.length >= 2);
 }
 
 function parse(input: string): Query {

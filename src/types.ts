@@ -78,6 +78,18 @@ export interface NearbySearch {
   truncated: boolean;
 }
 
+export interface ContentHit {
+  name: string;
+  line: number;
+  snippet: string;
+}
+
+export interface ContentSearch {
+  hits: ContentHit[];
+  /** The backend reached a file, byte, or result budget. */
+  truncated: boolean;
+}
+
 export interface RepoStatusPayload {
   root: string;
   branch: string | null;

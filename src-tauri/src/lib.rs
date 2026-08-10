@@ -1,4 +1,5 @@
 mod commands;
+mod content_search;
 mod fs_scan;
 mod git;
 mod model;
@@ -45,6 +46,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::list_dir,
             commands::nearby_entries,
+            commands::search_contents,
             commands::repo_info,
             commands::refresh_repo,
             commands::sidebar_places,
