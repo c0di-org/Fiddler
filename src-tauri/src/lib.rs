@@ -82,6 +82,7 @@ pub fn run() {
             commands::pdf_page,
             commands::install_apk,
             commands::reveal_in_finder,
+            commands::has_open_handler,
             commands::open_terminal_here,
             commands::create_folder,
             commands::create_text_file,

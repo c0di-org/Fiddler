@@ -63,19 +63,22 @@ What's not restored: back/forward history, and which folders were twisted open
 in list view. Both were deliberate — expanding a saved subtree means re-listing
 every level on launch, for continuity nobody has asked for.
 
-### The desktop build opens text files in its own editor
+### Open With
 
-`openTarget` reads up to 2 MB of any file over IPC to decide what it is, then
-opens anything that decodes as text in Fiddler's editor rather than handing it
-to the OS. On Android that's right — it's why the editor exists. On a Mac it
-means double-clicking `main.rs` gets a bare textarea instead of the editor the
-person actually uses, and it spends a 2 MB IPC round trip finding that out.
+↵ now hands a file to the OS where there is one, and falls back to Fiddler's
+editor only where nothing is registered for the type — a `LICENSE`, a
+`Makefile`, a `.env`. `has_open_handler` asks LaunchServices *in advance* rather
+than trying and catching, because the opener plugin launches detached: a refusal
+never comes back to us, it becomes a system dialog. The 2 MB identifying read is
+down to 8 KB, and the full read now only happens for a file that is actually
+going to be edited. "Edit Text File" is the way into the editor, and does
+something different from Open for the first time.
 
-The capability seam already has the right question in it: `caps.handOff`. Route
-on it, keep the editor as an explicit "Edit Text File" (already in the context
-menu), and drop the probe read to a few KB — deciding text-or-binary needs the
-first block, not the whole file. An **Open With** submenu is the natural
-follow-on and is the other half of what people expect from ↵.
+What's left is the other half of what people expect from ↵: an **Open With**
+submenu. That needs a Rust command to enumerate handlers — LaunchServices'
+`LSCopyApplicationURLsForURL`, next door to the call `has_open_handler` already
+makes — and it needs `ContextMenu` to learn to nest, which nothing has needed
+until now.
 
 ### A paired device can't be un-paired
 

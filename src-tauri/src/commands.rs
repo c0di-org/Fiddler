@@ -728,6 +728,47 @@ pub fn reveal_in_finder(_path: String) -> Result<(), String> {
     Err("Reveal in Finder is only available on macOS".into())
 }
 
+/// Is there an application registered to open this file?
+///
+/// ↵ on a file should hand it to whatever the person actually uses, and this is
+/// the question that has to be asked first — because when the answer is no, the
+/// alternative isn't an error, it's Fiddler's own editor. A `LICENSE`, a
+/// `Makefile`, a `.env`: perfectly readable text that macOS has no handler for,
+/// and where the system's "there is no application set to open the document"
+/// dialog is a worse answer than simply showing the text.
+///
+/// It has to be asked in advance rather than discovered afterwards. The opener
+/// plugin launches detached, so a refusal never comes back to us — it goes to a
+/// system dialog instead, which is exactly the outcome this avoids.
+#[tauri::command]
+#[cfg(target_os = "macos")]
+pub fn has_open_handler(path: String) -> bool {
+    use objc2::runtime::AnyObject;
+    use objc2::{class, msg_send};
+    use objc2_foundation::{NSString, NSURL};
+
+    let url = NSURL::fileURLWithPath(&NSString::from_str(&path));
+    // SAFETY: two read-only LaunchServices queries. Neither is main-thread-only
+    // — unlike NSColor above — and the result is only ever null-checked.
+    unsafe {
+        let workspace: *mut AnyObject = msg_send![class!(NSWorkspace), sharedWorkspace];
+        if workspace.is_null() {
+            return false;
+        }
+        let app: *mut AnyObject = msg_send![workspace, URLForApplicationToOpenURL: &*url];
+        !app.is_null()
+    }
+}
+
+/// Nowhere else has a desktop to hand off to, so the answer is always no and
+/// the editor is always the destination. `caps.handOff` means the UI doesn't
+/// ask, but the command exists so the two backends stay the same shape.
+#[tauri::command]
+#[cfg(not(target_os = "macos"))]
+pub fn has_open_handler(_path: String) -> bool {
+    false
+}
+
 #[tauri::command]
 #[cfg(target_os = "macos")]
 pub fn open_terminal_here(path: String) -> Result<(), String> {
@@ -1499,6 +1540,25 @@ mod tests {
         move_one(&landed, &original).unwrap();
         assert_eq!(std::fs::read_to_string(&original).unwrap(), "still here");
         assert!(!landed.exists(), "nothing should be left in the Trash");
+
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// The routing behind ↵ rests entirely on this answer, and a version of it
+    /// that said "yes" to everything would quietly send every `LICENSE` to a
+    /// system dialog instead of to Fiddler's editor.
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn launch_services_knows_what_it_can_and_cannot_open() {
+        let dir = scratch("handler");
+        let text = dir.join("notes.txt");
+        std::fs::write(&text, b"hello").unwrap();
+        // TextEdit ships with every Mac, so plain text always has a handler.
+        assert!(has_open_handler(text.to_string_lossy().into_owned()));
+
+        let nobodys = dir.join("notes.fiddler-no-such-type");
+        std::fs::write(&nobodys, b"hello").unwrap();
+        assert!(!has_open_handler(nobodys.to_string_lossy().into_owned()));
 
         std::fs::remove_dir_all(dir).unwrap();
     }

@@ -41,6 +41,12 @@ const TYPE_AHEAD_MS = 900;
 const PAIR_WAIT_MS = 60_000;
 const PAIR_POLL_MS = 1500;
 const MAX_CONTENT_FILE_BYTES = 512 * 1024;
+/** Enough to tell text from binary, and to hold a shortcut's whole address.
+ * The first block is all `grep` and `git` look at, and it's what `inspect`
+ * already reads — no reason opening a file should cost more than inspecting it. */
+const PROBE_BYTES = 8 * 1024;
+/** The most Fiddler will hold in its own editor. */
+const MAX_EDITOR_BYTES = 2 * 1024 * 1024;
 const TEXT_EXTENSIONS = new Set(
   "txt md mdx markdown json jsonc yaml yml toml xml html htm css scss sass less js jsx mjs cjs ts tsx rs go py rb java kt kts swift c h cc cpp hpp cs sh bash zsh fish sql graphql gql vue svelte astro ini cfg conf env lock gitignore dockerfile makefile gradle properties csv tsv log".split(
     " "
@@ -744,6 +750,38 @@ export default function App() {
     return at >= 0 ? { at, target: targets[at] } : null;
   }, [selection, targets]);
 
+  /**
+   * Put a file in Fiddler's own editor, if it's the sort of file that can be.
+   *
+   * Two reads rather than one: text-or-binary is answered by the first block —
+   * the same heuristic `grep` and `git` use — so a 40 MB video is refused after
+   * 8 KB instead of after two megabytes. Only a file that survives the probe is
+   * read in full, and only then to be edited rather than to be identified.
+   *
+   * Returns false when the file isn't editable here, so the caller can decide
+   * what else to do with it.
+   */
+  const openInEditor = useCallback(async (t: Target) => {
+    const head = await ipc.readText(t.path, PROBE_BYTES);
+    if (head.binary) return false;
+    const whole = head.truncated ? await ipc.readText(t.path, MAX_EDITOR_BYTES) : head;
+    if (whole.binary || whole.truncated) return false;
+    setEditor({ path: t.path, text: whole.text });
+    return true;
+  }, []);
+
+  /**
+   * What ↵ and a double-click do.
+   *
+   * On a Mac this hands the file to whatever the person actually uses — the
+   * point of a file manager — rather than to a textarea. Where nothing is
+   * registered for the type, though, the answer isn't an error: a `LICENSE`, a
+   * `Makefile`, a `.env` are perfectly readable, and Fiddler's editor beats the
+   * system's "there is no application set to open the document" dialog.
+   *
+   * Where there is no desktop to hand off to, `caps.handOff` is false and the
+   * editor is the destination — which is what the editor was written for.
+   */
   const openTarget = useCallback(
     async (t: Target) => {
       if (t.isDir) {
@@ -758,7 +796,7 @@ export default function App() {
         // A shortcut's only content is where it goes, so opening it means going
         // there — not opening the file that holds the address.
         if (routeOf(t.name) === "link") {
-          const head = await ipc.readText(t.path, 8 * 1024);
+          const head = await ipc.readText(t.path, PROBE_BYTES);
           const shortcut = parseShortcut(head.text);
           if (!shortcut) {
             flash(`“${t.name}” doesn’t point anywhere Fiddler will open`);
@@ -767,17 +805,19 @@ export default function App() {
           await ipc.openExternal(shortcut.url);
           return;
         }
-        const text = await ipc.readText(t.path, 2 * 1024 * 1024);
-        if (!text.binary && !text.truncated) {
-          setEditor({ path: t.path, text: text.text });
+        if (caps.handOff && (await ipc.hasOpenHandler(t.path))) {
+          await ipc.openExternal(t.path);
           return;
         }
+        if (await openInEditor(t)) return;
+        // Neither the OS nor the editor will have it. Hand it over anyway and
+        // let the system say its piece — silence would be worse.
         await ipc.openExternal(t.path);
       } catch {
         flash(`Could not open “${t.name}”`);
       }
     },
-    [go, flash]
+    [go, flash, openInEditor]
   );
 
   /** Touch opens immediately; keyboard and pointer selection keep Finder semantics. */
@@ -1068,7 +1108,18 @@ export default function App() {
         if (at.copy) {
           items.push({ label: selected.length > 1 ? `Copy ${selected.length} Items` : "Copy", onPick: copySelected });
         }
-        if (!t.isDir) items.push({ label: "Edit Text File", onPick: () => void openTarget(t) });
+        // The way *into* the editor now that ↵ goes to the OS. It used to call
+        // openTarget, which made it a second Open under a different name.
+        if (!t.isDir) {
+          items.push({
+            label: "Edit Text File",
+            onPick: () => {
+              void openInEditor(t).then((opened) => {
+                if (!opened) flash(`“${t.name}” isn’t text Fiddler can edit`);
+              });
+            },
+          });
+        }
         if (caps.reveal && at.shell) {
           items.push({ label: "Reveal in Finder", onPick: () => void ipc.revealInFinder(t.path) });
         }
@@ -1120,7 +1171,7 @@ export default function App() {
       // empty menu is a blank box that has to be dismissed.
       if (items.length > 0) setMenu({ x, y, items });
     },
-    [openTarget, selected.length, copySelected, trashSelected, copiedPaths.length, paste, newFolder, newTextFile, mountFolder, undoNext, undo]
+    [openTarget, openInEditor, flash, selected.length, copySelected, trashSelected, copiedPaths.length, paste, newFolder, newTextFile, mountFolder, undoNext, undo]
   );
 
   // ------------------------------------------------------------- keyboard

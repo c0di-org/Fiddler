@@ -243,6 +243,11 @@ const backend: Backend = {
 
   openTerminalHere: unavailable("Open in Terminal"),
 
+  /** A tab has no desktop behind it: "opening" a file here means downloading
+   * it, which is never what ↵ should do to something readable. `caps.handOff`
+   * is false for the same reason, so nothing asks — but the answer stands. */
+  hasOpenHandler: async () => false,
+
   /** Links open in a tab. A file has nowhere to be "opened" to in a browser, so
    * the honest equivalent is handing the user the bytes. */
   async openExternal(target) {

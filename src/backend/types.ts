@@ -139,6 +139,12 @@ export interface Backend {
   openTerminalHere(path: string): Promise<void>;
   /** Hand a path or URL to whatever handles it outside Fiddler. */
   openExternal(target: string): Promise<void>;
+  /** Is there anything out there registered to open this file?
+   *
+   * Asked before handing off, not after: opening is detached, so a refusal
+   * never comes back — it becomes a system dialog. And when the answer is no,
+   * the right response isn't an error, it's Fiddler's own editor. */
+  hasOpenHandler(path: string): Promise<boolean>;
   /** Launch Android's package installer for a selected APK. */
   installApk(path: string): Promise<void>;
 

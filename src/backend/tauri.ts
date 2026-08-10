@@ -115,6 +115,8 @@ const backend: Backend = {
 
   openExternal: (target) => openPath(target),
 
+  hasOpenHandler: (path) => invoke<boolean>("has_open_handler", { path }),
+
   installApk: (path) => invoke<void>("install_apk", { path }),
 };
 

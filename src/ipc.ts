@@ -50,6 +50,7 @@ export const {
   revealInFinder,
   openTerminalHere,
   openExternal,
+  hasOpenHandler,
   installApk,
   openFolder,
   importDropped,
