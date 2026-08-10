@@ -6,6 +6,8 @@ import type {
   Inspect,
   NearbySearch,
   PdfMeta,
+  PairingInfo,
+  PeerDevice,
   Place,
   RepoInfo,
   RepoStatusPayload,
@@ -30,6 +32,11 @@ export const refreshRepo = (root: string) => invoke<void>("refresh_repo", { root
 
 export const sidebarPlaces = () => invoke<Place[]>("sidebar_places");
 
+export const nearbyDevices = () => invoke<PeerDevice[]>("nearby_devices");
+export const nearbyPairingInfo = () => invoke<PairingInfo>("nearby_pairing_info");
+export const pairNearbyDevice = (id: string, code: string) =>
+  invoke<void>("pair_nearby_device", { id, code });
+
 /** The OS accent colour as sRGB bytes, or null where there isn't one to read. */
 export const systemAccent = () => invoke<[number, number, number] | null>("system_accent");
 
@@ -51,6 +58,9 @@ export const writeTextFile = (path: string, text: string) =>
 
 export const renamePath = (path: string, newName: string) =>
   invoke<string>("rename_path", { path, newName });
+
+export const copyPaths = (paths: string[], destination: string) =>
+  invoke<string[]>("copy_paths", { paths, destination });
 
 export const trashPaths = (paths: string[]) => invoke<void>("trash_paths", { paths });
 

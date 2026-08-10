@@ -1,9 +1,9 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// A two-character git status code, porcelain-v2 style.
 /// `index` is the staged side, `worktree` the unstaged side.
 /// Sentinel codes we add on top of git's own: `?` untracked, `!` ignored, `u` unmerged.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Code {
     pub index: char,
     pub worktree: char,
@@ -39,7 +39,7 @@ impl Code {
 /// Rolled-up counts for a directory: how many things below it are in each state.
 /// Ignored entries deliberately do not roll up — a folder containing `node_modules`
 /// should not read as "3 ignored things inside".
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Rollup {
     pub staged: u32,
     pub modified: u32,
@@ -54,7 +54,7 @@ impl Rollup {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Kind {
     Dir,
@@ -62,7 +62,7 @@ pub enum Kind {
     Symlink,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Entry {
     pub name: String,

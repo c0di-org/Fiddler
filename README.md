@@ -60,6 +60,16 @@ binary files still open in their installed Android app; opening an APK launches
 Android's package installer. System Trash, terminal launching, and macOS Quick
 Look thumbnails are not available on Android.
 
+## Nearby devices
+
+When Fiddler is open on a Mac and Android device on the same Wi-Fi network, the
+phone appears under **Devices** within a few seconds. The first time, enter the
+six-digit code shown in Fiddler on the device being shared; later visits are
+immediate. The paired Android device is a normal navigable Fiddler location,
+using the same list/icon views, folder navigation, search, and bounded text
+reading as a local folder. Discovery shares only a device name and temporary
+LAN address; storage is never listed until the device is explicitly paired.
+
 ## Keys
 
 | | |

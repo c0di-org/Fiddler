@@ -10,6 +10,7 @@ use crate::git::status::RepoStatus;
 use crate::git::{self, GitCache};
 use crate::model::{DirListing, Entry, Kind, Place, RepoInfo, Rollup, WorktreeInfo};
 use crate::nearby::{self, NearbySearch};
+use crate::peers::{self, PairingInfo, PeerDevice, PeerService};
 use crate::thumb_pool::{ThumbPool, ThumbReady, ThumbReq};
 use crate::watcher::FsWatcher;
 
@@ -17,6 +18,7 @@ pub struct AppState {
     pub cache: Arc<GitCache>,
     pub watcher: Arc<FsWatcher>,
     pub thumbs: Arc<ThumbPool>,
+    pub peers: Arc<PeerService>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -52,6 +54,9 @@ pub async fn list_dir(
     path: String,
     show_hidden: bool,
 ) -> Result<DirListing, String> {
+    if let Some((device, remote_path)) = peers::parse_remote_path(&path) {
+        return state.peers.remote_listing(&device, &remote_path, show_hidden);
+    }
     let cache = state.cache.clone();
     let watcher = state.watcher.clone();
 
@@ -132,6 +137,17 @@ pub async fn list_dir(
     .await
     .map_err(|e| format!("listing task failed: {e}"))?
 }
+
+/// Devices discovered on the same local network. Presence alone grants no file access.
+#[tauri::command]
+pub fn nearby_devices(state: State<'_, AppState>) -> Vec<PeerDevice> { state.peers.devices() }
+
+/// Show this short code on the device that is being browsed for the first time.
+#[tauri::command]
+pub fn nearby_pairing_info(state: State<'_, AppState>) -> PairingInfo { state.peers.pairing_info() }
+
+#[tauri::command]
+pub fn pair_nearby_device(state: State<'_, AppState>, id: String, code: String) -> Result<(), String> { state.peers.pair(&id, &code) }
 
 /// Scan just below the visible folder when its local search has no match. This
 /// is deliberately a separate IPC route: normal typing never invokes it.
@@ -296,7 +312,7 @@ pub async fn inspect(path: String) -> Result<Inspect, String> {
     .map_err(|e| format!("inspect task failed: {e}"))?
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TextHead {
     pub text: String,
@@ -316,7 +332,14 @@ pub struct TextHead {
 /// cut is made on a character boundary so the tail never arrives as a replacement
 /// glyph.
 #[tauri::command]
-pub async fn read_text(path: String, max_bytes: usize) -> Result<TextHead, String> {
+pub async fn read_text(
+    state: State<'_, AppState>,
+    path: String,
+    max_bytes: usize,
+) -> Result<TextHead, String> {
+    if let Some((device, remote_path)) = peers::parse_remote_path(&path) {
+        return state.peers.read_remote_text(&device, &remote_path, max_bytes);
+    }
     tauri::async_runtime::spawn_blocking(move || {
         use std::io::Read;
 
@@ -644,6 +667,75 @@ pub fn rename_path(
     state.cache.forget_discovery_under(parent);
     state.watcher.poke(parent);
     Ok(dst.to_string_lossy().into_owned())
+}
+
+/// Copy items into a folder without overwriting anything already there. This is
+/// intentionally the one transfer primitive the renderer needs: paste, a drop
+/// target, and later a nearby-device stream can all call the same operation.
+#[tauri::command]
+pub fn copy_paths(
+    state: State<'_, AppState>,
+    paths: Vec<String>,
+    destination: String,
+) -> Result<Vec<String>, String> {
+    if peers::parse_remote_path(&destination).is_some() || paths.iter().any(|path| peers::parse_remote_path(path).is_some()) {
+        if peers::parse_remote_path(&destination).is_some() { return Err("Pasting onto Android is not ready yet".into()); }
+        let destination = PathBuf::from(&destination);
+        if !destination.is_dir() { return Err("Paste destination is not a folder".into()); }
+        let mut copied = Vec::new();
+        for source in paths {
+            let (device, remote_path) = peers::parse_remote_path(&source).ok_or("Mixed local and remote copies are not supported")?;
+            let name = Path::new(&remote_path).file_name().and_then(|name| name.to_str()).ok_or("Invalid file name")?;
+            let target = copy_name(&destination, name);
+            let bytes = state.peers.download(&device, &remote_path)?;
+            std::fs::write(&target, bytes).map_err(|e| e.to_string())?;
+            copied.push(target.to_string_lossy().into_owned());
+        }
+        state.cache.forget_discovery_under(&destination);
+        state.watcher.poke(&destination);
+        return Ok(copied);
+    }
+    let destination = PathBuf::from(&destination);
+    if !destination.is_dir() { return Err("Paste destination is not a folder".into()); }
+    let mut copied = Vec::new();
+    for source in paths {
+        let source = PathBuf::from(source);
+        let name = source.file_name().and_then(|name| name.to_str()).ok_or("Invalid file name")?;
+        let target = copy_name(&destination, name);
+        copy_tree(&source, &target)?;
+        copied.push(target.to_string_lossy().into_owned());
+    }
+    state.cache.forget_discovery_under(&destination);
+    state.watcher.poke(&destination);
+    Ok(copied)
+}
+
+fn copy_tree(source: &Path, target: &Path) -> Result<(), String> {
+    let metadata = std::fs::symlink_metadata(source).map_err(|e| e.to_string())?;
+    if metadata.is_dir() {
+        std::fs::create_dir(target).map_err(|e| e.to_string())?;
+        for child in std::fs::read_dir(source).map_err(|e| e.to_string())? {
+            let child = child.map_err(|e| e.to_string())?;
+            copy_tree(&child.path(), &target.join(child.file_name()))?;
+        }
+    } else {
+        std::fs::copy(source, target).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+fn copy_name(parent: &Path, name: &str) -> PathBuf {
+    let first = parent.join(name);
+    if !first.exists() { return first; }
+    let file = Path::new(name);
+    let stem = file.file_stem().and_then(|part| part.to_str()).unwrap_or(name);
+    let extension = file.extension().and_then(|part| part.to_str()).map(|part| format!(".{part}")).unwrap_or_default();
+    for number in 1..10_000 {
+        let suffix = if number == 1 { " copy".to_string() } else { format!(" copy {number}") };
+        let candidate = parent.join(format!("{stem}{suffix}{extension}"));
+        if !candidate.exists() { return candidate; }
+    }
+    parent.join(format!("{stem} copy-{}{}", std::process::id(), extension))
 }
 
 #[tauri::command]

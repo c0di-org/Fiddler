@@ -966,6 +966,7 @@ dependencies = [
  "tauri-build",
  "tauri-plugin-opener",
  "trash",
+ "uuid",
 ]
 
 [[package]]

@@ -19,7 +19,7 @@ import * as ipc from "./ipc";
 import { contentTerms, prepareSearch, search, type SearchKind, type SearchRecord } from "./search";
 import { TreeStore, type Row } from "./store/tree";
 import { applyTint, hasSystemAccent, loadTint, saveTint, watchTint, type Tint } from "./tint";
-import type { ContentSearch, Entry, Favorite, NearbyEntry, NearbySearch, Place, WorktreeInfo } from "./types";
+import type { ContentSearch, Entry, Favorite, NearbyEntry, NearbySearch, PairingInfo, PeerDevice, Place, WorktreeInfo } from "./types";
 
 const store = new TreeStore();
 const isAndroid = /Android/i.test(navigator.userAgent);
@@ -62,10 +62,13 @@ export default function App() {
   useSyncExternalStore(store.subscribe, store.getSnapshot);
 
   const [places, setPlaces] = useState<Place[]>([]);
+  const [devices, setDevices] = useState<PeerDevice[]>([]);
+  const [pairingInfo, setPairingInfo] = useState<PairingInfo | null>(null);
   const [favorites, setFavorites] = useState<Favorite[]>(loadFavorites);
   const [folderTouchDrag, setFolderTouchDrag] = useState<FolderTouchDrag | null>(null);
   const folderTouchDragRef = useRef<FolderTouchDrag | null>(null);
   const [selection, setSelection] = useState<Set<string>>(new Set());
+  const [copiedPaths, setCopiedPaths] = useState<string[]>([]);
   const [revealSelection, setRevealSelection] = useState(0);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [filter, setFilter] = useState("");
@@ -109,6 +112,17 @@ export default function App() {
     return () => {
       cancelled = true;
     };
+  }, []);
+
+  // Broadcast discovery is intentionally ephemeral: polling keeps the sidebar
+  // honest when a phone sleeps or leaves Wi-Fi without adding another event pipe.
+  useEffect(() => {
+    let alive = true;
+    const refresh = () => void ipc.nearbyDevices().then((found) => alive && setDevices(found)).catch(() => {});
+    refresh();
+    const timer = window.setInterval(refresh, 2500);
+    void ipc.nearbyPairingInfo().then((info) => alive && setPairingInfo(info)).catch(() => {});
+    return () => { alive = false; window.clearInterval(timer); };
   }, []);
 
   // The accent follows the OS unless overridden, and has to be re-derived when
@@ -393,6 +407,21 @@ export default function App() {
     await store.navigate(path);
   }, []);
 
+  const openDevice = useCallback(async (device: PeerDevice) => {
+    if (!device.paired) {
+      const code = window.prompt(`Enter the six-digit pairing code shown in Fiddler on ${device.name}.`);
+      if (!code) return;
+      try {
+        await ipc.pairNearbyDevice(device.id, code.trim());
+        setDevices((current) => current.map((item) => item.id === device.id ? { ...item, paired: true } : item));
+      } catch (error) {
+        flash(String(error).replace(/^Error:\s*/, ""));
+        return;
+      }
+    }
+    await go(`fiddler://${device.id}/`);
+  }, [flash, go]);
+
   const favorite = useCallback((item: Favorite, at?: number) => {
     setFavorites((current) => addFavorite(current, item, at));
   }, []);
@@ -554,6 +583,24 @@ export default function App() {
     }
   }, [selected, flash]);
 
+  const copySelected = useCallback(() => {
+    const paths = selected.map((target) => target.path);
+    if (paths.length === 0) return;
+    setCopiedPaths(paths);
+    flash(`Copied ${paths.length} item${paths.length === 1 ? "" : "s"}`);
+  }, [selected, flash]);
+
+  const paste = useCallback(async () => {
+    if (copiedPaths.length === 0 || !store.path) return;
+    try {
+      const copied = await ipc.copyPaths(copiedPaths, store.path);
+      setSelection(new Set(copied));
+      flash(`Pasted ${copied.length} item${copied.length === 1 ? "" : "s"}`);
+    } catch (error) {
+      flash(String(error).replace(/^Error:\s*/, ""));
+    }
+  }, [copiedPaths, flash]);
+
   const newFolder = useCallback(async () => {
     try {
       const created = await ipc.createFolder(store.path, "untitled folder");
@@ -591,6 +638,7 @@ export default function App() {
 
       if (t) {
         items.push({ label: t.isDir ? "Open" : "Open", onPick: () => void openTarget(t) });
+        items.push({ label: selected.length > 1 ? `Copy ${selected.length} Items` : "Copy", onPick: copySelected });
         if (!t.isDir) items.push({ label: "Edit Text File", onPick: () => void openTarget(t) });
         if (!isAndroid) {
           items.push({ label: "Reveal in Finder", onPick: () => void ipc.revealInFinder(t.path) });
@@ -613,6 +661,7 @@ export default function App() {
           }
         }
       } else {
+        if (copiedPaths.length > 0) items.push({ label: "Paste", onPick: () => void paste() });
         items.push({ label: "New Text File", onPick: newTextFile });
         items.push({ label: "New Folder", onPick: () => void newFolder() });
         if (!isAndroid) items.push({ label: "Open in Terminal", onPick: () => void ipc.openTerminalHere(store.path) });
@@ -628,7 +677,7 @@ export default function App() {
 
       setMenu({ x, y, items });
     },
-    [openTarget, selected.length, trashSelected, newFolder, newTextFile]
+    [openTarget, selected.length, copySelected, trashSelected, copiedPaths.length, paste, newFolder, newTextFile]
   );
 
   // ------------------------------------------------------------- keyboard
@@ -666,8 +715,8 @@ export default function App() {
     [targets, selection, revealCursor]
   );
 
-  const kb = useRef({ targets, selection, moveCursor, openTarget, trashSelected, newFolder, newTextFile, go, jumpTo, quickLook });
-  kb.current = { targets, selection, moveCursor, openTarget, trashSelected, newFolder, newTextFile, go, jumpTo, quickLook };
+  const kb = useRef({ targets, selection, moveCursor, openTarget, copySelected, paste, trashSelected, newFolder, newTextFile, go, jumpTo, quickLook });
+  kb.current = { targets, selection, moveCursor, openTarget, copySelected, paste, trashSelected, newFolder, newTextFile, go, jumpTo, quickLook };
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -685,6 +734,8 @@ export default function App() {
       // Same rule for the editor overlay. In particular, its Markdown preview
       // shortcut must not also toggle the Finder preview behind it.
       if (editorActive.current) return;
+      if (modifier && e.key.toLowerCase() === "c") { e.preventDefault(); s.copySelected(); return; }
+      if (modifier && e.key.toLowerCase() === "v") { e.preventDefault(); void s.paste(); return; }
       const lead = [...s.selection].pop();
       const target = lead ? s.targets.find((t) => t.id === lead) : undefined;
       const perRow = store.view === "icons" ? iconsPerRow() : 1;
@@ -857,9 +908,12 @@ export default function App() {
       <GlyphDefs />
       <Sidebar
         places={places}
+        devices={devices}
+        pairingInfo={pairingInfo}
         favorites={favorites}
         current={store.path}
         onPick={(p) => void go(p)}
+        onOpenDevice={(device) => void openDevice(device)}
         onAddFavorite={favorite}
         onRemoveFavorite={unfavorite}
         onMoveFavorite={reorderFavorite}
