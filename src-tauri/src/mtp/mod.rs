@@ -27,16 +27,20 @@
 
 pub mod path;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
+use std::pin::Pin;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Arc, Mutex};
+use std::task::{Context, Poll};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
 
-use mtp_rs::mtp::{MtpDevice, ObjectHandle, Storage};
+use mtp_rs::mtp::{MtpDevice, NewObjectInfo, ObjectHandle, Storage};
 use mtp_rs::CancelToken;
 
 use crate::model::{DirListing, Entry, Kind};
@@ -175,6 +179,16 @@ enum Request {
         storage: u64,
         rel: String,
         reply: Sender<Result<Vec<u8>, String>>,
+    },
+    /// Copy one local file or folder into a folder on the device. Answers with
+    /// the `mtp://` address it landed at, which is what the paste selects.
+    Upload {
+        serial: String,
+        storage: u64,
+        /// The destination *folder*, not the object being written.
+        rel: String,
+        source: PathBuf,
+        reply: Sender<Result<String, String>>,
     },
 }
 
@@ -350,6 +364,32 @@ impl MtpService {
             .map_err(|_| "The USB service is not running")?;
         rx.recv().map_err(|_| "The USB service stopped responding")?
     }
+
+    /// Copy one local file or folder into a folder on a device, answering with
+    /// the address it landed at.
+    ///
+    /// Blocks for the whole transfer: MTP gives a device one session, so a copy
+    /// and a listing cannot overlap, and the caller is already on a blocking
+    /// thread for exactly this reason.
+    pub fn upload(&self, destination: &str, source: &Path) -> Result<String, String> {
+        let parsed = path::parse(destination).ok_or("Not a device path")?;
+        // The device root lists storages, not files. There is no folder there to
+        // write into, so say which choice is missing rather than failing deeper.
+        let storage = parsed
+            .storage
+            .ok_or("Open a storage on the device — internal or the SD card — and paste there")?;
+        let (tx, rx) = channel();
+        self.jobs
+            .send(Request::Upload {
+                serial: parsed.serial,
+                storage,
+                rel: parsed.rel,
+                source: source.to_path_buf(),
+                reply: tx,
+            })
+            .map_err(|_| "The USB service is not running")?;
+        rx.recv().map_err(|_| "The USB service stopped responding")?
+    }
 }
 
 /// One attached device, as the worker sees it.
@@ -360,6 +400,16 @@ struct Slot {
     /// by path, so every listing seeds this and every later operation on a path
     /// resolves through it. Cleared whenever the device goes away.
     handles: HashMap<(u64, String), ObjectHandle>,
+    /// `(storage, rel)` for every folder we have read all the way to the end.
+    ///
+    /// Writing needs to know a folder's *whole* membership, not just the part we
+    /// happen to have seen. What a device does with a duplicate filename is the
+    /// device's choice, and some — Android's server among them — take it as
+    /// permission to write over what is already there, so a name we failed to
+    /// notice is a file the person loses. A folder in here has every name in
+    /// `handles`; a folder that isn't gets read before anything is written into
+    /// it.
+    listed: HashSet<(u64, String)>,
     snapshot: UsbDevice,
     /// When we last tried to open a device that was blocked, so a device held by
     /// another process doesn't turn into a retry storm.
@@ -426,6 +476,7 @@ impl Worker {
                 device: None,
                 storages: Vec::new(),
                 handles: HashMap::new(),
+                listed: HashSet::new(),
                 snapshot: UsbDevice {
                     serial: serial.clone(),
                     name: info
@@ -494,6 +545,13 @@ impl Worker {
                 };
                 let _ = reply.send(result);
             }
+            Request::Upload { serial, storage, rel, source, reply } => {
+                let result = match self.slots.get_mut(&serial) {
+                    Some(slot) => upload(slot, &serial, storage, &rel, &source).await,
+                    None => Err("That device is not connected".into()),
+                };
+                let _ = reply.send(result);
+            }
         }
     }
 }
@@ -542,7 +600,7 @@ async fn list(
     // `Storage` isn't Clone, and the handle cache needs a mutable borrow at the
     // same time. Destructuring splits the slot into disjoint field borrows,
     // which the checker accepts where `slot.x` plus `&mut slot.y` would not.
-    let Slot { storages, handles, .. } = slot;
+    let Slot { storages, handles, listed, .. } = slot;
     let Some(store) = storages.iter().find(|s| s.id().0 == storage_id) else {
         let _ = reply.send(Err("That storage is no longer attached".into()));
         return;
@@ -604,13 +662,20 @@ async fn list(
         }};
     }
 
+    // Whether the folder was read all the way to its end, which is a different
+    // question from whether the UI got a usable answer.
+    let mut complete = true;
     loop {
         let item = match listing.next().await {
             Some(Ok(item)) => item,
+            None => break,
             // A single unreadable object is skipped by the stream itself; an
             // error here ended the whole read, so close the folder out rather
             // than leaving the UI waiting for a batch that will never come.
-            Some(Err(_)) | None => break,
+            Some(Err(_)) => {
+                complete = false;
+                break;
+            }
         };
         let mtp_rs::mtp::ListingItem::Object(object) = item else { continue };
 
@@ -626,8 +691,17 @@ async fn list(
             flush!(false);
         }
         if cancel.is_cancelled() {
+            complete = false;
             break;
         }
+    }
+
+    // A read that ran to the end is the only one that can claim to know every
+    // name in the folder. One that was cancelled or gave out partway saw a
+    // prefix, which is worse than nothing for deciding whether a paste would
+    // land on top of something.
+    if complete {
+        listed.insert((storage_id, rel.to_string()));
     }
 
     flush!(true);
@@ -669,6 +743,229 @@ async fn device_thumbnail(
         return Err("the device has no thumbnail for this file".into());
     }
     Ok(bytes)
+}
+
+/// Copy a local file or folder into a folder on the device.
+///
+/// The shape of this is set by the protocol. `SendObjectInfo` declares the name
+/// and the exact byte count, and only then does `SendObject` carry the data — so
+/// the size is read from disk up front, and a file that changes underneath us
+/// has to fail rather than send a length the device wasn't promised.
+///
+/// See [`Slot::listed`] for why the destination folder may be read first.
+async fn upload(
+    slot: &mut Slot,
+    serial: &str,
+    storage_id: u64,
+    rel: &str,
+    source: &Path,
+) -> Result<String, String> {
+    if !matches!(slot.snapshot.stage, Stage::Ready) {
+        return Err(stage_message(&slot.snapshot));
+    }
+    let name = source
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or("That name isn't text the device can store")?
+        .to_string();
+
+    // Checking the space the device reported a moment ago costs nothing and
+    // turns "the copy failed at 94%" into something said before it starts. It is
+    // a snapshot, so the device still gets the final say.
+    let needed = tree_size(source)?;
+    if let Some(storage) = slot.snapshot.storages.iter().find(|s| s.id == storage_id) {
+        if needed > storage.free_space {
+            return Err(format!(
+                "{name} needs {}, and {} has {} free",
+                human(needed),
+                storage.description,
+                human(storage.free_space)
+            ));
+        }
+    }
+
+    let Slot { storages, handles, listed, .. } = slot;
+    let store = storages
+        .iter()
+        .find(|s| s.id().0 == storage_id)
+        .ok_or("That storage is no longer attached")?;
+    let parent = if rel.is_empty() {
+        None
+    } else {
+        Some(resolve(store, handles, storage_id, rel).await?)
+    };
+
+    // Learn the destination's names before writing one. Normally free: the paste
+    // target is the folder on screen, which was just listed.
+    if !listed.contains(&(storage_id, rel.to_string())) {
+        for object in store.list_objects(parent).await.map_err(describe)? {
+            handles.insert((storage_id, format!("{rel}/{}", object.filename)), object.handle);
+        }
+        listed.insert((storage_id, rel.to_string()));
+    }
+
+    let top = format!("{rel}/{}", free_name(handles, storage_id, rel, &name));
+    // Depth-first with an explicit stack rather than recursion, which an async
+    // function can only do behind a box. A folder is created before its
+    // children, so every push already has its parent's handle.
+    let mut stack = vec![(source.to_path_buf(), parent, top.clone())];
+    while let Some((src, parent, child_rel)) = stack.pop() {
+        let name = child_rel.rsplit('/').next().unwrap_or_default().to_string();
+        // `symlink_metadata`, so a link is copied as the file it points at
+        // rather than walked as a folder — the same choice the local copy makes,
+        // and the one that cannot loop.
+        let meta = std::fs::symlink_metadata(&src).map_err(|e| e.to_string())?;
+        if meta.is_dir() {
+            let handle = store.create_folder(parent, &name).await.map_err(describe)?;
+            handles.insert((storage_id, child_rel.clone()), handle);
+            // Nothing can collide inside a folder we just made.
+            listed.insert((storage_id, child_rel.clone()));
+            for child in std::fs::read_dir(&src).map_err(|e| e.to_string())? {
+                let child = child.map_err(|e| e.to_string())?;
+                let child_name = child
+                    .file_name()
+                    .to_str()
+                    .ok_or("That name isn't text the device can store")?
+                    .to_string();
+                stack.push((child.path(), Some(handle), format!("{child_rel}/{child_name}")));
+            }
+        } else {
+            let handle = send_file(store, parent, &src, &name).await?;
+            handles.insert((storage_id, child_rel.clone()), handle);
+        }
+    }
+
+    Ok(path::format(serial, storage_id, &top))
+}
+
+/// Stream one file to the device.
+async fn send_file(
+    store: &Storage,
+    parent: Option<ObjectHandle>,
+    source: &Path,
+    name: &str,
+) -> Result<ObjectHandle, String> {
+    let file = std::fs::File::open(source).map_err(|e| e.to_string())?;
+    let size = file.metadata().map_err(|e| e.to_string())?.len();
+    let data = FileChunks { reader: std::io::BufReader::new(file), remaining: size };
+    match store.upload(parent, NewObjectInfo::file(name, size), data).await {
+        Ok(handle) => Ok(handle),
+        Err(e) => {
+            // A failed data phase can leave the object created and half-written.
+            // The library keeps it deliberately, and for a file browser that is
+            // the wrong default: a truncated video plays for four seconds and
+            // looks like a copy that worked. Take it back off the device.
+            if let Some(partial) = e.partial {
+                let _ = store.delete(partial).await;
+            }
+            Err(describe(e.source))
+        }
+    }
+}
+
+/// `name`, or the first "name copy"/"name copy 2" that nothing in the
+/// destination is already using. Pasting never overwrites.
+fn free_name(
+    handles: &HashMap<(u64, String), ObjectHandle>,
+    storage: u64,
+    rel: &str,
+    name: &str,
+) -> String {
+    let taken = |candidate: &str| handles.contains_key(&(storage, format!("{rel}/{candidate}")));
+    if !taken(name) {
+        return name.to_string();
+    }
+    let file = Path::new(name);
+    let stem = file.file_stem().and_then(|part| part.to_str()).unwrap_or(name);
+    let extension = file
+        .extension()
+        .and_then(|part| part.to_str())
+        .map(|part| format!(".{part}"))
+        .unwrap_or_default();
+    for number in 1..10_000 {
+        let suffix = if number == 1 { " copy".to_string() } else { format!(" copy {number}") };
+        let candidate = format!("{stem}{suffix}{extension}");
+        if !taken(&candidate) {
+            return candidate;
+        }
+    }
+    format!("{stem} copy-{}{extension}", std::process::id())
+}
+
+/// How many bytes a source will take on the device, following it down.
+fn tree_size(source: &Path) -> Result<u64, String> {
+    let meta = std::fs::symlink_metadata(source).map_err(|e| e.to_string())?;
+    if !meta.is_dir() {
+        return Ok(std::fs::metadata(source).map(|m| m.len()).unwrap_or(meta.len()));
+    }
+    let mut total = 0;
+    for child in std::fs::read_dir(source).map_err(|e| e.to_string())? {
+        total += tree_size(&child.map_err(|e| e.to_string())?.path())?;
+    }
+    Ok(total)
+}
+
+/// Bytes as a short human string, for messages about space.
+fn human(bytes: u64) -> String {
+    for (scale, unit) in [(1_000_000_000, "GB"), (1_000_000, "MB"), (1_000, "KB")] {
+        if bytes >= scale {
+            return format!("{:.1} {unit}", bytes as f64 / scale as f64);
+        }
+    }
+    format!("{bytes} bytes")
+}
+
+/// How much of a file is read before it is handed to the device.
+///
+/// The data phase is one bulk transfer whatever this is, so it only trades
+/// memory against read syscalls. A megabyte is well past where syscall overhead
+/// shows up and small enough to not matter on any machine that runs this.
+const UPLOAD_CHUNK: u64 = 1 << 20;
+
+/// A local file as the chunk stream `Storage::upload` wants.
+///
+/// The reads are blocking, which is the right shape here rather than a
+/// compromise: the worker's runtime exists to serialise device I/O, and this
+/// thread is doing nothing else until the file is across.
+struct FileChunks {
+    reader: std::io::BufReader<std::fs::File>,
+    /// What is left of the size already declared to the device.
+    remaining: u64,
+}
+
+impl futures::Stream for FileChunks {
+    type Item = Result<Bytes, std::io::Error>;
+
+    fn poll_next(mut self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        use std::io::Read;
+        let this = &mut *self;
+        if this.remaining == 0 {
+            return Poll::Ready(None);
+        }
+        let want = this.remaining.min(UPLOAD_CHUNK) as usize;
+        let mut buf = vec![0u8; want];
+        let mut filled = 0;
+        while filled < want {
+            match this.reader.read(&mut buf[filled..]) {
+                Ok(0) => break,
+                Ok(n) => filled += n,
+                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+                Err(e) => return Poll::Ready(Some(Err(e))),
+            }
+        }
+        // The device was promised a byte count and will wait for exactly that
+        // many. A file that shrank mid-copy cannot be finished, so fail here
+        // rather than hang the session waiting on bytes that no longer exist.
+        if filled == 0 {
+            return Poll::Ready(Some(Err(std::io::Error::new(
+                std::io::ErrorKind::UnexpectedEof,
+                "the file got smaller while it was being copied",
+            ))));
+        }
+        buf.truncate(filled);
+        this.remaining -= filled as u64;
+        Poll::Ready(Some(Ok(Bytes::from(buf))))
+    }
 }
 
 /// Move one device forward: open it, ask for storages, and decide which stage
@@ -714,6 +1011,7 @@ async fn advance(slot: &mut Slot, serial: &str) {
             slot.snapshot.storages.clear();
             slot.storages.clear();
             slot.handles.clear();
+            slot.listed.clear();
         }
         Ok(storages) => {
             slot.snapshot.storages = storages.iter().map(snapshot_of).collect();
@@ -726,6 +1024,7 @@ async fn advance(slot: &mut Slot, serial: &str) {
             slot.device = None;
             slot.storages.clear();
             slot.handles.clear();
+            slot.listed.clear();
             slot.snapshot.storages.clear();
             slot.snapshot.stage = Stage::Failed { message: describe(e) };
         }
@@ -983,6 +1282,7 @@ mod tests {
                 device: None,
                 storages: Vec::new(),
                 handles: HashMap::new(),
+                listed: HashSet::new(),
                 snapshot: UsbDevice {
                     serial: self.serial.clone(),
                     name: "unknown".into(),
@@ -1250,6 +1550,115 @@ mod tests {
             batches.last().map(|b| b.done).unwrap_or(true),
             "any batch stream must still be closed"
         );
+    }
+
+    #[tokio::test]
+    async fn a_file_pasted_into_a_device_folder_lands_there() {
+        // The bug this fixes: a device folder has no `is_dir`, so pasting into
+        // one used to answer "Paste destination is not a folder".
+        let fake = Fake::new("upload");
+        let mut slot = fake.slot().await;
+        let storage = slot.snapshot.storages[0].id;
+        // The folder is on screen, so it has been listed — the warm path.
+        let _ = drain(&mut slot, &fake.serial, Some(storage), "/Download", &CancelToken::new()).await;
+
+        let source = fake.dir.parent().unwrap().join(format!("clip-{}.mp4", std::process::id()));
+        fs::write(&source, b"pretend mp4 body").unwrap();
+
+        let landed = upload(&mut slot, &fake.serial, storage, "/Download", &source).await.unwrap();
+        let name = source.file_name().unwrap().to_str().unwrap();
+        assert_eq!(landed, format!("mtp://{}/{storage}/Download/{name}", fake.serial));
+        assert_eq!(fs::read(fake.dir.join("Download").join(name)).unwrap(), b"pretend mp4 body");
+
+        // And it must be browsable straight away, by the address we answered with.
+        let (entries, _, _) =
+            drain(&mut slot, &fake.serial, Some(storage), "/Download", &CancelToken::new()).await;
+        assert!(entries.iter().any(|e| e.path == landed));
+        let _ = fs::remove_file(&source);
+    }
+
+    #[tokio::test]
+    async fn pasting_a_name_the_device_already_has_never_overwrites() {
+        // Android takes a duplicate filename as permission to overwrite, so the
+        // check has to happen here. This slot has never listed the folder, which
+        // is the path that reads it before writing into it.
+        let fake = Fake::new("collide");
+        let mut slot = fake.slot().await;
+        let storage = slot.snapshot.storages[0].id;
+        assert!(slot.handles.is_empty(), "the check must not depend on a prior listing");
+
+        // A local file with the name the device already uses.
+        let mac = fake.dir.parent().unwrap().join(format!("fiddler-mac-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&mac);
+        fs::create_dir_all(&mac).unwrap();
+        let clash = mac.join("notes.txt");
+        fs::write(&clash, b"from the Mac").unwrap();
+
+        let landed = upload(&mut slot, &fake.serial, storage, "/Download", &clash).await.unwrap();
+        assert!(landed.ends_with("/Download/notes copy.txt"), "{landed}");
+        assert_eq!(fs::read(fake.dir.join("Download/notes.txt")).unwrap(), b"hello from the phone");
+        assert_eq!(fs::read(fake.dir.join("Download/notes copy.txt")).unwrap(), b"from the Mac");
+
+        // A second paste of the same file keeps counting rather than colliding.
+        let again = upload(&mut slot, &fake.serial, storage, "/Download", &clash).await.unwrap();
+        assert!(again.ends_with("/Download/notes copy 2.txt"), "{again}");
+        let _ = fs::remove_dir_all(&mac);
+    }
+
+    #[tokio::test]
+    async fn a_pasted_folder_arrives_with_everything_inside_it() {
+        let fake = Fake::new("tree");
+        let mut slot = fake.slot().await;
+        let storage = slot.snapshot.storages[0].id;
+
+        let source = fake.dir.parent().unwrap().join(format!("trip-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&source);
+        fs::create_dir_all(source.join("raw")).unwrap();
+        fs::write(source.join("one.txt"), b"one").unwrap();
+        fs::write(source.join("raw/two.txt"), b"two").unwrap();
+
+        let landed = upload(&mut slot, &fake.serial, storage, "", &source).await.unwrap();
+        let name = source.file_name().unwrap().to_str().unwrap();
+        assert_eq!(landed, format!("mtp://{}/{storage}/{name}", fake.serial));
+        assert_eq!(fs::read(fake.dir.join(name).join("one.txt")).unwrap(), b"one");
+        assert_eq!(fs::read(fake.dir.join(name).join("raw/two.txt")).unwrap(), b"two");
+        let _ = fs::remove_dir_all(&source);
+    }
+
+    #[tokio::test]
+    async fn pasting_onto_a_device_that_has_not_granted_says_what_to_do() {
+        let fake = Fake::new("upload-grant");
+        let mut slot = fake.slot().await;
+        let storage = slot.snapshot.storages[0].id;
+        slot.snapshot.stage = Stage::AwaitingGrant;
+        slot.snapshot.name = "Galaxy Z Fold 7".into();
+
+        let source = fake.dir.join("Download/notes.txt");
+        let error = upload(&mut slot, &fake.serial, storage, "/Download", &source).await.unwrap_err();
+        assert!(error.contains("Unlock Galaxy Z Fold 7"), "{error}");
+    }
+
+    #[tokio::test]
+    async fn a_file_too_big_for_the_device_is_refused_before_anything_moves() {
+        let fake = Fake::new("space");
+        let mut slot = fake.slot().await;
+        let storage = slot.snapshot.storages[0].id;
+        // Whatever the device reported, pretend it is nearly full.
+        slot.snapshot.storages[0].free_space = 4;
+
+        let source = fake.dir.join("Download/notes.txt");
+        let error = upload(&mut slot, &fake.serial, storage, "/DCIM", &source).await.unwrap_err();
+        assert!(error.contains("Internal storage"), "{error}");
+        assert!(error.contains("free"), "{error}");
+        assert!(!fake.dir.join("DCIM/notes.txt").exists(), "nothing may have been written");
+    }
+
+    #[test]
+    fn human_sizes_read_the_way_a_person_would_say_them() {
+        assert_eq!(human(0), "0 bytes");
+        assert_eq!(human(900), "900 bytes");
+        assert_eq!(human(1_500), "1.5 KB");
+        assert_eq!(human(2_400_000_000), "2.4 GB");
     }
 
     #[test]

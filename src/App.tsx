@@ -733,8 +733,18 @@ export default function App() {
 
   const paste = useCallback(async () => {
     if (copiedPaths.length === 0 || !store.path) return;
+    const destination = store.path;
+    // A cable is slow enough that silence reads as nothing happening: a video
+    // onto a phone over USB 2.0 is tens of seconds.
+    const device = destination.startsWith("mtp://");
+    if (device) {
+      flash(`Copying ${copiedPaths.length} item${copiedPaths.length === 1 ? "" : "s"} to the device…`);
+    }
     try {
-      const copied = await ipc.copyPaths(copiedPaths, store.path);
+      const copied = await ipc.copyPaths(copiedPaths, destination);
+      // Nothing watches a folder on a device, so the listing only shows what
+      // just arrived if we go and ask again.
+      if (device) await store.invalidateDirs([destination]);
       setSelection(new Set(copied));
       flash(`Pasted ${copied.length} item${copied.length === 1 ? "" : "s"}`);
     } catch (error) {
