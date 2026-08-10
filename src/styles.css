@@ -973,6 +973,15 @@ button {
   fill: url(#g-plain);
 }
 
+/* The first few things inside a folder, fanned out of its mouth. They are drawn
+   under the front panel, so all this has to do is give a photo the white edge of
+   a print, which is what separates one from the next where they overlap. */
+.folder-peek .peek-edge {
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.85);
+  stroke-width: 0.7;
+}
+
 .folder-repo-mark circle {
   fill: rgba(255, 255, 255, 0.92);
 }

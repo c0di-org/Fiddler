@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 
 import { isTextual, routeOf } from "../preview/route";
-import { peek, subscribe } from "../thumbs";
+import { peek, subscribe, thumbPx } from "../thumbs";
 import type { Entry } from "../types";
 import { FileGlyph } from "./FileGlyph";
 
@@ -26,7 +26,7 @@ const TEXT_FLOOR = 40;
 
 export function Thumb({ entry, size }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
-  const want = px(size);
+  const want = thumbPx(size);
   // Only files are routed by name. A folder called `assets.css` is not a
   // stylesheet, and whatever it has to show is worth showing at any size.
   const isFile = entry.kind === "file";
@@ -58,10 +58,4 @@ export function Thumb({ entry, size }: Props) {
       )}
     </div>
   );
-}
-
-/** Ask for a device-pixel-accurate thumbnail, snapped so the cache stays shared. */
-function px(size: number) {
-  const want = size * Math.min(2, window.devicePixelRatio || 1);
-  return want <= 64 ? 64 : want <= 128 ? 128 : want <= 256 ? 256 : 512;
 }

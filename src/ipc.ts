@@ -7,6 +7,7 @@ import type {
   NearbySearch,
   PdfMeta,
   PairingInfo,
+  PeekItem,
   PeerDevice,
   Place,
   RepoInfo,
@@ -81,6 +82,10 @@ export const onThumbs = (fn: (ready: ThumbReady[]) => void) =>
   listen<ThumbReady[]>("fiddler:thumbs", (e) => fn(e.payload));
 
 export const inspect = (path: string) => invoke<Inspect>("inspect", { path });
+
+/** The leading children of a folder, for the fan of cards on its icon. */
+export const folderPeek = (path: string, showHidden: boolean, limit: number) =>
+  invoke<PeekItem[]>("folder_peek", { path, showHidden, limit });
 
 /** The front of a text file, bounded by `maxBytes` and cut on a character. */
 export const readText = (path: string, maxBytes: number) =>

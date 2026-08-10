@@ -105,9 +105,14 @@ pub fn scan(dir: &Path, opts: &ScanOpts, cache: &GitCache) -> Result<Vec<Entry>,
 fn cmp_entries(a: &Entry, b: &Entry) -> Ordering {
     let a_dir = matches!(a.kind, Kind::Dir) || (matches!(a.kind, Kind::Symlink) && a.link_to_dir);
     let b_dir = matches!(b.kind, Kind::Dir) || (matches!(b.kind, Kind::Symlink) && b.link_to_dir);
-    b_dir
-        .cmp(&a_dir)
-        .then_with(|| natural_cmp(&a.name, &b.name))
+    display_cmp((a_dir, &a.name), (b_dir, &b.name))
+}
+
+/// The same ordering over just the two fields it actually reads, so a caller
+/// holding nothing but a name and a kind — the folder peek — can sort the way
+/// the listing will.
+pub fn display_cmp(a: (bool, &str), b: (bool, &str)) -> Ordering {
+    b.0.cmp(&a.0).then_with(|| natural_cmp(a.1, b.1))
 }
 
 pub fn natural_cmp(a: &str, b: &str) -> Ordering {
@@ -165,6 +170,14 @@ mod tests {
         assert_eq!(natural_cmp("a", "A"), Ordering::Equal);
         assert_eq!(natural_cmp("apple", "banana"), Ordering::Less);
         assert_eq!(natural_cmp("v1.9.0", "v1.10.0"), Ordering::Less);
+    }
+
+    #[test]
+    fn display_order_puts_directories_first() {
+        assert_eq!(display_cmp((true, "zeta"), (false, "alpha")), Ordering::Less);
+        assert_eq!(display_cmp((false, "alpha"), (true, "zeta")), Ordering::Greater);
+        assert_eq!(display_cmp((true, "a"), (true, "b")), Ordering::Less);
+        assert_eq!(display_cmp((false, "img2.png"), (false, "img10.png")), Ordering::Less);
     }
 
     #[test]
