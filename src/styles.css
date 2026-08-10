@@ -223,6 +223,10 @@ button {
 /* DeX keeps the desktop layout, while a phone remains usable instead of
    squeezing a 228px Finder sidebar beside the file grid. */
 @media (max-width: 640px) {
+  .android .status-zoom {
+    display: none;
+  }
+
   .sidebar {
     width: 76px;
     flex-basis: 76px;
@@ -1423,6 +1427,49 @@ button {
   text-align: center;
 }
 
+/* On Android, Quick Look cannot rely on the desktop space-bar shortcut. This
+   stays where the selection description already lives, so one tap selects and
+   the next tap previews without hunting through a menu. */
+.quick-preview {
+  grid-column: 3;
+  justify-self: end;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 44px;
+  height: 36px;
+  padding: 0 11px;
+  border: 0;
+  border-radius: var(--r-md);
+  background: var(--sel-cell);
+  color: var(--accent-ink);
+  font: 600 12px var(--font);
+}
+
+.quick-preview:active {
+  background: var(--fill-hover);
+  transform: scale(0.96);
+}
+
+.android .statusbar {
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  height: 48px;
+  flex-basis: 48px;
+}
+
+.android .status-text {
+  grid-column: 2;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.android .status-zoom {
+  grid-column: 4;
+}
+
 /* ------------------------------------------------------------ accent tint */
 
 .tint {
@@ -2473,6 +2520,26 @@ li.md-task {
   color: var(--fg);
 }
 
+/* Phone and tablet WebViews do not have a hover state or a reliable keyboard;
+   give the viewer's exit/open controls a proper touch target. */
+@media (pointer: coarse) {
+  .ql-bar {
+    min-height: 58px;
+    padding: 7px 12px;
+  }
+
+  .ql-close,
+  .ql-open {
+    min-width: 44px;
+    height: 44px;
+  }
+
+  .ql-close {
+    width: 44px;
+    font-size: 14px;
+  }
+}
+
 .ql-body {
   flex: 1;
   min-height: 0;
@@ -2628,6 +2695,21 @@ li.md-task {
 }
 
 @media (max-width: 680px) {
+  .ql-scrim {
+    padding: env(safe-area-inset-top, 0px) 0 env(safe-area-inset-bottom, 0px);
+    align-items: stretch;
+  }
+
+  .ql {
+    width: 100%;
+    border-radius: 0;
+    border-inline: 0;
+  }
+
+  .ql-doc {
+    padding: 22px 20px 36px;
+  }
+
   .ql-folder {
     grid-template-columns: 1fr;
     grid-template-rows: minmax(160px, 0.8fr) minmax(0, 1fr);

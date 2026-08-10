@@ -12,7 +12,7 @@ import { TintPicker } from "./components/TintPicker";
 import { TextEditor } from "./components/TextEditor";
 import { Toolbar } from "./components/Toolbar";
 import type { FolderTouchDragHandlers } from "./components/folder-touch-drag";
-import { GridIcon } from "./components/icons";
+import { EyeIcon, GridIcon } from "./components/icons";
 import { addFavorite, loadFavorites, moveFavorite, saveFavorites } from "./favorites";
 import { formatSize } from "./format";
 import * as ipc from "./ipc";
@@ -640,6 +640,10 @@ export default function App() {
 
       if (t) {
         items.push({ label: t.isDir ? "Open" : "Open", onPick: () => void openTarget(t) });
+        // Space opens Quick Look on a desktop, but a touch-only Android device
+        // has no comparable gesture. Keep the viewer one long-press away too,
+        // in addition to the always-visible action in the status bar.
+        if (isAndroid && t.entry) items.push({ label: "Quick Preview", onPick: () => setQuickLook(true) });
         items.push({ label: selected.length > 1 ? `Copy ${selected.length} Items` : "Copy", onPick: copySelected });
         if (!t.isDir) items.push({ label: "Edit Text File", onPick: () => void openTarget(t) });
         if (!isAndroid) {
@@ -910,7 +914,7 @@ export default function App() {
   }, [usingNearby, targets.length, localSearchEmpty, nearbyBusy, contentBusy, selected, selectedDirectory, selectedDirCount, contentEntries.length]);
 
   return (
-    <div className="app">
+    <div className={`app${isAndroid ? " android" : ""}`}>
       <GlyphDefs />
       <Sidebar
         places={places}
@@ -1017,6 +1021,16 @@ export default function App() {
         <footer className="statusbar">
           <TintPicker tint={tint} systemAvailable={systemTint} onPick={setTint} />
           <span className="status-text" title={statusText}>{statusText}</span>
+          {isAndroid && lead?.target.entry && (
+            <button
+              className="quick-preview"
+              onClick={() => setQuickLook(true)}
+              title={`Preview ${lead.target.name}`}
+            >
+              <EyeIcon size={16} />
+              <span>Preview</span>
+            </button>
+          )}
           {store.view === "icons" && (
             <label className="status-zoom" title="Icon size">
               <GridIcon size={11} />
