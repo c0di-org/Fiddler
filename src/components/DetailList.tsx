@@ -23,6 +23,8 @@ const COLUMNS: { key: SortKey; label: string; cls: string }[] = [
 
 interface Props {
   rows: Row[];
+  /** Search results are ranked and flat, rather than an expandable tree. */
+  searching: boolean;
   selection: Set<string>;
   /** Advances when keyboard navigation asks us to reveal the lead selection. */
   revealSelection: number;
@@ -43,7 +45,7 @@ interface Props {
 }
 
 export function DetailList(props: Props) {
-  const { rows, selection, renamingId, revealSelection } = props;
+  const { rows, selection, renamingId, revealSelection, searching } = props;
   const scrollerRef = useRef<HTMLDivElement>(null);
   const revealed = useRef(0);
   const [scrollTop, setScrollTop] = useState(0);
@@ -144,6 +146,7 @@ export function DetailList(props: Props) {
                 row={row}
                 selected={selection.has(row.id)}
                 renaming={row.id === renamingId}
+                searching={searching}
                 onRenameCommit={props.onRenameCommit}
                 onRenameCancel={props.onRenameCancel}
               />
@@ -160,16 +163,18 @@ function RowView({
   row,
   selected,
   renaming,
+  searching,
   onRenameCommit,
   onRenameCancel,
 }: {
   row: Row;
   selected: boolean;
   renaming: boolean;
+  searching: boolean;
   onRenameCommit: (row: Row, name: string) => void;
   onRenameCancel: () => void;
 }) {
-  const expandable = row.kind === "wt-group" || row.dirPath !== null;
+  const expandable = !searching && (row.kind === "wt-group" || row.dirPath !== null);
   const e = row.kind === "entry" ? row.entry : null;
 
   const name =

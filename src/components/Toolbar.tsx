@@ -128,7 +128,8 @@ export function Toolbar(p: Props) {
           <SearchIcon size={15} />
           <input
             value={p.filter}
-            placeholder="Search"
+            placeholder="Search files"
+            title="Search names and paths. Try ext:ts or kind:dir."
             spellCheck={false}
             onChange={(e) => p.onFilter(e.target.value)}
           />

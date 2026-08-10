@@ -15,9 +15,10 @@ import { GridIcon } from "./components/icons";
 import { addFavorite, loadFavorites, moveFavorite, saveFavorites } from "./favorites";
 import { formatSize } from "./format";
 import * as ipc from "./ipc";
+import { prepareSearch, search, type SearchKind, type SearchRecord } from "./search";
 import { TreeStore, type Row } from "./store/tree";
 import { applyTint, hasSystemAccent, loadTint, saveTint, watchTint, type Tint } from "./tint";
-import type { Entry, Favorite, Place } from "./types";
+import type { Entry, Favorite, Place, WorktreeInfo } from "./types";
 
 const store = new TreeStore();
 const isAndroid = /Android/i.test(navigator.userAgent);
@@ -38,6 +39,8 @@ interface EditorState {
   path?: string;
   text: string;
 }
+
+type GridSearchValue = { kind: "entry"; entry: Entry } | { kind: "worktree"; worktree: WorktreeInfo };
 
 export default function App() {
   useSyncExternalStore(store.subscribe, store.getSnapshot);
@@ -108,17 +111,44 @@ export default function App() {
 
   // ----------------------------------------------------------------- data
 
-  const q = filter.trim().toLowerCase();
+  const entries = store.entries;
+  const worktrees = store.worktrees;
+  const rows = store.rows;
+  const searching = filter.trim().length > 0;
 
+  // Search records are prepared only when Fiddler's listing changes. Querying
+  // these records is metadata-only and does no work outside the renderer.
+  const gridRecords = useMemo<SearchRecord<GridSearchValue>[]>(
+    () => [
+      ...entries.map((entry) =>
+        prepareSearch<GridSearchValue>({ value: { kind: "entry", entry }, name: entry.name, path: entry.path, kind: entryKind(entry) })
+      ),
+      ...worktrees.map((worktree) =>
+        prepareSearch<GridSearchValue>({
+          value: { kind: "worktree", worktree },
+          name: worktree.name,
+          path: worktree.path,
+          kind: "worktree",
+        })
+      ),
+    ],
+    [entries, worktrees]
+  );
+  const gridMatches = useMemo(() => (searching ? search(gridRecords, filter) : []), [searching, gridRecords, filter]);
   const gridEntries = useMemo(
-    () => (q ? store.entries.filter((e) => e.name.toLowerCase().includes(q)) : store.entries),
-    [store.entries, q]
+    () => (searching ? gridMatches.flatMap((record) => (record.value.kind === "entry" ? [record.value.entry] : [])) : entries),
+    [searching, gridMatches, entries]
   );
   const gridWorktrees = useMemo(
-    () => (q ? store.worktrees.filter((w) => w.name.toLowerCase().includes(q)) : store.worktrees),
-    [store.worktrees, q]
+    () => (searching ? gridMatches.flatMap((record) => (record.value.kind === "worktree" ? [record.value.worktree] : [])) : worktrees),
+    [searching, gridMatches, worktrees]
   );
-  const listRows = useMemo(() => applyFilter(store.rows, q), [store.rows, q]);
+
+  const listRecords = useMemo(() => rows.flatMap(searchRow), [rows]);
+  const listRows = useMemo(
+    () => (searching ? search(listRecords, filter).map((record) => record.value) : rows),
+    [searching, listRecords, filter, rows]
+  );
 
   /** Flat, ordered list of everything selectable in the current view. */
   const targets = useMemo<Target[]>(() => {
@@ -529,13 +559,13 @@ export default function App() {
 
   const emptyMessage = useMemo(() => {
     const err = store.listing?.error;
-    if (!err) return q ? "No matches" : "This folder is empty";
+    if (!err) return searching ? "No matches" : "This folder is empty";
     return /denied|not permitted|Operation not permitted/i.test(err)
       ? isAndroid
         ? "Fiddler needs All files access to browse shared storage.\nAllow it in Android Settings, then return here."
         : "Fiddler doesn’t have permission to read this folder.\nGrant access in System Settings › Privacy & Security › Files and Folders."
       : err.replace(/^Error:\s*/, "");
-  }, [store.listing, q]);
+  }, [store.listing, searching]);
 
   const statusText = useMemo(() => {
     if (selected.length === 1 && selected[0].entry && !selected[0].isDir) {
@@ -603,6 +633,7 @@ export default function App() {
               emptyMessage={emptyMessage}
               loaded={store.loaded}
               rows={listRows}
+              searching={searching}
               selection={selection}
               revealSelection={revealSelection}
               renamingId={renamingId}
@@ -696,30 +727,16 @@ function iconsPerRow(): number {
   return Math.max(1, row.children.length);
 }
 
-/**
- * Keep rows whose name matches, plus every ancestor of a match. Runs back to
- * front: in a depth-first flattening, any earlier row that is shallower than a
- * kept row is one of its ancestors.
- */
-function applyFilter(rows: Row[], q: string): Row[] {
-  if (!q) return rows;
+function entryKind(entry: Entry): SearchKind {
+  return entry.kind === "dir" || (entry.kind === "symlink" && entry.linkToDir) ? "dir" : "file";
+}
 
-  const keep = new Array<boolean>(rows.length).fill(false);
-  let shallowestKept = -1;
-
-  for (let i = rows.length - 1; i >= 0; i--) {
-    const row = rows[i];
-    const name =
-      row.kind === "entry" ? row.entry.name : row.kind === "worktree" ? row.wt.name : "worktrees";
-
-    if (name.toLowerCase().includes(q)) {
-      keep[i] = true;
-      shallowestKept = shallowestKept < 0 ? row.depth : Math.min(shallowestKept, row.depth);
-    } else if (shallowestKept >= 0 && row.depth < shallowestKept) {
-      keep[i] = true;
-      shallowestKept = row.depth;
-    }
+/** Search results are flat and ranked; the normal list remains a navigable tree. */
+function searchRow(row: Row): SearchRecord<Row>[] {
+  if (row.kind === "wt-group") return [];
+  const value: Row = { ...row, depth: 0, expanded: false };
+  if (row.kind === "entry") {
+    return [prepareSearch<Row>({ value, name: row.entry.name, path: row.entry.path, kind: entryKind(row.entry) })];
   }
-
-  return rows.filter((_, i) => keep[i]);
+  return [prepareSearch<Row>({ value, name: row.wt.name, path: row.wt.path, kind: "worktree" })];
 }
