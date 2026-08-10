@@ -467,6 +467,28 @@ pub async fn read_text(
     if let Some((device, remote_path)) = peers::parse_remote_path(&path) {
         return state.peers.read_remote_text(&device, &remote_path, max_bytes);
     }
+    let cap = max_bytes.clamp(1024, 4 * 1024 * 1024);
+    // A file on a phone has no `stat` and no `open`, so the head arrives through
+    // the same bounded read the previews use — and over a cable, on the blocking
+    // pool rather than in front of the async executor.
+    #[cfg(not(target_os = "android"))]
+    if mtp::path::parse(&path).is_some() {
+        let usb = state.usb.clone();
+        return tauri::async_runtime::spawn_blocking(move || {
+            let buf = usb.read_range(&path, 0, cap as u32)?;
+            let size = match usb.meta(&path) {
+                Some((size, _)) => size,
+                // No listing has covered this path, so its size is unknown and
+                // the read is the only evidence there is: a buffer filled to the
+                // cap means the file carries on past what we can show.
+                None if buf.len() >= cap => buf.len() as u64 + 1,
+                None => buf.len() as u64,
+            };
+            Ok(text_head(&buf, size))
+        })
+        .await
+        .map_err(|e| format!("read task failed: {e}"))?;
+    }
     tauri::async_runtime::spawn_blocking(move || {
         use std::io::Read;
 
@@ -476,7 +498,6 @@ pub async fn read_text(
             return Err("that is a folder".into());
         }
 
-        let cap = max_bytes.clamp(1024, 4 * 1024 * 1024);
         // `take` + `read_to_end` rather than one `read`: a single read is
         // allowed to come back short, which would silently cut the preview.
         let mut buf = Vec::with_capacity(cap.min(meta.len() as usize + 1));
@@ -484,35 +505,40 @@ pub async fn read_text(
         f.take(cap as u64)
             .read_to_end(&mut buf)
             .map_err(|e| e.to_string())?;
-        let n = buf.len();
 
-        if buf.contains(&0) {
-            return Ok(TextHead {
-                text: String::new(),
-                truncated: false,
-                bytes: meta.len(),
-                lines: 0,
-                binary: true,
-            });
-        }
-
-        // Trim back to the last whole character, so a multi-byte sequence split
-        // by the read boundary is dropped rather than mangled.
-        let text = match std::str::from_utf8(&buf) {
-            Ok(s) => s.to_string(),
-            Err(e) => String::from_utf8_lossy(&buf[..e.valid_up_to()]).into_owned(),
-        };
-
-        Ok(TextHead {
-            lines: text.lines().count() as u32,
-            truncated: (n as u64) < meta.len(),
-            bytes: meta.len(),
-            binary: false,
-            text,
-        })
+        Ok(text_head(&buf, meta.len()))
     })
     .await
     .map_err(|e| format!("read task failed: {e}"))?
+}
+
+/// Describe the head we read, against `size` — the length of the whole file,
+/// which is what lets the reader say how much it isn't showing.
+fn text_head(buf: &[u8], size: u64) -> TextHead {
+    if buf.contains(&0) {
+        return TextHead {
+            text: String::new(),
+            truncated: false,
+            bytes: size,
+            lines: 0,
+            binary: true,
+        };
+    }
+
+    // Trim back to the last whole character, so a multi-byte sequence split
+    // by the read boundary is dropped rather than mangled.
+    let text = match std::str::from_utf8(buf) {
+        Ok(s) => s.to_string(),
+        Err(e) => String::from_utf8_lossy(&buf[..e.valid_up_to()]).into_owned(),
+    };
+
+    TextHead {
+        lines: text.lines().count() as u32,
+        truncated: (buf.len() as u64) < size,
+        bytes: size,
+        binary: false,
+        text,
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -745,6 +771,7 @@ pub fn write_text_file(
 ) -> Result<(), String> {
     use std::io::Write;
 
+    local_only(&path)?;
     let target = PathBuf::from(&path);
     let meta = std::fs::metadata(&target).map_err(|e| e.to_string())?;
     if !meta.is_file() {
@@ -1084,6 +1111,37 @@ mod tests {
             local_only("fiddler://abc123/Documents"),
             Err("Fiddler cannot change files on a nearby device yet".into())
         );
+    }
+
+    #[test]
+    fn a_head_is_measured_against_the_whole_file() {
+        // The size comes from a `stat` locally and from the listing on a device,
+        // and it is the only thing that can say the preview stops early.
+        let head = text_head(b"hello", 5);
+        assert!(!head.truncated);
+        assert_eq!(head.bytes, 5);
+        assert_eq!(head.lines, 1);
+
+        let head = text_head(b"hello", 5000);
+        assert!(head.truncated);
+        assert_eq!(head.bytes, 5000);
+    }
+
+    #[test]
+    fn a_head_cut_mid_character_drops_the_fragment() {
+        // "é" is two bytes; a read that stops between them must not reach the
+        // reader as a replacement glyph.
+        let head = text_head("caf\u{e9}".as_bytes().split_last().unwrap().1, 5);
+        assert_eq!(head.text, "caf");
+        assert!(!head.binary);
+    }
+
+    #[test]
+    fn an_embedded_nul_makes_it_binary_rather_than_garbled_text() {
+        let head = text_head(b"\x89PNG\r\n\x1a\n\0\0", 4096);
+        assert!(head.binary);
+        assert!(head.text.is_empty());
+        assert_eq!(head.bytes, 4096);
     }
 
     #[test]
