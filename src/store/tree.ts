@@ -39,14 +39,35 @@ type Listener = () => void;
 const wtGroupId = (repoRoot: string) => ` wt:${repoRoot}`;
 const wtRowId = (repoRoot: string, path: string) => ` wt:${repoRoot} ${path}`;
 
+/** The view preferences the store owns, which is exactly the set that survives
+ * a quit. Passed in rather than read here so the store stays ignorant of where
+ * they are kept — see `session.ts`. */
+export interface ViewPrefs {
+  showHidden: boolean;
+  sortKey: SortKey;
+  sortAsc: boolean;
+  view: ViewMode;
+  iconSize: number;
+  previewOpen: boolean;
+}
+
 export class TreeStore {
   path = "";
-  showHidden = false;
-  sortKey: SortKey = "name";
-  sortAsc = true;
-  view: ViewMode = "icons";
-  iconSize = 112;
-  previewOpen = false;
+  showHidden: boolean;
+  sortKey: SortKey;
+  sortAsc: boolean;
+  view: ViewMode;
+  iconSize: number;
+  previewOpen: boolean;
+
+  constructor(prefs: ViewPrefs) {
+    this.showHidden = prefs.showHidden;
+    this.sortKey = prefs.sortKey;
+    this.sortAsc = prefs.sortAsc;
+    this.view = prefs.view;
+    this.iconSize = prefs.iconSize;
+    this.previewOpen = prefs.previewOpen;
+  }
 
   private history: string[] = [];
   private historyAt = -1;

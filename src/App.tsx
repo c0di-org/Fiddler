@@ -17,10 +17,11 @@ import { GridIcon } from "./components/icons";
 import { describeItems, type DragItems, type DropVerb } from "./drag";
 import { addFavorite, loadFavorites, moveFavorite, saveFavorites } from "./favorites";
 import { invalidate as peekChanged, setShowHidden as setPeekHidden } from "./folder-peek";
-import { formatSize } from "./format";
+import { formatSize, tildify } from "./format";
 import * as ipc from "./ipc";
 import { locationCaps } from "./location";
 import { caps, permissionHelp } from "./platform";
+import { loadSession, restorable, saveSession } from "./session";
 import { parseShortcut } from "./preview/link";
 import { routeOf } from "./preview/route";
 import { contentTerms, prepareSearch, search, type SearchKind, type SearchRecord } from "./search";
@@ -29,7 +30,9 @@ import { invert, remember, take as takeUndo, undoStore } from "./undo";
 import { applyTint, hasSystemAccent, loadTint, saveTint, watchTint, type Tint } from "./tint";
 import type { ContentSearch, Entry, Favorite, NearbyEntry, NearbySearch, PairRequest, PairingInfo, PeerDevice, Place, UsbDevice, WorktreeInfo } from "./types";
 
-const store = new TreeStore();
+/** Read once, at module load, because the store is built from it. */
+const session = loadSession();
+const store = new TreeStore(session);
 
 /** How long a type-to-jump buffer stays alive between keystrokes. */
 const TYPE_AHEAD_MS = 900;
@@ -104,6 +107,12 @@ export default function App() {
   const [systemTint, setSystemTint] = useState(false);
   const [editor, setEditor] = useState<EditorState | null>(null);
   const [dropping, setDropping] = useState(false);
+  /** Why the remembered folder couldn't be reopened. Holds the status bar until
+   * the next deliberate move, because a silent fallback to the default reads as
+   * the preference having been ignored. */
+  const [restoreNote, setRestoreNote] = useState<string | null>(null);
+  /** The most recent folder worth reopening — see `restorable`. */
+  const lastFolder = useRef(session.path);
   const anchorRef = useRef<string | null>(null);
   const typeAhead = useRef({ buffer: "", at: 0 });
   const editorActive = useRef(false);
@@ -132,13 +141,51 @@ export default function App() {
       const ps = await ipc.sidebarPlaces();
       if (cancelled) return;
       setPlaces(ps);
-      const start = ps.find((p) => p.icon === "code") ?? ps[0];
-      if (start) await store.navigate(start.path);
+      const usual = ps.find((p) => p.icon === "code") ?? ps[0];
+      let start = usual?.path ?? "";
+
+      // Reopening where you left off, but not blindly: the folder may have been
+      // renamed, deleted, or been on a volume that isn't mounted any more. One
+      // cheap probe first, so a folder that has gone never becomes the first
+      // screen — a listing error there reads as Fiddler being broken.
+      //
+      // A folder that exists but can't be read is deliberately *not* treated as
+      // a failure: it opens, and the empty state already says which permission
+      // to grant and where. Falling back would hide a fixable problem.
+      if (session.path) {
+        try {
+          await ipc.inspect(session.path);
+          start = session.path;
+        } catch (error) {
+          const home = ps.find((p) => p.icon === "home")?.path ?? "";
+          setRestoreNote(`Couldn’t reopen ${tildify(session.path, home)} — ${reasonFor(error, session.path)}`);
+        }
+      }
+      if (cancelled) return;
+      if (start) await store.navigate(start);
     })();
     return () => {
       cancelled = true;
     };
   }, []);
+
+  // Six view preferences and the folder, written whenever any of them moves.
+  // `useSyncExternalStore` above means a store change has already re-rendered
+  // us, so reading the fields as dependencies is enough to catch every change.
+  useEffect(() => {
+    // Standing in a device folder shouldn't wipe the folder we'd otherwise
+    // reopen, so an unrestorable path leaves the last good one in place.
+    if (restorable(store.path)) lastFolder.current = store.path;
+    saveSession({
+      view: store.view,
+      sortKey: store.sortKey,
+      sortAsc: store.sortAsc,
+      iconSize: store.iconSize,
+      showHidden: store.showHidden,
+      previewOpen: store.previewOpen,
+      path: lastFolder.current,
+    });
+  }, [store.view, store.sortKey, store.sortAsc, store.iconSize, store.showHidden, store.previewOpen, store.path]);
 
   // Broadcast discovery is intentionally ephemeral: polling keeps the sidebar
   // honest when a phone sleeps or leaves Wi-Fi without adding another event pipe.
@@ -463,6 +510,7 @@ export default function App() {
     setSelection(new Set());
     setFilter("");
     setQuickLook(false);
+    setRestoreNote(null);
     await store.navigate(path);
   }, []);
 
@@ -735,6 +783,9 @@ export default function App() {
   /** Touch opens immediately; keyboard and pointer selection keep Finder semantics. */
   const select = useCallback(
     (id: string, e: React.MouseEvent, touch = false) => {
+      // The status bar describes the selection, so it can't go on holding a
+      // note about the launch once there is a selection to describe.
+      setRestoreNote(null);
       if (touch && !e.metaKey && !e.ctrlKey && !e.shiftKey) {
         const target = targets.find((item) => item.id === id);
         if (target) {
@@ -1277,6 +1328,9 @@ export default function App() {
   }, [store.listing, searching, localSearchEmpty, nearbyBusy, contentBusy, nearbyResult]);
 
   const statusText = useMemo(() => {
+    // Outranks the count: a folder that couldn't be reopened is the one thing
+    // about this window that the person didn't ask for and needs to know.
+    if (restoreNote) return restoreNote;
     if (usingNearby) {
       return `${targets.length} nearby item${targets.length === 1 ? "" : "s"} — within two levels`;
     }
@@ -1296,7 +1350,7 @@ export default function App() {
     }
     if (selected.length > 1) return `${selected.length} of ${targets.length} selected`;
     return `${targets.length} item${targets.length === 1 ? "" : "s"}`;
-  }, [usingNearby, targets.length, localSearchEmpty, nearbyBusy, contentBusy, selected, selectedDirectory, selectedDirCount, contentEntries.length]);
+  }, [restoreNote, usingNearby, targets.length, localSearchEmpty, nearbyBusy, contentBusy, selected, selectedDirectory, selectedDirCount, contentEntries.length]);
 
   return (
     <div
@@ -1490,6 +1544,19 @@ export default function App() {
       )}
     </div>
   );
+}
+
+/** Why an operation on `path` failed, without naming the path a second time.
+ *
+ * The two backends differ here: Rust hands back a bare `No such file or
+ * directory`, while the browser's virtual filesystem includes the path it was
+ * asked about. A sentence that names the folder is doing the naming already. */
+function reasonFor(error: unknown, path: string): string {
+  return String(error)
+    .replace(/^Error:\s*/, "")
+    .replace(path, "")
+    .replace(/[:\s]+$/, "")
+    .trim();
 }
 
 /** Wait, for a poll that is deliberately paced rather than hammered. */

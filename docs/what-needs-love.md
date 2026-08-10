@@ -43,20 +43,25 @@ redo. Both were deliberate — a new folder is created straight into a rename, s
 undoing it means reasoning about two stacked entries for one gesture, and redo
 doubles the state for a case that comes up far less often than ⌘Z does.
 
-### The session doesn't survive a quit
+### The session survives a quit now
 
-View mode, sort key and direction, icon size, show-hidden and the preview pane
-all live as plain fields on `TreeStore` and reset on every launch: icon view,
-112 px, `~/Developer`. Favorites and the accent already persist, so the machinery
-and the taste for it are both there.
+`session.ts` persists the six view preferences and the folder you were last in,
+in `localStorage` next to favourites, the accent and the list's columns. Every
+field is validated on the way back in, because the stored value comes from a
+previous version of Fiddler as often as from this one.
 
-The straightforward part is the view state — it's five fields and a
-`localStorage` write next to the existing `saveFavorites` effect. The part
-needing a decision is the last folder: restoring it is what people expect, but
-it can be missing, unreadable, or on an unmounted volume by the time it's
-restored, and falling back silently to `~/Developer` looks like the setting was
-ignored. Suggest: restore it, and if the listing errors, fall back *and say so*
-in the status bar.
+Two decisions worth knowing about. A device path is never remembered — `mtp://`
+and `fiddler://` only exist while the cable is in or the other machine is awake,
+so standing in one at quit leaves the last real folder in place instead. And a
+folder that has *gone* is separated from one that can't be *read*: the remembered
+path gets one cheap `inspect` first, and a failure falls back to the usual
+starting place with the reason in the status bar, while a folder that exists but
+is unreadable simply opens, because its empty state already names the permission
+to grant. Falling back there would hide something fixable.
+
+What's not restored: back/forward history, and which folders were twisted open
+in list view. Both were deliberate — expanding a saved subtree means re-listing
+every level on launch, for continuity nobody has asked for.
 
 ### The desktop build opens text files in its own editor
 
