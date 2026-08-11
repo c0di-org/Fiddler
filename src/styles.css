@@ -1703,11 +1703,11 @@ body.column-resizing * {
   text-align: center;
 }
 
-/* ----------------------------------------------------------- copy progress */
+/* ------------------------------------------------------- transfer progress */
 
 /* Takes the middle track the count usually holds, so the bar arrives without
    the two things either side of it moving. */
-.status-copy {
+.status-transfer {
   grid-column: 2;
   display: flex;
   align-items: center;
@@ -1715,14 +1715,14 @@ body.column-resizing * {
   min-width: 0;
 }
 
-.status-copy .status-text {
+.status-transfer .status-text {
   grid-column: auto;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
 }
 
-.copy-bar {
+.transfer-bar {
   flex: 0 0 auto;
   width: 84px;
   height: 4px;
@@ -1731,7 +1731,7 @@ body.column-resizing * {
   overflow: hidden;
 }
 
-.copy-bar i {
+.transfer-bar i {
   display: block;
   height: 100%;
   background: var(--accent);
@@ -1740,11 +1740,11 @@ body.column-resizing * {
 
 /* Nothing has been counted yet, so the bar says "something is happening" and
    declines to say how much of it is left. */
-.copy-bar i.unknown {
+.transfer-bar i.unknown {
   opacity: 0.35;
 }
 
-.copy-cancel {
+.transfer-cancel {
   flex: 0 0 auto;
   padding: 2px 9px;
   border: 1px solid var(--hair);
@@ -1755,12 +1755,12 @@ body.column-resizing * {
   cursor: default;
 }
 
-.copy-cancel:hover {
+.transfer-cancel:hover {
   background: var(--fill-strong);
   color: var(--fg);
 }
 
-.copy-cancel:focus-visible {
+.transfer-cancel:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
 }

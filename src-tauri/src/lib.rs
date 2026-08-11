@@ -1,7 +1,7 @@
 mod apk;
 mod commands;
 mod content_search;
-mod copy;
+mod transfer;
 mod fs_scan;
 mod git;
 mod model;
@@ -54,7 +54,7 @@ pub fn run() {
                 peers,
                 #[cfg(not(target_os = "android"))]
                 usb,
-                copies: Default::default(),
+                transfers: Default::default(),
             });
             Ok(())
         })
@@ -94,7 +94,7 @@ pub fn run() {
             commands::write_text_file,
             commands::rename_path,
             commands::copy_paths,
-            commands::cancel_copy,
+            commands::cancel_transfer,
             commands::move_paths,
             commands::trash_paths,
             commands::restore_trashed,

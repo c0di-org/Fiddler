@@ -9,7 +9,6 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
 
 use crate::content_search::{self, ContentSearch};
-use crate::copy::{self, Stopped};
 use crate::fs_scan::{self, ScanOpts};
 use crate::git::status::RepoStatus;
 use crate::git::{self, GitCache};
@@ -19,6 +18,7 @@ use crate::mtp::{self, MtpService, UsbDevice};
 use crate::nearby::{self, NearbySearch};
 use crate::peers::{self, NearbyAccess, PairOutcome, PairRequest, PairingInfo, PeerDevice, PeerService};
 use crate::thumb_pool::{ThumbPool, ThumbReady, ThumbReq};
+use crate::transfer::{self, Stopped};
 use crate::watcher::FsWatcher;
 
 pub struct AppState {
@@ -28,41 +28,104 @@ pub struct AppState {
     pub peers: Arc<PeerService>,
     #[cfg(not(target_os = "android"))]
     pub usb: Arc<MtpService>,
-    /// The cancel flag of every copy currently running, by the job number the
-    /// renderer made up for it. Keyed rather than singular because a paste and
-    /// a drop can be in flight at once, and Cancel has to mean the one whose
+    /// The cancel flag of every transfer currently running, by the job number
+    /// the renderer made up for it. Keyed rather than singular because a paste
+    /// and a drop can be in flight at once, and Cancel has to mean the one whose
     /// button was pressed.
-    pub copies: Mutex<HashMap<u64, Arc<AtomicBool>>>,
+    pub transfers: Mutex<HashMap<u64, Arc<AtomicBool>>>,
 }
 
-/// How often a running copy is allowed to say so. A thousand files a second is
-/// entirely normal on a clone, and a thousand IPC messages a second is not.
-const COPY_REPORT: Duration = Duration::from_millis(100);
+/// How often a running transfer is allowed to say so. A thousand files a second
+/// is entirely normal on a clone, and a thousand IPC messages a second is not.
+const TRANSFER_REPORT: Duration = Duration::from_millis(100);
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct CopyProgress {
+pub struct TransferProgress {
     pub job: u64,
+    /// The word the status bar leads with: "Copying" or "Moving".
+    pub verb: String,
     pub done_items: u64,
     pub total_items: u64,
     pub done_bytes: u64,
     pub total_bytes: u64,
     pub name: String,
+    pub by_bytes: bool,
 }
 
 /// A cancel is not a failure, and the renderer has to be able to tell them
-/// apart: one wants an apology in the status bar, the other wants nothing at
-/// all. `paths` is empty when `cancelled`, because the copy took itself back.
+/// apart: one is worth saying out loud, the other is the person getting exactly
+/// what they asked for. `paths` is empty when `cancelled`, because a stopped
+/// transfer takes back everything it wrote.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct CopyOutcome {
+pub struct TransferOutcome {
     pub paths: Vec<String>,
     pub cancelled: bool,
 }
 
-impl CopyOutcome {
+impl TransferOutcome {
     fn done(paths: Vec<String>) -> Self {
-        CopyOutcome { paths, cancelled: false }
+        TransferOutcome { paths, cancelled: false }
+    }
+
+    fn cancelled() -> Self {
+        TransferOutcome { paths: Vec::new(), cancelled: true }
+    }
+}
+
+/// Survey a plan, carry it out, and narrate it — the part a copy and a
+/// cross-volume move do identically. Both arrive here having already settled
+/// every target name, which is what the rollback needs and what lets this stay
+/// ignorant of which verb it is serving.
+fn carry(
+    app: &AppHandle,
+    job: u64,
+    verb: &str,
+    plan: &[(PathBuf, PathBuf)],
+    cancel: &AtomicBool,
+) -> Result<TransferOutcome, String> {
+    let say = |progress: &transfer::Progress| {
+        let _ = app.emit(
+            "fiddler:transfer",
+            TransferProgress {
+                job,
+                verb: verb.to_string(),
+                done_items: progress.done_items,
+                total_items: progress.total_items,
+                done_bytes: progress.done_bytes,
+                total_bytes: progress.total_bytes,
+                name: progress.name.clone(),
+                by_bytes: progress.by_bytes,
+            },
+        );
+    };
+
+    // Said before the survey as well as during the transfer: a folder with a
+    // hundred thousand files in it takes a moment just to count, and silence
+    // there looks exactly like nothing having happened.
+    say(&transfer::Progress {
+        by_bytes: transfer::crosses_volumes(plan),
+        ..transfer::Progress::default()
+    });
+
+    let sources: Vec<PathBuf> = plan.iter().map(|(source, _)| source.clone()).collect();
+    let totals = match transfer::survey(&sources, cancel) {
+        Ok(totals) => totals,
+        Err(Stopped::Cancelled) => return Ok(TransferOutcome::cancelled()),
+        Err(Stopped::Failed(message)) => return Err(message),
+    };
+
+    let mut last = Instant::now();
+    match transfer::run(plan, totals, cancel, &mut |progress| {
+        if last.elapsed() >= TRANSFER_REPORT {
+            last = Instant::now();
+            say(progress);
+        }
+    }) {
+        Ok(landed) => Ok(TransferOutcome::done(landed)),
+        Err(Stopped::Cancelled) => Ok(TransferOutcome::cancelled()),
+        Err(Stopped::Failed(message)) => Err(message),
     }
 }
 
@@ -955,12 +1018,12 @@ pub fn rename_path(
     Ok(dst.to_string_lossy().into_owned())
 }
 
-/// Stop a running copy. Harmless if the job has already finished or was never
-/// there — Cancel and the last file landing race by nature, and losing that race
-/// is not something to report.
+/// Stop a running transfer. Harmless if the job has already finished or was
+/// never there — Cancel and the last file landing race by nature, and losing
+/// that race is not something to report.
 #[tauri::command]
-pub fn cancel_copy(state: State<'_, AppState>, job: u64) {
-    if let Some(flag) = state.copies.lock().unwrap().get(&job) {
+pub fn cancel_transfer(state: State<'_, AppState>, job: u64) {
+    if let Some(flag) = state.transfers.lock().unwrap().get(&job) {
         flag.store(true, std::sync::atomic::Ordering::Relaxed);
     }
 }
@@ -979,7 +1042,7 @@ pub async fn copy_paths(
     paths: Vec<String>,
     destination: String,
     job: u64,
-) -> Result<CopyOutcome, String> {
+) -> Result<TransferOutcome, String> {
     let cache = state.cache.clone();
     let watcher = state.watcher.clone();
     let peer_service = state.peers.clone();
@@ -987,7 +1050,7 @@ pub async fn copy_paths(
     let usb = state.usb.clone();
 
     let cancel = Arc::new(AtomicBool::new(false));
-    state.copies.lock().unwrap().insert(job, cancel.clone());
+    state.transfers.lock().unwrap().insert(job, cancel.clone());
 
     // A copy is unbounded work — a folder of photos on disk, a video across a
     // USB cable — so none of it runs on the thread that draws the window.
@@ -997,7 +1060,7 @@ pub async fn copy_paths(
         // folder" for a perfectly good folder on a device.
         #[cfg(not(target_os = "android"))]
         if mtp::path::parse(&destination).is_some() {
-            return copy_onto_device(&usb, &paths, &destination).map(CopyOutcome::done);
+            return copy_onto_device(&usb, &paths, &destination).map(TransferOutcome::done);
         }
         if peers::parse_remote_path(&destination).is_some() || paths.iter().any(|path| peers::parse_remote_path(path).is_some()) {
             if peers::parse_remote_path(&destination).is_some() { return Err("Pasting onto Android is not ready yet".into()); }
@@ -1016,7 +1079,7 @@ pub async fn copy_paths(
             }
             cache.forget_discovery_under(&destination);
             watcher.poke(&destination);
-            return Ok(CopyOutcome::done(copied));
+            return Ok(TransferOutcome::done(copied));
         }
         // Reading off a device is bounded byte-range work the copy path doesn't
         // do yet. Say that, rather than letting a `mtp://` string reach the
@@ -1046,54 +1109,18 @@ pub async fn copy_paths(
             plan.push((source, target));
         }
 
-        // Said before the survey as well as during the copy: a folder with a
-        // hundred thousand files in it takes a moment just to count, and
-        // silence there looks exactly like nothing having happened.
-        let say = |app: &AppHandle, progress: &copy::Progress| {
-            let _ = app.emit(
-                "fiddler:copy-progress",
-                CopyProgress {
-                    job,
-                    done_items: progress.done_items,
-                    total_items: progress.total_items,
-                    done_bytes: progress.done_bytes,
-                    total_bytes: progress.total_bytes,
-                    name: progress.name.clone(),
-                },
-            );
-        };
-        say(&app, &copy::Progress::default());
-
-        let sources: Vec<PathBuf> = plan.iter().map(|(source, _)| source.clone()).collect();
-        let totals = match copy::survey(&sources, &cancel) {
-            Ok(totals) => totals,
-            Err(Stopped::Cancelled) => return Ok(CopyOutcome { paths: Vec::new(), cancelled: true }),
-            Err(Stopped::Failed(message)) => return Err(message),
-        };
-
-        let mut last = Instant::now();
-        let result = copy::run(&plan, totals, &cancel, &mut |progress| {
-            if last.elapsed() >= COPY_REPORT {
-                last = Instant::now();
-                say(&app, progress);
-            }
-        });
+        let result = carry(&app, job, "Copying", &plan, &cancel);
 
         // Either way the folder changed: a rollback removes what a listing may
         // already have picked up, so the refresh is owed in both directions.
         cache.forget_discovery_under(&destination);
         watcher.poke(&destination);
-
-        match result {
-            Ok(copied) => Ok(CopyOutcome::done(copied)),
-            Err(Stopped::Cancelled) => Ok(CopyOutcome { paths: Vec::new(), cancelled: true }),
-            Err(Stopped::Failed(message)) => Err(message),
-        }
+        result
     })
     .await
     .map_err(|e| e.to_string());
 
-    state.copies.lock().unwrap().remove(&job);
+    state.transfers.lock().unwrap().remove(&job);
     outcome?
 }
 
@@ -1109,16 +1136,21 @@ pub async fn copy_paths(
 /// stopping halfway with three items in their new home and two still behind.
 #[tauri::command]
 pub async fn move_paths(
+    app: AppHandle,
     state: State<'_, AppState>,
     paths: Vec<String>,
     destination: String,
-) -> Result<Vec<String>, String> {
+    job: u64,
+) -> Result<TransferOutcome, String> {
     let cache = state.cache.clone();
     let watcher = state.watcher.clone();
 
+    let cancel = Arc::new(AtomicBool::new(false));
+    state.transfers.lock().unwrap().insert(job, cancel.clone());
+
     // A move can be a rename (instant) or a whole copy-and-delete across
     // volumes (unbounded), and nothing tells the two apart until it is tried.
-    tauri::async_runtime::spawn_blocking(move || {
+    let outcome = tauri::async_runtime::spawn_blocking(move || {
         local_only(&destination)?;
         for path in &paths {
             local_only(path)?;
@@ -1128,55 +1160,105 @@ pub async fn move_paths(
             return Err("Move destination is not a folder".into());
         }
 
-        // Two passes: work out every target and refuse the whole batch on the
-        // first problem, then move. A partial move is the one outcome a person
-        // can't reason about afterwards.
-        let mut plan = Vec::new();
-        for path in &paths {
-            let source = PathBuf::from(path);
-            let name = source
-                .file_name()
-                .and_then(|name| name.to_str())
-                .ok_or("Invalid file name")?
-                .to_owned();
-            if contains(&source, &destination) {
-                return Err(format!("“{name}” can’t be moved into itself"));
-            }
-            if source.parent() == Some(destination.as_path()) {
-                return Err(format!("“{name}” is already there"));
-            }
-            let target = destination.join(&name);
-            if occupied(&target, &source) {
-                return Err(format!("“{name}” already exists there"));
-            }
-            plan.push((source, target, name));
-        }
+        let plan = move_plan(&paths, &destination)?;
 
-        let mut moved = Vec::new();
         let mut touched: Vec<PathBuf> = vec![destination.clone()];
-        for (source, target, name) in plan {
-            move_one(&source, &target).map_err(|e| format!("Couldn’t move “{name}”: {e}"))?;
+        for (source, _, _) in &plan {
             if let Some(parent) = source.parent() {
                 if !touched.iter().any(|seen| seen == parent) {
                     touched.push(parent.to_path_buf());
                 }
             }
-            moved.push(target.to_string_lossy().into_owned());
         }
+
+        // Within one volume a move is an entry rewrite: instant, nothing to
+        // watch and nothing to stop. Only a move that has to carry the bytes
+        // goes through the transfer, and it is exactly the one worth watching.
+        let pairs: Vec<(PathBuf, PathBuf)> =
+            plan.iter().map(|(source, target, _)| (source.clone(), target.clone())).collect();
+
+        let result = if transfer::crosses_volumes(&pairs) {
+            match carry(&app, job, "Moving", &pairs, &cancel)? {
+                outcome if outcome.cancelled => Ok(outcome),
+                outcome => {
+                    // The originals go only once every copy is whole. Until
+                    // then the source is the only copy there is, which is what
+                    // lets a cancelled move leave everything where it was.
+                    for (source, _, name) in &plan {
+                        let gone = if source.is_dir() {
+                            std::fs::remove_dir_all(source)
+                        } else {
+                            std::fs::remove_file(source)
+                        };
+                        // The bytes are safely at the far end, so this is a
+                        // leftover rather than a loss — but saying nothing
+                        // would leave the item looking like it is in two
+                        // places for no stated reason.
+                        gone.map_err(|e| format!("“{name}” was copied, but the original could not be removed: {e}"))?;
+                    }
+                    Ok(outcome)
+                }
+            }
+        } else {
+            let mut moved = Vec::new();
+            for (source, target, name) in &plan {
+                move_one(source, target).map_err(|e| format!("Couldn’t move “{name}”: {e}"))?;
+                moved.push(target.to_string_lossy().into_owned());
+            }
+            Ok(TransferOutcome::done(moved))
+        };
 
         for dir in touched {
             cache.forget_discovery_under(&dir);
             watcher.poke(&dir);
         }
-        Ok(moved)
+        result
     })
     .await
-    .map_err(|e| e.to_string())?
+    .map_err(|e| e.to_string());
+
+    state.transfers.lock().unwrap().remove(&job);
+    outcome?
 }
 
 /// `EXDEV`. The one rename failure that isn't a failure: the two paths are on
 /// different filesystems, so the bytes have to travel rather than the entry.
 const CROSSES_DEVICES: i32 = 18;
+
+/// Where every item in a move is going, worked out before the first one goes.
+///
+/// Two passes rather than one because a partial move is the outcome nobody can
+/// reason about afterwards: better to refuse the whole batch on the first
+/// problem than to leave three items rehoused and two behind.
+fn move_plan(paths: &[String], destination: &Path) -> Result<Vec<(PathBuf, PathBuf, String)>, String> {
+    let mut plan = Vec::new();
+    let mut claimed: HashSet<PathBuf> = HashSet::new();
+    for path in paths {
+        let source = PathBuf::from(path);
+        let name = source
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or("Invalid file name")?
+            .to_owned();
+        if contains(&source, destination) {
+            return Err(format!("“{name}” can’t be moved into itself"));
+        }
+        if source.parent() == Some(destination) {
+            return Err(format!("“{name}” is already there"));
+        }
+        let target = destination.join(&name);
+        // `occupied` asks the filesystem, which only knows what is already
+        // there — and two items dragged out of two folders can share a name
+        // while neither target exists yet. Unlike a paste, a move refuses
+        // instead of renaming around it: "notes copy.md" is not what a drag
+        // was asking for, and `rename` would overwrite without a word.
+        if occupied(&target, &source) || !claimed.insert(target.clone()) {
+            return Err(format!("“{name}” already exists there"));
+        }
+        plan.push((source, target, name));
+    }
+    Ok(plan)
+}
 
 fn move_one(source: &Path, target: &Path) -> Result<(), String> {
     match std::fs::rename(source, target) {
@@ -1551,6 +1633,34 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn two_items_of_the_same_name_cannot_both_be_moved_to_one_place() {
+        let dir = scratch("move-clash");
+        let a = dir.join("a");
+        let b = dir.join("b");
+        let into = dir.join("into");
+        std::fs::create_dir_all(&a).unwrap();
+        std::fs::create_dir_all(&b).unwrap();
+        std::fs::create_dir_all(&into).unwrap();
+        std::fs::write(a.join("notes.md"), b"from a").unwrap();
+        std::fs::write(b.join("notes.md"), b"from b").unwrap();
+
+        // Neither target exists when the plan is drawn up, so the filesystem
+        // has nothing to object to. Without the claimed set both would be
+        // planned as into/notes.md and the rename would take the first one
+        // out without saying so.
+        let sources = vec![
+            a.join("notes.md").to_string_lossy().into_owned(),
+            b.join("notes.md").to_string_lossy().into_owned(),
+        ];
+        let refused = move_plan(&sources, &into);
+        assert!(refused.is_err(), "two notes.md were planned onto one path");
+
+        // One at a time is still fine, which is what stops the guard from
+        // being a blanket refusal.
+        assert!(move_plan(&sources[..1], &into).is_ok());
     }
 
     #[test]

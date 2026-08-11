@@ -10,8 +10,6 @@ import { openPath } from "@tauri-apps/plugin-opener";
 
 import type {
   ContentSearch,
-  CopyOutcome,
-  CopyProgress,
   DirListing,
   EntryBatch,
   Inspect,
@@ -29,6 +27,8 @@ import type {
   TextHead,
   ThumbReady,
   ThumbReq,
+  TransferOutcome,
+  TransferProgress,
   Trashed,
   UsbDevice,
 } from "../types";
@@ -93,14 +93,14 @@ const backend: Backend = {
   renamePath: (path, newName) => invoke<string>("rename_path", { path, newName }),
 
   copyPaths: (paths, destination, job) =>
-    invoke<CopyOutcome>("copy_paths", { paths, destination, job }),
+    invoke<TransferOutcome>("copy_paths", { paths, destination, job }),
 
-  cancelCopy: (job) => invoke<void>("cancel_copy", { job }),
+  movePaths: (paths, destination, job) =>
+    invoke<TransferOutcome>("move_paths", { paths, destination, job }),
 
-  onCopyProgress: (fn) =>
-    listen<CopyProgress>("fiddler:copy-progress", (e) => fn(e.payload)),
+  cancelTransfer: (job) => invoke<void>("cancel_transfer", { job }),
 
-  movePaths: (paths, destination) => invoke<string[]>("move_paths", { paths, destination }),
+  onTransfer: (fn) => listen<TransferProgress>("fiddler:transfer", (e) => fn(e.payload)),
 
   trashPaths: (paths) => invoke<Trashed[]>("trash_paths", { paths }),
 

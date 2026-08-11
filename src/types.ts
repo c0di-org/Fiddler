@@ -263,25 +263,34 @@ export interface ThumbReady extends ThumbReq {
   src: string | null;
 }
 
-/** How far a copy has got. Both totals are zero until the survey that measures
- * the work has finished — a hundred thousand files take a moment just to count,
- * and the status bar says "Copying…" rather than nothing while that happens. */
-export interface CopyProgress {
-  /** The number the renderer made up for this copy, so Cancel names the right
-   * one when two are in flight. */
+/** How far a copy — or the kind of move that is really a copy — has got. Both
+ * totals are zero until the survey that measures the work has finished: a
+ * hundred thousand files take a moment just to count, and the status bar says
+ * so rather than sitting at nothing. */
+export interface TransferProgress {
+  /** The number the renderer made up for this transfer, so Cancel names the
+   * right one when two are in flight. */
   job: number;
+  /** The word to lead with: "Copying" or "Moving". */
+  verb: string;
   doneItems: number;
   totalItems: number;
   doneBytes: number;
   totalBytes: number;
-  /** What is being copied at this moment — the part a person actually reads. */
+  /** What is moving at this moment — the part a person actually reads. */
   name: string;
+  /** Which pair of numbers the bar should follow. Decided by the backend,
+   * because only it knows whether the bytes are really travelling: a clone
+   * costs time per file and none per byte, and a copy across volumes is the
+   * other way round. Following the wrong one gives a bar that lurches or one
+   * that stalls. */
+  byBytes: boolean;
 }
 
-/** `paths` is empty when `cancelled`, because a cancelled copy takes back
+/** `paths` is empty when `cancelled`, because a stopped transfer takes back
  * everything it wrote. Kept apart from a thrown error: one is a failure and the
- * other is the person getting what they asked for. */
-export interface CopyOutcome {
+ * other is the person getting exactly what they asked for. */
+export interface TransferOutcome {
   paths: string[];
   cancelled: boolean;
 }

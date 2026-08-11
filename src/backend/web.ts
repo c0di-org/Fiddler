@@ -7,7 +7,7 @@
  * `platform.ts`). */
 
 import { natural } from "../sort";
-import type { CopyProgress, Entry, PairingInfo, PdfMeta, RepoInfo } from "../types";
+import type { Entry, PairingInfo, PdfMeta, RepoInfo, TransferProgress } from "../types";
 import { canThumb } from "./web/render";
 import { nearbyEntries, searchContents } from "./web/search-fs";
 import { importDropped, initMounts, openFolder, places } from "./web/session";
@@ -41,13 +41,13 @@ function toEntry(node: vfs.Node, parent: string): Entry {
   };
 }
 
-// ----------------------------------------------------------------- copy
+// ------------------------------------------------------------- transfers
 
 /** The Rust build carries these in `AppState` and speaks to the renderer over
  * Tauri events; in a tab both ends are here, so they are two plain collections
  * rather than anything cleverer. */
-const copyJobs = new Map<number, { value: boolean }>();
-const copyWatchers = new Set<(progress: CopyProgress) => void>();
+const transferJobs = new Map<number, { value: boolean }>();
+const transferWatchers = new Set<(progress: TransferProgress) => void>();
 
 // ---------------------------------------------------------------- media
 
@@ -199,44 +199,60 @@ const backend: Backend = {
 
   async copyPaths(paths, destination, job) {
     const cancelled = { value: false };
-    copyJobs.set(job, cancelled);
+    transferJobs.set(job, cancelled);
     try {
       // Announced before the survey as well as during, because the survey is
       // itself a wait on a big enough tree.
-      let progress: CopyProgress = { job, doneItems: 0, totalItems: 0, doneBytes: 0, totalBytes: 0, name: "" };
-      copyWatchers.forEach((fn) => fn(progress));
+      //
+      // `byBytes` is false because every mount here is blobs in one tab: there
+      // is no volume to cross, so the count of files is what the wait is made
+      // of — the same answer the Rust side reaches for a clone.
+      let progress: TransferProgress = {
+        job,
+        verb: "Copying",
+        doneItems: 0,
+        totalItems: 0,
+        doneBytes: 0,
+        totalBytes: 0,
+        name: "",
+        byBytes: false,
+      };
+      transferWatchers.forEach((fn) => fn(progress));
       const totals = await vfs.surveyCopy(paths);
       progress = { ...progress, totalItems: totals.items, totalBytes: totals.bytes };
-      copyWatchers.forEach((fn) => fn(progress));
+      transferWatchers.forEach((fn) => fn(progress));
 
       return await vfs.copyInto(paths, destination, {
         cancelled: () => cancelled.value,
         report: (step) => {
           progress = { ...progress, ...step };
-          copyWatchers.forEach((fn) => fn(progress));
+          transferWatchers.forEach((fn) => fn(progress));
         },
       });
     } finally {
-      copyJobs.delete(job);
+      transferJobs.delete(job);
     }
   },
 
-  async cancelCopy(job) {
-    const flag = copyJobs.get(job);
+  async cancelTransfer(job) {
+    const flag = transferJobs.get(job);
     if (flag) flag.value = true;
   },
 
-  async onCopyProgress(fn) {
-    copyWatchers.add(fn);
-    return () => copyWatchers.delete(fn);
+  async onTransfer(fn) {
+    transferWatchers.add(fn);
+    return () => transferWatchers.delete(fn);
   },
 
+  // No progress and no cancel, for the same reason the Rust build stays quiet
+  // about a move within one volume: there is no second place for the bytes to
+  // travel to, so it is over before there is anything to report.
   async movePaths(paths, destination) {
     const moved = await vfs.moveInto(paths, destination);
     // The originals are gone, so anything cached against those paths is now
     // about a file that isn't there — the same reason trashing forgets them.
     for (const path of paths) invalidate(path);
-    return moved;
+    return { paths: moved, cancelled: false };
   },
 
   // A tab has nowhere to put a deleted file, so this really is a delete and

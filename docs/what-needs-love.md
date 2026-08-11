@@ -97,39 +97,60 @@ allowed, and nobody would know to grant it again.
 Withdrawing drops the remembered answer along with the token, so a device that
 asks again is a stranger putting a fresh card on screen.
 
-### Copying says how far it has got, and can be called off
+### A transfer says how far it has got, and can be called off
 
-The status bar holds a bar, what is being copied, how many of how many and how
-much of how much, and a Cancel button — in the middle track the item count
-usually has, so nothing moves when it appears. `copy.rs` is the engine and is
-where the decisions live.
+The status bar holds a bar, what is moving, how many of how many and how much of
+how much, and a Cancel button — in the middle track the item count usually has,
+so nothing shifts when it appears. `transfer.rs` is the engine, used by a paste,
+a drop, and the one kind of move that is really a copy.
 
-The one worth knowing: `std::fs::copy` was kept rather than replaced with a
-chunked loop. On APFS it lands on `fclonefileat`, so a same-volume copy of forty
-gigabytes is near-instant whatever the size, and a read/write loop would trade
-that away for progress nobody would live long enough to read. The loop is kept
-for the case that is genuinely slow — a large file arriving on a *different*
-volume, compared by `st_dev` — where there is no clone to be had and Cancel has
-to be able to land mid-file. Below 8 MB even a cross-volume file goes whole.
+`std::fs::copy` was kept rather than replaced with a chunked loop. On APFS it
+lands on `fclonefileat`, so a same-volume copy of forty gigabytes is near-instant
+whatever the size, and a read/write loop would trade that away for progress
+nobody would live long enough to read. The loop is kept for the case that is
+genuinely slow — a large file arriving on a *different* volume, compared by
+`st_dev` — where there is no clone to be had and Cancel has to be able to land
+mid-file. Below 8 MB even a cross-volume file goes whole.
 
-Cancel means cancelled, not stopped: everything the copy wrote is removed. That
-is safe precisely because `copy_name` invents every target a moment beforehand,
-so nothing being deleted existed before the copy did. The same rollback runs on
-a failure, which is what closes the other half of this entry — a five-item paste
-that failed on the fourth used to leave three copies, a half-built tree and no
-way to tell which was which.
+That same fact decides **what the bar counts**, which is not a matter of taste
+and was got wrong twice before it was got right. A clone costs a syscall per file
+and no time per byte, so within one volume the wait tracks the number of files
+and a byte bar lurches; across volumes every byte travels, so the wait tracks
+bytes and a file bar stalls through one big file. `by_bytes` is decided in the
+engine, where the answer is known, and carried out to the status bar rather than
+guessed at there. Both numbers are always in the text; only the bar has to pick.
 
-Two things this changed on the way. Every target is now planned before any bytes
-move, which the rollback needs — so `copy_name` had to be told what the batch has
-already claimed, or two files called `notes.md` from two folders would both be
-planned as `notes.md` and the second would land on the first. There is a test for
-that. And the work is surveyed before it starts, so the bar has a total; the tree
-is read twice and that is the price of a bar that means something.
+Cancel means cancelled, not stopped: everything the transfer wrote is removed.
+That is safe precisely because every target is a path invented a moment
+beforehand, so nothing being deleted existed before the transfer did — and in a
+move, the originals are never among them. The same rollback runs on a failure,
+which is what closes the other half of this entry: a five-item paste that failed
+on the fourth used to leave three copies, a half-built tree and no way to tell
+which was which.
 
-What's left: a cross-volume `move` is still a silent copy-and-delete, and so is
-an upload to a device over USB. Neither is hard now that the engine exists,
-though a cancelled move has a harder question behind it — the source is being
-deleted as it goes, so "take back what you wrote" means something different.
+A **cross-volume move** now goes through the same engine, and deletes its sources
+only once every copy is whole. Until then the source is the only copy there is,
+so a cancelled move leaves everything exactly where it was. A move within one
+volume is still a rename and never enters any of this — there is nothing to
+watch and nothing to stop.
+
+Cancelling says nothing. The status bar going quiet is the acknowledgement; a
+toast reading "cancelled" after you have just cancelled something is the app
+explaining your own decision back to you.
+
+Two things this changed on the way, both the same bug in two places. Targets are
+now planned before any bytes move, which the rollback needs — and that
+invalidates the "does it exist yet?" question both `copy_name` and the move's
+own planner were built on. Two files called `notes.md` from two folders would be
+planned onto one path, and the second would land on the first: a paste now
+renames around it, a move refuses, and there is a test for each. The move half
+of that was a pre-existing bug, not one this work introduced.
+
+The work is surveyed before it starts so the bar has a total. The tree is read
+twice and that is the price of a bar that means anything.
+
+What's left: an upload to a device over USB is still one toast and a wait. It
+runs through the MTP worker and its own cancel token rather than this engine.
 
 ## Accessibility
 
@@ -225,5 +246,5 @@ before this pass, `watcher.rs` had zero, `git/discover.rs` still does, and so
 does `store/tree.ts`, which is the navigation core. Not a crisis, but if a test
 is going to be written, write it there rather than adding a 23rd parser case.
 
-`copy.rs` arrived with seven, against a real temp filesystem rather than a
+`transfer.rs` arrived with nine, against a real temp filesystem rather than a
 fake one, which is the shape the rest of this list wants.

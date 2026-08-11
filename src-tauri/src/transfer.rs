@@ -1,4 +1,6 @@
-//! Copying, with a way to watch it and a way to stop it.
+//! Carrying bytes from one place to another, with a way to watch it and a way
+//! to stop it. Used by a paste, by a drop, and by the one kind of move that is
+//! not an entry rewrite — across volumes, where a move really is a copy.
 //!
 //! `std::fs::copy` is the right primitive and this does not replace it. On APFS
 //! it lands on `fclonefileat`, which makes a same-volume copy of forty
@@ -8,12 +10,19 @@
 //! a large file arriving on a *different* volume, where there is no clone to be
 //! had and every byte really does travel. `strategy` is where that is decided.
 //!
+//! That same fact decides what the progress bar should count, which is not a
+//! matter of taste. A clone costs a syscall per file and no time per byte, so on
+//! one volume the wait tracks the *number* of files and a byte bar would lurch;
+//! across volumes every byte travels, so the wait tracks *bytes* and a file bar
+//! would stall through one big file. `by_bytes` carries that answer out to the
+//! status bar rather than leaving it to guess.
+//!
 //! Cancelling is a flag rather than a killed thread, checked between files and,
 //! in the chunked path, between chunks. What makes it a cancel rather than a
-//! stop is the rollback: every target here is a path `copy_name` invented a
-//! moment ago, so removing them can't touch anything that was already there.
-//! Without that, pressing Cancel on a half-finished paste would leave a mess
-//! that only the person who pressed it could untangle.
+//! stop is the rollback: every target here is a path invented a moment ago by
+//! the caller, so removing them can't touch anything that was already there —
+//! and in a move, can't touch the originals, which is what lets a cancelled
+//! move leave everything exactly where it was.
 
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -27,8 +36,8 @@ const CHUNK: usize = 1 << 20;
 /// between two frames.
 const CHUNKED_MIN: u64 = 8 << 20;
 
-/// What the caller learns as the copy runs. Sizes are bytes; `name` is whatever
-/// is being copied at that moment, which is the part a person actually reads.
+/// What the caller learns as the transfer runs. Sizes are bytes; `name` is
+/// whatever is moving at that moment, which is the part a person actually reads.
 #[derive(Debug, Clone, Default)]
 pub struct Progress {
     pub done_items: u64,
@@ -36,6 +45,9 @@ pub struct Progress {
     pub done_bytes: u64,
     pub total_bytes: u64,
     pub name: String,
+    /// Which pair of numbers the bar should follow — see the module note. Both
+    /// are always reported; this only says which one is the honest one here.
+    pub by_bytes: bool,
 }
 
 /// Told apart from an error because the person asked for it: nothing went
@@ -104,26 +116,42 @@ fn walk(path: &Path, cancel: &AtomicBool, items: &mut u64, bytes: &mut u64) -> R
     Ok(())
 }
 
+/// Whether any pair in `plan` has to cross volumes, which is what makes the
+/// wait about bytes rather than about files. One crossing item is enough: it
+/// will dominate everything the clones do around it.
+pub fn crosses_volumes(plan: &[(PathBuf, PathBuf)]) -> bool {
+    plan.iter()
+        .any(|(source, target)| !same_volume(source, target.parent().unwrap_or(target)))
+}
+
 /// Copy `plan`'s pairs, reporting as it goes, and leave nothing behind if it
 /// doesn't finish. `plan` is `(source, target)`, and every target must be a
-/// path that does not yet exist — the rollback deletes them outright.
+/// path that does not yet exist — the rollback deletes them outright, and
+/// nothing else.
 pub fn run(
     plan: &[(PathBuf, PathBuf)],
     totals: (u64, u64),
     cancel: &AtomicBool,
     report: &mut dyn FnMut(&Progress),
 ) -> Result<Vec<String>, Stopped> {
+    // Asked once per top-level item rather than per file: a volume can't change
+    // under a transfer, and the answer decides every file below it.
+    let same: Vec<bool> = plan
+        .iter()
+        .map(|(source, target)| same_volume(source, target.parent().unwrap_or(target)))
+        .collect();
+
     let mut progress = Progress {
         total_items: totals.0,
         total_bytes: totals.1,
+        // Settled before the first file so the bar never changes its mind about
+        // what it is measuring half way along.
+        by_bytes: same.iter().any(|one| !one),
         ..Progress::default()
     };
     let mut done = Vec::new();
 
-    for (source, target) in plan {
-        // Asked once per top-level item rather than per file: a volume can't
-        // change under a copy, and the answer decides every file below it.
-        let same = same_volume(source, target.parent().unwrap_or(target));
+    for ((source, target), same) in plan.iter().zip(same) {
         match copy_tree(source, target, same, cancel, &mut progress, report) {
             Ok(()) => done.push(target.to_string_lossy().into_owned()),
             Err(stopped) => {
@@ -137,7 +165,7 @@ pub fn run(
     Ok(done)
 }
 
-/// Undo what this copy made. Failures are swallowed on purpose: this runs while
+/// Undo what this transfer made. Failures are swallowed on purpose: this runs while
 /// something has already gone wrong, and a second message about the cleanup
 /// would bury the first one about the cause.
 fn rollback(plan: &[(PathBuf, PathBuf)]) {
@@ -339,6 +367,47 @@ mod tests {
 
         assert!(matches!(result, Err(Stopped::Cancelled)));
         assert!(!dst.exists(), "a cancelled copy left {dst:?} behind");
+    }
+
+    #[test]
+    fn a_cancelled_transfer_never_touches_the_source() {
+        let dir = scratch("sources");
+        let src = dir.join("src");
+        tree(&src);
+        let dst = dir.join("dst");
+
+        // The half of a move that this module is responsible for. `move_paths`
+        // deletes the originals only after a whole run comes back Ok, so the
+        // guarantee it leans on is this one: a stopped run reaches for nothing
+        // but the targets it was making.
+        let cancel = AtomicBool::new(false);
+        let totals = survey(&[src.clone()], &cancel).unwrap();
+        let result = run(&[(src.clone(), dst)], totals, &cancel, &mut |_| {
+            cancel.store(true, Ordering::Relaxed);
+        });
+
+        assert!(matches!(result, Err(Stopped::Cancelled)));
+        assert_eq!(std::fs::read_to_string(src.join("inner/b.txt")).unwrap(), "bb");
+        assert_eq!(std::fs::read_to_string(src.join("a.txt")).unwrap(), "aaaa");
+    }
+
+    #[test]
+    fn the_bar_counts_files_on_one_volume_and_bytes_across_two() {
+        let dir = scratch("unit");
+        let src = dir.join("src");
+        tree(&src);
+        let dst = dir.join("dst");
+
+        // Everything the tests can reach is on one volume, so this is the
+        // same-volume answer; `crosses_volumes` is the pure statement of the
+        // rule that produces the other one.
+        let cancel = AtomicBool::new(false);
+        let totals = survey(&[src.clone()], &cancel).unwrap();
+        let mut units = Vec::new();
+        run(&[(src.clone(), dst)], totals, &cancel, &mut |p| units.push(p.by_bytes)).unwrap();
+
+        assert!(units.iter().all(|by_bytes| !by_bytes));
+        assert!(!crosses_volumes(&[(src, dir.join("elsewhere"))]));
     }
 
     #[test]

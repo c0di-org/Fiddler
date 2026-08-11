@@ -29,7 +29,7 @@ import { contentTerms, prepareSearch, search, type SearchKind, type SearchRecord
 import { TreeStore, type Row } from "./store/tree";
 import { invert, remember, take as takeUndo, undoStore } from "./undo";
 import { applyTint, hasSystemAccent, loadTint, saveTint, watchTint, type Tint } from "./tint";
-import type { ContentSearch, CopyProgress, DeviceAccess, Entry, Favorite, NearbyAccess, NearbyEntry, NearbySearch, PairRequest, PairingInfo, PeerDevice, Place, UsbDevice, WorktreeInfo } from "./types";
+import type { ContentSearch, DeviceAccess, Entry, Favorite, NearbyAccess, NearbyEntry, NearbySearch, PairRequest, PairingInfo, PeerDevice, Place, TransferProgress, UsbDevice, WorktreeInfo } from "./types";
 
 /** Read once, at module load, because the store is built from it. */
 const session = loadSession();
@@ -123,14 +123,14 @@ export default function App() {
    * the next deliberate move, because a silent fallback to the default reads as
    * the preference having been ignored. */
   const [restoreNote, setRestoreNote] = useState<string | null>(null);
-  /** The copy currently running, if there is one. Null between copies, which is
-   * what puts the ordinary count back in the status bar. */
-  const [copying, setCopying] = useState<CopyProgress | null>(null);
+  /** The transfer currently running, if there is one. Null between them, which
+   * is what puts the ordinary count back in the status bar. */
+  const [transfer, setTransfer] = useState<TransferProgress | null>(null);
   /** The most recent folder worth reopening — see `restorable`. */
   const lastFolder = useRef(session.path);
   const anchorRef = useRef<string | null>(null);
-  const nextCopyJob = useRef(1);
-  const activeCopyJob = useRef<number | null>(null);
+  const nextTransferJob = useRef(1);
+  const activeTransferJob = useRef<number | null>(null);
   const typeAhead = useRef({ buffer: "", at: 0 });
   const editorActive = useRef(false);
   editorActive.current = !!editor;
@@ -974,29 +974,35 @@ export default function App() {
   }, [selected, flash]);
 
   /**
-   * Run a copy with the status bar watching it. The job number is invented here
-   * rather than handed back by the call, because the call doesn't resolve until
-   * the copy is over — which is exactly the span in which Cancel needs a name.
+   * Run a copy or a move with the status bar watching it. The job number is
+   * invented here rather than handed back by the call, because the call doesn't
+   * resolve until the transfer is over — which is exactly the span in which
+   * Cancel needs a name.
    *
-   * Only the job that is actually running is shown: a second copy started while
-   * the first is going would otherwise fight it for the one status bar.
+   * Only the job that is actually running is shown: a second transfer started
+   * while the first is going would otherwise fight it for the one status bar.
    */
-  const runCopy = useCallback(async (paths: string[], destination: string) => {
-    const job = nextCopyJob.current++;
-    activeCopyJob.current = job;
-    try {
-      return await ipc.copyPaths(paths, destination, job);
-    } finally {
-      if (activeCopyJob.current === job) {
-        activeCopyJob.current = null;
-        setCopying(null);
+  const runTransfer = useCallback(
+    async (verb: "copy" | "move", paths: string[], destination: string) => {
+      const job = nextTransferJob.current++;
+      activeTransferJob.current = job;
+      try {
+        return verb === "copy"
+          ? await ipc.copyPaths(paths, destination, job)
+          : await ipc.movePaths(paths, destination, job);
+      } finally {
+        if (activeTransferJob.current === job) {
+          activeTransferJob.current = null;
+          setTransfer(null);
+        }
       }
-    }
-  }, []);
+    },
+    []
+  );
 
   useEffect(() => {
-    const stop = ipc.onCopyProgress((progress) => {
-      if (progress.job === activeCopyJob.current) setCopying(progress);
+    const stop = ipc.onTransfer((progress) => {
+      if (progress.job === activeTransferJob.current) setTransfer(progress);
     });
     return () => void stop.then((off) => off());
   }, []);
@@ -1029,21 +1035,22 @@ export default function App() {
       flash(`Copying ${copiedPaths.length} item${copiedPaths.length === 1 ? "" : "s"} to the device…`);
     }
     try {
-      const outcome = await runCopy(copiedPaths, destination);
+      const outcome = await runTransfer("copy", copiedPaths, destination);
       // Nothing watches a folder on a device, so the listing only shows what
       // just arrived if we go and ask again.
       if (device) await store.invalidateDirs([destination]);
-      if (outcome.cancelled) {
-        flash("Copy cancelled");
-        return;
-      }
+      // Nothing is said about a cancellation. The status bar has already gone
+      // quiet, which is the acknowledgement; a toast reading "cancelled" after
+      // you have just cancelled something is the app explaining your own
+      // decision back to you.
+      if (outcome.cancelled) return;
       setSelection(new Set(outcome.paths));
       remember({ label: "Paste", action: { kind: "create", paths: outcome.paths } });
       flash(`Pasted ${outcome.paths.length} item${outcome.paths.length === 1 ? "" : "s"}`);
     } catch (error) {
       flash(String(error).replace(/^Error:\s*/, ""));
     }
-  }, [copiedPaths, flash, runCopy]);
+  }, [copiedPaths, flash, runTransfer]);
 
   /**
    * What a drag starting on `id` carries.
@@ -1070,7 +1077,10 @@ export default function App() {
       const what = describeItems(items);
       try {
         if (verb === "move") {
-          const moved = await ipc.movePaths(items.paths, destination);
+          const outcome = await runTransfer("move", items.paths, destination);
+          // A cancelled move left the originals exactly where they were, so
+          // there is nothing to select, nothing to undo and nothing to say.
+          if (outcome.cancelled) return;
           // The originals are gone; keeping them selected would leave the
           // status bar describing files that aren't there.
           setSelection(new Set());
@@ -1078,7 +1088,7 @@ export default function App() {
           // works in — and what lets each one find its own way home.
           remember({
             label: "Move",
-            action: { kind: "move", moves: moved.map((to, at) => ({ from: items.paths[at], to })) },
+            action: { kind: "move", moves: outcome.paths.map((to, at) => ({ from: items.paths[at], to })) },
           });
           flash(`Moved ${what}`);
           return;
@@ -1086,21 +1096,18 @@ export default function App() {
         // A cable is slow enough that silence reads as nothing happening.
         const device = destination.startsWith("mtp://");
         if (device) flash(`Copying ${what} to the device…`);
-        const outcome = await runCopy(items.paths, destination);
+        const outcome = await runTransfer("copy", items.paths, destination);
         // Nothing watches a folder on a device, so the listing only shows what
         // just arrived if we go and ask again.
         if (device) await store.invalidateDirs([destination]);
-        if (outcome.cancelled) {
-          flash("Copy cancelled");
-          return;
-        }
+        if (outcome.cancelled) return;
         remember({ label: "Copy", action: { kind: "create", paths: outcome.paths } });
         flash(`Copied ${what}`);
       } catch (error) {
         flash(String(error).replace(/^Error:\s*/, ""));
       }
     },
-    [flash, runCopy]
+    [flash, runTransfer]
   );
 
   const onDropItems = useCallback(
@@ -1179,9 +1186,16 @@ export default function App() {
           case "trash":
             await ipc.trashPaths(step.paths);
             break;
-          case "move":
-            landed.push(...(await ipc.movePaths(step.paths, step.into)));
+          case "move": {
+            // Walking back a move across volumes is the same unbounded work as
+            // making it, so it gets the same bar. Cancelling stops the walk
+            // here rather than unwinding it: the step that was interrupted
+            // simply didn't happen, and the ones before it stand.
+            const outcome = await runTransfer("move", step.paths, step.into);
+            if (outcome.cancelled) return;
+            landed.push(...outcome.paths);
             break;
+          }
           case "restore":
             landed.push(...(await ipc.restoreTrashed(step.items)));
             break;
@@ -1197,7 +1211,7 @@ export default function App() {
     } catch (error) {
       flash(`Couldn’t undo ${entry.label} — ${String(error).replace(/^Error:\s*/, "")}`);
     }
-  }, [flash, revealCursor]);
+  }, [flash, revealCursor, runTransfer]);
 
   const buildMenu = useCallback(
     (t: Target | null, x: number, y: number) => {
@@ -1763,23 +1777,27 @@ export default function App() {
             competing with navigation for room in the toolbar. */}
         <footer className="statusbar">
           <TintPicker tint={tint} systemAvailable={systemTint} onPick={setTint} />
-          {/* A copy outranks the count while it runs: it is the only thing down
-              here that is still happening, and the only one with a button. */}
-          {copying ? (
-            <span className="status-copy">
+          {/* A transfer outranks the count while it runs: it is the only thing
+              down here that is still happening, and the only one with a
+              button. */}
+          {transfer ? (
+            <span className="status-transfer">
               <span
-                className="copy-bar"
+                className="transfer-bar"
                 role="progressbar"
-                aria-label="Copying"
+                aria-label={transfer.verb}
                 aria-valuemin={0}
                 aria-valuemax={100}
-                aria-valuenow={copyShare(copying) ?? undefined}
-                aria-valuetext={copyText(copying)}
+                aria-valuenow={transferShare(transfer) ?? undefined}
+                aria-valuetext={transferText(transfer)}
               >
-                <i style={{ width: `${copyShare(copying) ?? 100}%` }} className={copyShare(copying) === null ? "unknown" : ""} />
+                <i
+                  style={{ width: `${transferShare(transfer) ?? 100}%` }}
+                  className={transferShare(transfer) === null ? "unknown" : ""}
+                />
               </span>
-              <span className="status-text">{copyText(copying)}</span>
-              <button className="copy-cancel" onClick={() => void ipc.cancelCopy(copying.job)}>
+              <span className="status-text">{transferText(transfer)}</span>
+              <button className="transfer-cancel" onClick={() => void ipc.cancelTransfer(transfer.job)}>
                 Cancel
               </button>
             </span>
@@ -1873,17 +1891,24 @@ function pause(ms: number) {
 
 /**
  * How full the bar is, or null while the survey that measures the work is still
- * running. Counted in items rather than bytes: a folder is thousands of small
- * files far more often than one enormous one, and a bar that sits at nothing
- * through nine thousand of them and then jumps is worse than no bar.
+ * running.
+ *
+ * Which pair of numbers to follow is the backend's call, not a preference —
+ * see `byBytes`. It knows whether the bytes are really travelling; from up here
+ * both would look equally reasonable and one of them would always be lying.
+ * The text carries both regardless, since only the *bar* has to choose.
  */
-function copyShare(progress: CopyProgress): number | null {
-  if (progress.totalItems === 0) return null;
-  return Math.min(100, Math.round((progress.doneItems / progress.totalItems) * 100));
+function transferShare(progress: TransferProgress): number | null {
+  const [done, total] = progress.byBytes
+    ? [progress.doneBytes, progress.totalBytes]
+    : [progress.doneItems, progress.totalItems];
+  if (total === 0) return null;
+  return Math.min(100, Math.round((done / total) * 100));
 }
 
-function copyText(progress: CopyProgress): string {
-  if (progress.totalItems === 0) return "Preparing to copy…";
+function transferText(progress: TransferProgress): string {
+  const verb = progress.verb || "Copying";
+  if (progress.totalItems === 0) return `Preparing…`;
   const of = `${progress.doneItems} of ${progress.totalItems}`;
   // Bytes are left out where there are none worth reporting — a tree of empty
   // folders would otherwise read "0 B of 0 B" all the way through.
@@ -1891,7 +1916,7 @@ function copyText(progress: CopyProgress): string {
     progress.totalBytes > 0
       ? ` — ${formatSize(progress.doneBytes, false)} of ${formatSize(progress.totalBytes, false)}`
       : "";
-  return `Copying ${progress.name ? `“${progress.name}” ` : ""}${of}${bytes}`;
+  return `${verb} ${progress.name ? `“${progress.name}” ` : ""}${of}${bytes}`;
 }
 
 /**

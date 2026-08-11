@@ -12,8 +12,6 @@
 
 import type {
   ContentSearch,
-  CopyOutcome,
-  CopyProgress,
   DirListing,
   EntryBatch,
   Inspect,
@@ -31,6 +29,8 @@ import type {
   TextHead,
   ThumbReady,
   ThumbReq,
+  TransferOutcome,
+  TransferProgress,
   Trashed,
   UsbDevice,
 } from "../types";
@@ -105,18 +105,21 @@ export interface Backend {
   renamePath(path: string, newName: string): Promise<string>;
   /** `job` is chosen by the caller, not returned by this call — the call does
    * not resolve until the copy is over, which is exactly the span in which
-   * `cancelCopy` needs something to name. */
-  copyPaths(paths: string[], destination: string, job: number): Promise<CopyOutcome>;
-  /** Stop a running copy, which then removes everything it had written. Doing
-   * nothing is the right answer for a job that has already finished. */
-  cancelCopy(job: number): Promise<void>;
-  /** Fires as a copy runs, at most a handful of times a second. */
-  onCopyProgress(fn: (progress: CopyProgress) => void): Promise<Unlisten>;
+   * `cancelTransfer` needs something to name. */
+  copyPaths(paths: string[], destination: string, job: number): Promise<TransferOutcome>;
   /** The same transfer, without leaving the originals behind. Separate from
    * `copyPaths` because within one volume it is an entry rewrite rather than a
    * copy, and because it must never overwrite: a name already taken at the
-   * destination refuses the whole batch rather than moving part of it. */
-  movePaths(paths: string[], destination: string): Promise<string[]>;
+   * destination refuses the whole batch rather than moving part of it. Only a
+   * move that has to cross volumes reports progress or can be stopped; the
+   * rest are over before there is anything to say. */
+  movePaths(paths: string[], destination: string, job: number): Promise<TransferOutcome>;
+  /** Stop a running transfer, which then removes everything it had written —
+   * and in a move, leaves the originals untouched. Doing nothing is the right
+   * answer for a job that has already finished. */
+  cancelTransfer(job: number): Promise<void>;
+  /** Fires as a transfer runs, at most a handful of times a second. */
+  onTransfer(fn: (progress: TransferProgress) => void): Promise<Unlisten>;
   /** Resolves with where each item landed, which is what lets the deletion be
    * undone. An empty answer means it happened but can't be walked back. */
   trashPaths(paths: string[]): Promise<Trashed[]>;
