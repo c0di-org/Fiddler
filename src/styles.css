@@ -1703,6 +1703,68 @@ body.column-resizing * {
   text-align: center;
 }
 
+/* ----------------------------------------------------------- copy progress */
+
+/* Takes the middle track the count usually holds, so the bar arrives without
+   the two things either side of it moving. */
+.status-copy {
+  grid-column: 2;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.status-copy .status-text {
+  grid-column: auto;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.copy-bar {
+  flex: 0 0 auto;
+  width: 84px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--fill);
+  overflow: hidden;
+}
+
+.copy-bar i {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  transition: width var(--fast) var(--ease);
+}
+
+/* Nothing has been counted yet, so the bar says "something is happening" and
+   declines to say how much of it is left. */
+.copy-bar i.unknown {
+  opacity: 0.35;
+}
+
+.copy-cancel {
+  flex: 0 0 auto;
+  padding: 2px 9px;
+  border: 1px solid var(--hair);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--fg-faint);
+  font: inherit;
+  cursor: default;
+}
+
+.copy-cancel:hover {
+  background: var(--fill-strong);
+  color: var(--fg);
+}
+
+.copy-cancel:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
 /* ------------------------------------------------------------ accent tint */
 
 .tint {

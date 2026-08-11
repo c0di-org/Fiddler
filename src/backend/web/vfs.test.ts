@@ -9,10 +9,12 @@ import {
   copyInto,
   freshPath,
   joinSegments,
+  listDir,
   parentOf,
   rename,
   resolve,
   segments,
+  surveyCopy,
   uniqueMountId,
   validName,
 } from "./vfs.ts";
@@ -75,11 +77,45 @@ test("copy carries a folder's whole subtree across mounts", async () => {
   addMount({ id: "To", name: "To", icon: "folder", listed: true, provider: to });
 
   const created = await copyInto(["/From/project"], "/To/landing");
-  assert.deepEqual(created, ["/To/landing/project"]);
+  assert.deepEqual(created, { paths: ["/To/landing/project"], cancelled: false });
   assert.equal(
     await new Response(await to.read(["landing", "project", "src", "main.rs"])).text(),
     "fn main() {}"
   );
+});
+
+test("a cancelled copy takes back what it had already written", async () => {
+  const from = new MemoryProvider();
+  from.seedFile("project/src/main.rs", new Blob(["fn main() {}"]));
+  from.seedFile("project/README.md", new Blob(["# hi"]));
+  addMount({ id: "Src", name: "Src", icon: "folder", listed: true, provider: from });
+
+  const to = new MemoryProvider();
+  to.seedDir("landing");
+  addMount({ id: "Dst", name: "Dst", icon: "folder", listed: true, provider: to });
+
+  // Cancel the moment anything has landed, which is what pressing the button
+  // part-way through a real copy amounts to.
+  let cancelled = false;
+  const outcome = await copyInto(["/Src/project"], "/Dst/landing", {
+    cancelled: () => cancelled,
+    report: () => {
+      cancelled = true;
+    },
+  });
+
+  assert.deepEqual(outcome, { paths: [], cancelled: true });
+  assert.deepEqual(await listDir("/Dst/landing"), []);
+});
+
+test("a survey counts every item and every byte before any of it moves", async () => {
+  const provider = new MemoryProvider();
+  provider.seedFile("tree/a.txt", new Blob(["aaaa"]));
+  provider.seedFile("tree/inner/b.txt", new Blob(["bb"]));
+  addMount({ id: "Count", name: "Count", icon: "folder", listed: true, provider });
+
+  // The folder, a.txt, inner, inner/b.txt.
+  assert.deepEqual(await surveyCopy(["/Count/tree"]), { items: 4, bytes: 6 });
 });
 
 test("a read-only mount refuses writes rather than failing halfway", async () => {

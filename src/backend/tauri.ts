@@ -10,6 +10,8 @@ import { openPath } from "@tauri-apps/plugin-opener";
 
 import type {
   ContentSearch,
+  CopyOutcome,
+  CopyProgress,
   DirListing,
   EntryBatch,
   Inspect,
@@ -90,7 +92,13 @@ const backend: Backend = {
 
   renamePath: (path, newName) => invoke<string>("rename_path", { path, newName }),
 
-  copyPaths: (paths, destination) => invoke<string[]>("copy_paths", { paths, destination }),
+  copyPaths: (paths, destination, job) =>
+    invoke<CopyOutcome>("copy_paths", { paths, destination, job }),
+
+  cancelCopy: (job) => invoke<void>("cancel_copy", { job }),
+
+  onCopyProgress: (fn) =>
+    listen<CopyProgress>("fiddler:copy-progress", (e) => fn(e.payload)),
 
   movePaths: (paths, destination) => invoke<string[]>("move_paths", { paths, destination }),
 

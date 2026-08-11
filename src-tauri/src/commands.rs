@@ -1,11 +1,15 @@
 use std::cmp::Ordering;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
 
 use crate::content_search::{self, ContentSearch};
+use crate::copy::{self, Stopped};
 use crate::fs_scan::{self, ScanOpts};
 use crate::git::status::RepoStatus;
 use crate::git::{self, GitCache};
@@ -24,6 +28,42 @@ pub struct AppState {
     pub peers: Arc<PeerService>,
     #[cfg(not(target_os = "android"))]
     pub usb: Arc<MtpService>,
+    /// The cancel flag of every copy currently running, by the job number the
+    /// renderer made up for it. Keyed rather than singular because a paste and
+    /// a drop can be in flight at once, and Cancel has to mean the one whose
+    /// button was pressed.
+    pub copies: Mutex<HashMap<u64, Arc<AtomicBool>>>,
+}
+
+/// How often a running copy is allowed to say so. A thousand files a second is
+/// entirely normal on a clone, and a thousand IPC messages a second is not.
+const COPY_REPORT: Duration = Duration::from_millis(100);
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CopyProgress {
+    pub job: u64,
+    pub done_items: u64,
+    pub total_items: u64,
+    pub done_bytes: u64,
+    pub total_bytes: u64,
+    pub name: String,
+}
+
+/// A cancel is not a failure, and the renderer has to be able to tell them
+/// apart: one wants an apology in the status bar, the other wants nothing at
+/// all. `paths` is empty when `cancelled`, because the copy took itself back.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CopyOutcome {
+    pub paths: Vec<String>,
+    pub cancelled: bool,
+}
+
+impl CopyOutcome {
+    fn done(paths: Vec<String>) -> Self {
+        CopyOutcome { paths, cancelled: false }
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -915,30 +955,49 @@ pub fn rename_path(
     Ok(dst.to_string_lossy().into_owned())
 }
 
+/// Stop a running copy. Harmless if the job has already finished or was never
+/// there — Cancel and the last file landing race by nature, and losing that race
+/// is not something to report.
+#[tauri::command]
+pub fn cancel_copy(state: State<'_, AppState>, job: u64) {
+    if let Some(flag) = state.copies.lock().unwrap().get(&job) {
+        flag.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
 /// Copy items into a folder without overwriting anything already there. This is
 /// intentionally the one transfer primitive the renderer needs: paste, a drop
 /// target, and later a nearby-device stream can all call the same operation.
+///
+/// `job` is made up by the renderer rather than handed back by this call, for
+/// the plain reason that this call doesn't return until the copy is over —
+/// which is exactly the span in which Cancel needs something to name.
 #[tauri::command]
 pub async fn copy_paths(
+    app: AppHandle,
     state: State<'_, AppState>,
     paths: Vec<String>,
     destination: String,
-) -> Result<Vec<String>, String> {
+    job: u64,
+) -> Result<CopyOutcome, String> {
     let cache = state.cache.clone();
     let watcher = state.watcher.clone();
     let peer_service = state.peers.clone();
     #[cfg(not(target_os = "android"))]
     let usb = state.usb.clone();
 
+    let cancel = Arc::new(AtomicBool::new(false));
+    state.copies.lock().unwrap().insert(job, cancel.clone());
+
     // A copy is unbounded work — a folder of photos on disk, a video across a
     // USB cable — so none of it runs on the thread that draws the window.
-    tauri::async_runtime::spawn_blocking(move || {
+    let outcome = tauri::async_runtime::spawn_blocking(move || {
         // A phone on a cable is not a filesystem path: it has no `is_dir`, and
         // treating it as one is what used to answer "Paste destination is not a
         // folder" for a perfectly good folder on a device.
         #[cfg(not(target_os = "android"))]
         if mtp::path::parse(&destination).is_some() {
-            return copy_onto_device(&usb, &paths, &destination);
+            return copy_onto_device(&usb, &paths, &destination).map(CopyOutcome::done);
         }
         if peers::parse_remote_path(&destination).is_some() || paths.iter().any(|path| peers::parse_remote_path(path).is_some()) {
             if peers::parse_remote_path(&destination).is_some() { return Err("Pasting onto Android is not ready yet".into()); }
@@ -948,14 +1007,16 @@ pub async fn copy_paths(
             for source in paths {
                 let (device, remote_path) = peers::parse_remote_path(&source).ok_or("Mixed local and remote copies are not supported")?;
                 let name = Path::new(&remote_path).file_name().and_then(|name| name.to_str()).ok_or("Invalid file name")?;
-                let target = copy_name(&destination, name);
+                // Nothing claimed in advance here: each file is written before
+                // the next is named, so the filesystem is the whole answer.
+                let target = copy_name(&destination, name, &HashSet::new());
                 let bytes = peer_service.download(&device, &remote_path)?;
                 std::fs::write(&target, bytes).map_err(|e| e.to_string())?;
                 copied.push(target.to_string_lossy().into_owned());
             }
             cache.forget_discovery_under(&destination);
             watcher.poke(&destination);
-            return Ok(copied);
+            return Ok(CopyOutcome::done(copied));
         }
         // Reading off a device is bounded byte-range work the copy path doesn't
         // do yet. Say that, rather than letting a `mtp://` string reach the
@@ -966,7 +1027,12 @@ pub async fn copy_paths(
         }
         let destination = PathBuf::from(&destination);
         if !destination.is_dir() { return Err("Paste destination is not a folder".into()); }
-        let mut copied = Vec::new();
+
+        // Every target is worked out before a byte moves, because the rollback
+        // needs the full list of what this copy is about to invent — which is
+        // also why `copy_name` is told what the batch has already claimed.
+        let mut plan: Vec<(PathBuf, PathBuf)> = Vec::new();
+        let mut claimed: HashSet<PathBuf> = HashSet::new();
         for source in paths {
             let source = PathBuf::from(source);
             let name = source.file_name().and_then(|name| name.to_str()).ok_or("Invalid file name")?;
@@ -975,16 +1041,60 @@ pub async fn copy_paths(
             if contains(&source, &destination) {
                 return Err(format!("“{name}” can’t be copied into itself"));
             }
-            let target = copy_name(&destination, name);
-            copy_tree(&source, &target)?;
-            copied.push(target.to_string_lossy().into_owned());
+            let target = copy_name(&destination, name, &claimed);
+            claimed.insert(target.clone());
+            plan.push((source, target));
         }
+
+        // Said before the survey as well as during the copy: a folder with a
+        // hundred thousand files in it takes a moment just to count, and
+        // silence there looks exactly like nothing having happened.
+        let say = |app: &AppHandle, progress: &copy::Progress| {
+            let _ = app.emit(
+                "fiddler:copy-progress",
+                CopyProgress {
+                    job,
+                    done_items: progress.done_items,
+                    total_items: progress.total_items,
+                    done_bytes: progress.done_bytes,
+                    total_bytes: progress.total_bytes,
+                    name: progress.name.clone(),
+                },
+            );
+        };
+        say(&app, &copy::Progress::default());
+
+        let sources: Vec<PathBuf> = plan.iter().map(|(source, _)| source.clone()).collect();
+        let totals = match copy::survey(&sources, &cancel) {
+            Ok(totals) => totals,
+            Err(Stopped::Cancelled) => return Ok(CopyOutcome { paths: Vec::new(), cancelled: true }),
+            Err(Stopped::Failed(message)) => return Err(message),
+        };
+
+        let mut last = Instant::now();
+        let result = copy::run(&plan, totals, &cancel, &mut |progress| {
+            if last.elapsed() >= COPY_REPORT {
+                last = Instant::now();
+                say(&app, progress);
+            }
+        });
+
+        // Either way the folder changed: a rollback removes what a listing may
+        // already have picked up, so the refresh is owed in both directions.
         cache.forget_discovery_under(&destination);
         watcher.poke(&destination);
-        Ok(copied)
+
+        match result {
+            Ok(copied) => Ok(CopyOutcome::done(copied)),
+            Err(Stopped::Cancelled) => Ok(CopyOutcome { paths: Vec::new(), cancelled: true }),
+            Err(Stopped::Failed(message)) => Err(message),
+        }
     })
     .await
-    .map_err(|e| e.to_string())?
+    .map_err(|e| e.to_string());
+
+    state.copies.lock().unwrap().remove(&job);
+    outcome?
 }
 
 /// Move items into a folder — the other half of `copy_paths`, and what a drag
@@ -1136,16 +1246,27 @@ fn copy_tree(source: &Path, target: &Path) -> Result<(), String> {
     Ok(())
 }
 
-fn copy_name(parent: &Path, name: &str) -> PathBuf {
+/// "notes.md" beside an existing "notes.md" becomes "notes copy.md", then
+/// "notes copy 2.md" — Finder's shape, so a paste never overwrites what it
+/// landed next to.
+///
+/// `claimed` is what a batch has already promised itself but not yet written.
+/// Names used to be settled one at a time, with each file on disk before the
+/// next was named, so asking the filesystem was enough. Now the whole plan is
+/// drawn up first — the rollback needs the full list of targets before any of
+/// them exist — and two files called `notes.md` from two different folders
+/// would otherwise both be planned as `notes.md`.
+fn copy_name(parent: &Path, name: &str, claimed: &HashSet<PathBuf>) -> PathBuf {
+    let free = |candidate: &Path| !claimed.contains(candidate) && !candidate.exists();
     let first = parent.join(name);
-    if !first.exists() { return first; }
+    if free(&first) { return first; }
     let file = Path::new(name);
     let stem = file.file_stem().and_then(|part| part.to_str()).unwrap_or(name);
     let extension = file.extension().and_then(|part| part.to_str()).map(|part| format!(".{part}")).unwrap_or_default();
     for number in 1..10_000 {
         let suffix = if number == 1 { " copy".to_string() } else { format!(" copy {number}") };
         let candidate = parent.join(format!("{stem}{suffix}{extension}"));
-        if !candidate.exists() { return candidate; }
+        if free(&candidate) { return candidate; }
     }
     parent.join(format!("{stem} copy-{}{}", std::process::id(), extension))
 }
@@ -1430,6 +1551,23 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn two_files_of_the_same_name_do_not_plan_the_same_target() {
+        let dir = scratch("claimed");
+        std::fs::write(dir.join("notes.md"), b"already here").unwrap();
+
+        // What a paste of /a/notes.md and /b/notes.md draws up. Neither target
+        // exists yet when the second one is named, so without `claimed` the two
+        // would agree on a name and the second would land on the first.
+        let mut claimed = HashSet::new();
+        let first = copy_name(&dir, "notes.md", &claimed);
+        claimed.insert(first.clone());
+        let second = copy_name(&dir, "notes.md", &claimed);
+
+        assert_eq!(first, dir.join("notes copy.md"));
+        assert_eq!(second, dir.join("notes copy 2.md"));
     }
 
     #[test]

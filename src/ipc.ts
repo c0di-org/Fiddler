@@ -38,6 +38,8 @@ export const {
   writeTextFile,
   renamePath,
   copyPaths,
+  cancelCopy,
+  onCopyProgress,
   movePaths,
   trashPaths,
   restoreTrashed,

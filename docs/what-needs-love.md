@@ -97,14 +97,39 @@ allowed, and nobody would know to grant it again.
 Withdrawing drops the remembered answer along with the token, so a device that
 asks again is a stranger putting a fresh card on screen.
 
-### Copying is silent and can't be stopped
+### Copying says how far it has got, and can be called off
 
-`copy_paths` has no progress and no cancel, and a failure part-way leaves what
-it had already written. Pasting a 40 GB folder is one toast and a long wait.
+The status bar holds a bar, what is being copied, how many of how many and how
+much of how much, and a Cancel button — in the middle track the item count
+usually has, so nothing moves when it appears. `copy.rs` is the engine and is
+where the decisions live.
 
-Needs the copy to run against a cancellation flag and emit progress events —
-the thumbnail pool is the model for both. The status bar is the right home for
-the progress; the toast can't hold it.
+The one worth knowing: `std::fs::copy` was kept rather than replaced with a
+chunked loop. On APFS it lands on `fclonefileat`, so a same-volume copy of forty
+gigabytes is near-instant whatever the size, and a read/write loop would trade
+that away for progress nobody would live long enough to read. The loop is kept
+for the case that is genuinely slow — a large file arriving on a *different*
+volume, compared by `st_dev` — where there is no clone to be had and Cancel has
+to be able to land mid-file. Below 8 MB even a cross-volume file goes whole.
+
+Cancel means cancelled, not stopped: everything the copy wrote is removed. That
+is safe precisely because `copy_name` invents every target a moment beforehand,
+so nothing being deleted existed before the copy did. The same rollback runs on
+a failure, which is what closes the other half of this entry — a five-item paste
+that failed on the fourth used to leave three copies, a half-built tree and no
+way to tell which was which.
+
+Two things this changed on the way. Every target is now planned before any bytes
+move, which the rollback needs — so `copy_name` had to be told what the batch has
+already claimed, or two files called `notes.md` from two folders would both be
+planned as `notes.md` and the second would land on the first. There is a test for
+that. And the work is surveyed before it starts, so the bar has a total; the tree
+is read twice and that is the price of a bar that means something.
+
+What's left: a cross-volume `move` is still a silent copy-and-delete, and so is
+an upload to a device over USB. Neither is hard now that the engine exists,
+though a cancelled move has a harder question behind it — the source is being
+deleted as it goes, so "take back what you wrote" means something different.
 
 ## Accessibility
 
@@ -199,3 +224,6 @@ while the concurrency and network surfaces have almost none. `peers.rs` had zero
 before this pass, `watcher.rs` had zero, `git/discover.rs` still does, and so
 does `store/tree.ts`, which is the navigation core. Not a crisis, but if a test
 is going to be written, write it there rather than adding a 23rd parser case.
+
+`copy.rs` arrived with seven, against a real temp filesystem rather than a
+fake one, which is the shape the rest of this list wants.

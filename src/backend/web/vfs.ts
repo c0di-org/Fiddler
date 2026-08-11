@@ -209,22 +209,80 @@ export async function remove(path: string): Promise<void> {
   touchDir(parentOf(path));
 }
 
+/** What a running copy tells its caller, and how it is asked to stop. The names
+ * match the Rust side's, because App.tsx sees only one of the two. */
+export interface CopyWatch {
+  cancelled(): boolean;
+  report(step: { doneItems: number; doneBytes: number; name: string }): void;
+}
+
 /** Copies files and folders between any two mounts by streaming through blobs,
- * which is the one operation that has to work across providers. */
-export async function copyInto(sources: string[], destination: string): Promise<string[]> {
+ * which is the one operation that has to work across providers.
+ *
+ * `watch` is optional and every provider here is fast enough that nothing will
+ * ever be seen moving. It exists so the browser build runs the same shape as
+ * the real one — a survey, then a cancellable walk that takes back what it
+ * wrote — rather than a stub that would let the two drift apart unnoticed. */
+export async function copyInto(
+  sources: string[],
+  destination: string,
+  watch?: CopyWatch,
+): Promise<{ paths: string[]; cancelled: boolean }> {
   const { mount } = resolve(destination);
   assertWritable(mount);
 
   const created: string[] = [];
+  // The rollback deletes exactly these, and they are all names `freshPath`
+  // invented a moment ago, so nothing that was already there is at risk.
+  const undo = async () => {
+    for (const path of created) await remove(path).catch(() => {});
+    touchDir(destination);
+  };
+
+  let doneItems = 0;
+  let doneBytes = 0;
   for (const source of sources) {
     const node = await stat(source);
     if (!node) continue;
+    if (watch?.cancelled()) {
+      await undo();
+      return { paths: [], cancelled: true };
+    }
     const target = await freshPath(destination, node.name);
-    await copyOne(source, target, node.kind);
     created.push(target);
+    try {
+      await copyOne(source, target, node.kind, watch, (bytes) => {
+        doneItems += 1;
+        doneBytes += bytes;
+        watch?.report({ doneItems, doneBytes, name: node.name });
+      });
+    } catch (error) {
+      await undo();
+      if (watch?.cancelled()) return { paths: [], cancelled: true };
+      throw error;
+    }
   }
   touchDir(destination);
-  return created;
+  return { paths: created, cancelled: false };
+}
+
+/** What a copy is about to cost, so the bar has a total to fill towards. */
+export async function surveyCopy(sources: string[]): Promise<{ items: number; bytes: number }> {
+  let items = 0;
+  let bytes = 0;
+  const walk = async (path: string, kind: Node["kind"]) => {
+    items += 1;
+    if (kind !== "file") {
+      for (const child of await listDir(path)) await walk(childPath(path, child.name), child.kind);
+      return;
+    }
+    bytes += (await stat(path))?.size ?? 0;
+  };
+  for (const source of sources) {
+    const node = await stat(source);
+    if (node) await walk(source, node.kind);
+  }
+  return { items, bytes };
 }
 
 /** Move rather than duplicate. No provider here has a cross-directory rename —
@@ -253,7 +311,9 @@ export async function moveInto(sources: string[], destination: string): Promise<
 
   const moved: string[] = [];
   for (const { source, target, kind } of plan) {
-    await copyOne(source, target, kind);
+    // A move reports nothing: it is a rename everywhere it can be, and where it
+    // can't, it is still one entry at a time rather than a tree.
+    await copyOne(source, target, kind, undefined, () => {});
     const { mount: from, rel } = resolve(source);
     await from.provider.remove(rel);
     touchDir(parentOf(source));
@@ -263,16 +323,26 @@ export async function moveInto(sources: string[], destination: string): Promise<
   return moved;
 }
 
-async function copyOne(source: string, target: string, kind: Node["kind"]) {
+async function copyOne(
+  source: string,
+  target: string,
+  kind: Node["kind"],
+  watch: CopyWatch | undefined,
+  landed: (bytes: number) => void,
+) {
+  if (watch?.cancelled()) throw new Error("Copy cancelled");
   if (kind === "file") {
     const { mount, rel } = resolve(target);
-    await mount.provider.write(rel, await readBlob(source));
+    const blob = await readBlob(source);
+    await mount.provider.write(rel, blob);
+    landed(blob.size);
     return;
   }
   const { mount, rel } = resolve(target);
   await mount.provider.mkdir(rel);
+  landed(0);
   for (const child of await listDir(source)) {
-    await copyOne(childPath(source, child.name), childPath(target, child.name), child.kind);
+    await copyOne(childPath(source, child.name), childPath(target, child.name), child.kind, watch, landed);
   }
 }
 

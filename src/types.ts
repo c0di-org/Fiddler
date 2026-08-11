@@ -263,6 +263,29 @@ export interface ThumbReady extends ThumbReq {
   src: string | null;
 }
 
+/** How far a copy has got. Both totals are zero until the survey that measures
+ * the work has finished — a hundred thousand files take a moment just to count,
+ * and the status bar says "Copying…" rather than nothing while that happens. */
+export interface CopyProgress {
+  /** The number the renderer made up for this copy, so Cancel names the right
+   * one when two are in flight. */
+  job: number;
+  doneItems: number;
+  totalItems: number;
+  doneBytes: number;
+  totalBytes: number;
+  /** What is being copied at this moment — the part a person actually reads. */
+  name: string;
+}
+
+/** `paths` is empty when `cancelled`, because a cancelled copy takes back
+ * everything it wrote. Kept apart from a thrown error: one is a failure and the
+ * other is the person getting what they asked for. */
+export interface CopyOutcome {
+  paths: string[];
+  cancelled: boolean;
+}
+
 /** One child shown on the face of a folder's icon. */
 export interface PeekItem {
   name: string;

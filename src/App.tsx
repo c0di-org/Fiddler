@@ -29,7 +29,7 @@ import { contentTerms, prepareSearch, search, type SearchKind, type SearchRecord
 import { TreeStore, type Row } from "./store/tree";
 import { invert, remember, take as takeUndo, undoStore } from "./undo";
 import { applyTint, hasSystemAccent, loadTint, saveTint, watchTint, type Tint } from "./tint";
-import type { ContentSearch, DeviceAccess, Entry, Favorite, NearbyAccess, NearbyEntry, NearbySearch, PairRequest, PairingInfo, PeerDevice, Place, UsbDevice, WorktreeInfo } from "./types";
+import type { ContentSearch, CopyProgress, DeviceAccess, Entry, Favorite, NearbyAccess, NearbyEntry, NearbySearch, PairRequest, PairingInfo, PeerDevice, Place, UsbDevice, WorktreeInfo } from "./types";
 
 /** Read once, at module load, because the store is built from it. */
 const session = loadSession();
@@ -123,9 +123,14 @@ export default function App() {
    * the next deliberate move, because a silent fallback to the default reads as
    * the preference having been ignored. */
   const [restoreNote, setRestoreNote] = useState<string | null>(null);
+  /** The copy currently running, if there is one. Null between copies, which is
+   * what puts the ordinary count back in the status bar. */
+  const [copying, setCopying] = useState<CopyProgress | null>(null);
   /** The most recent folder worth reopening — see `restorable`. */
   const lastFolder = useRef(session.path);
   const anchorRef = useRef<string | null>(null);
+  const nextCopyJob = useRef(1);
+  const activeCopyJob = useRef<number | null>(null);
   const typeAhead = useRef({ buffer: "", at: 0 });
   const editorActive = useRef(false);
   editorActive.current = !!editor;
@@ -968,6 +973,34 @@ export default function App() {
     }
   }, [selected, flash]);
 
+  /**
+   * Run a copy with the status bar watching it. The job number is invented here
+   * rather than handed back by the call, because the call doesn't resolve until
+   * the copy is over — which is exactly the span in which Cancel needs a name.
+   *
+   * Only the job that is actually running is shown: a second copy started while
+   * the first is going would otherwise fight it for the one status bar.
+   */
+  const runCopy = useCallback(async (paths: string[], destination: string) => {
+    const job = nextCopyJob.current++;
+    activeCopyJob.current = job;
+    try {
+      return await ipc.copyPaths(paths, destination, job);
+    } finally {
+      if (activeCopyJob.current === job) {
+        activeCopyJob.current = null;
+        setCopying(null);
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    const stop = ipc.onCopyProgress((progress) => {
+      if (progress.job === activeCopyJob.current) setCopying(progress);
+    });
+    return () => void stop.then((off) => off());
+  }, []);
+
   const copySelected = useCallback(() => {
     const paths = selected.map((target) => target.path);
     if (paths.length === 0) return;
@@ -989,23 +1022,28 @@ export default function App() {
       return;
     }
     // A cable is slow enough that silence reads as nothing happening: a video
-    // onto a phone over USB 2.0 is tens of seconds.
+    // onto a phone over USB 2.0 is tens of seconds. The device path reports no
+    // progress of its own yet, so it keeps the toast it always had.
     const device = destination.startsWith("mtp://");
     if (device) {
       flash(`Copying ${copiedPaths.length} item${copiedPaths.length === 1 ? "" : "s"} to the device…`);
     }
     try {
-      const copied = await ipc.copyPaths(copiedPaths, destination);
+      const outcome = await runCopy(copiedPaths, destination);
       // Nothing watches a folder on a device, so the listing only shows what
       // just arrived if we go and ask again.
       if (device) await store.invalidateDirs([destination]);
-      setSelection(new Set(copied));
-      remember({ label: "Paste", action: { kind: "create", paths: copied } });
-      flash(`Pasted ${copied.length} item${copied.length === 1 ? "" : "s"}`);
+      if (outcome.cancelled) {
+        flash("Copy cancelled");
+        return;
+      }
+      setSelection(new Set(outcome.paths));
+      remember({ label: "Paste", action: { kind: "create", paths: outcome.paths } });
+      flash(`Pasted ${outcome.paths.length} item${outcome.paths.length === 1 ? "" : "s"}`);
     } catch (error) {
       flash(String(error).replace(/^Error:\s*/, ""));
     }
-  }, [copiedPaths, flash]);
+  }, [copiedPaths, flash, runCopy]);
 
   /**
    * What a drag starting on `id` carries.
@@ -1048,17 +1086,21 @@ export default function App() {
         // A cable is slow enough that silence reads as nothing happening.
         const device = destination.startsWith("mtp://");
         if (device) flash(`Copying ${what} to the device…`);
-        const copied = await ipc.copyPaths(items.paths, destination);
+        const outcome = await runCopy(items.paths, destination);
         // Nothing watches a folder on a device, so the listing only shows what
         // just arrived if we go and ask again.
         if (device) await store.invalidateDirs([destination]);
-        remember({ label: "Copy", action: { kind: "create", paths: copied } });
+        if (outcome.cancelled) {
+          flash("Copy cancelled");
+          return;
+        }
+        remember({ label: "Copy", action: { kind: "create", paths: outcome.paths } });
         flash(`Copied ${what}`);
       } catch (error) {
         flash(String(error).replace(/^Error:\s*/, ""));
       }
     },
-    [flash]
+    [flash, runCopy]
   );
 
   const onDropItems = useCallback(
@@ -1721,7 +1763,29 @@ export default function App() {
             competing with navigation for room in the toolbar. */}
         <footer className="statusbar">
           <TintPicker tint={tint} systemAvailable={systemTint} onPick={setTint} />
-          <span className="status-text" title={statusText}>{statusText}</span>
+          {/* A copy outranks the count while it runs: it is the only thing down
+              here that is still happening, and the only one with a button. */}
+          {copying ? (
+            <span className="status-copy">
+              <span
+                className="copy-bar"
+                role="progressbar"
+                aria-label="Copying"
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-valuenow={copyShare(copying) ?? undefined}
+                aria-valuetext={copyText(copying)}
+              >
+                <i style={{ width: `${copyShare(copying) ?? 100}%` }} className={copyShare(copying) === null ? "unknown" : ""} />
+              </span>
+              <span className="status-text">{copyText(copying)}</span>
+              <button className="copy-cancel" onClick={() => void ipc.cancelCopy(copying.job)}>
+                Cancel
+              </button>
+            </span>
+          ) : (
+            <span className="status-text" title={statusText}>{statusText}</span>
+          )}
           {store.view === "icons" && (
             <label className="status-zoom" title="Icon size">
               <GridIcon size={11} />
@@ -1805,6 +1869,29 @@ function reasonFor(error: unknown, path: string): string {
 /** Wait, for a poll that is deliberately paced rather than hammered. */
 function pause(ms: number) {
   return new Promise<void>((resolve) => window.setTimeout(resolve, ms));
+}
+
+/**
+ * How full the bar is, or null while the survey that measures the work is still
+ * running. Counted in items rather than bytes: a folder is thousands of small
+ * files far more often than one enormous one, and a bar that sits at nothing
+ * through nine thousand of them and then jumps is worse than no bar.
+ */
+function copyShare(progress: CopyProgress): number | null {
+  if (progress.totalItems === 0) return null;
+  return Math.min(100, Math.round((progress.doneItems / progress.totalItems) * 100));
+}
+
+function copyText(progress: CopyProgress): string {
+  if (progress.totalItems === 0) return "Preparing to copy…";
+  const of = `${progress.doneItems} of ${progress.totalItems}`;
+  // Bytes are left out where there are none worth reporting — a tree of empty
+  // folders would otherwise read "0 B of 0 B" all the way through.
+  const bytes =
+    progress.totalBytes > 0
+      ? ` — ${formatSize(progress.doneBytes, false)} of ${formatSize(progress.totalBytes, false)}`
+      : "";
+  return `Copying ${progress.name ? `“${progress.name}” ` : ""}${of}${bytes}`;
 }
 
 /**
