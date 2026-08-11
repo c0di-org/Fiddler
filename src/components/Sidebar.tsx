@@ -148,7 +148,7 @@ export function Sidebar({
 
       {usb.length > 0 && (
         <div className="sidebar-devices">
-          <SidebarHeading icon={<CableIcon size={13} />}>On a cable</SidebarHeading>
+          <SidebarHeading icon={<CableIcon size={13} />}>Wired</SidebarHeading>
           {usb.map((device) => {
             const notice = connectionNotice(device);
             const open = current.startsWith(`mtp://${device.serial}/`);
@@ -217,7 +217,7 @@ export function Sidebar({
             )
           }
         >
-          Over Wi-Fi
+          Wi-Fi
         </SidebarHeading>
         {devices.map((device) => {
           const asking = device.id === askingDeviceId;
