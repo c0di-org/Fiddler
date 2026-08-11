@@ -48,15 +48,35 @@ export interface Mount {
 
 // ------------------------------------------------------------------- paths
 
+/**
+ * A device address's own first segment: `mtp://RFCY71NMVTA`, `fiddler://abc123`.
+ *
+ * Fiddler browses three address spaces (see `location.ts`) and the two device
+ * ones carry the device's identity in the part that looks like a hostname. It
+ * has to survive being split and rejoined, or a listing of a phone's DCIM
+ * folder would hand back child paths of `/mtp:/RFCY71NMVTA/…` — which is not
+ * the address anything else in the app is comparing against.
+ *
+ * Anchored, so a *file* whose name mentions a scheme is still just a file.
+ */
+const DEVICE_ROOT = /^[a-z]+:\/\/[^/]*/;
+
 export function segments(path: string): string[] {
-  return path.split("/").filter((s) => s.length > 0);
+  const root = DEVICE_ROOT.exec(path);
+  if (!root) return path.split("/").filter((s) => s.length > 0);
+  const rest = path.slice(root[0].length).split("/").filter((s) => s.length > 0);
+  return [root[0], ...rest];
 }
 
 export function joinSegments(parts: string[]): string {
+  if (parts.length === 0) return "";
+  // A device root is already a whole address and takes no leading slash; a
+  // local path is relative to a root that has no name of its own.
+  if (DEVICE_ROOT.test(parts[0])) return parts.join("/");
   // Above the mounts there is nothing to name, so the root joins to the empty
   // string rather than "/". That keeps `touchDir` from ever announcing a
   // directory no listing can exist for.
-  return parts.length === 0 ? "" : "/" + parts.join("/");
+  return "/" + parts.join("/");
 }
 
 export function basename(path: string): string {

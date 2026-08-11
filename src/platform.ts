@@ -37,7 +37,11 @@ export interface Capabilities {
   installApk: boolean;
   /** One tap opens, rather than selecting. */
   directTouch: boolean;
-  /** Other Fiddlers on the network can appear in the sidebar. */
+  /** Other Fiddlers on the network can appear in the sidebar. True on the web
+   * not because a tab has a network transport — it has none — but because the
+   * demo shows what the section does, labelled as a demonstration on every row
+   * it draws. See `demo-device.ts` for why that exception is drawn here and
+   * nowhere near `git`. */
   nearby: boolean;
   /** Git status, branches and worktrees are real and worth showing. */
   git: boolean;
@@ -60,7 +64,7 @@ export const caps: Capabilities = {
   trash: platform !== "android",
   installApk: platform === "android",
   directTouch: platform === "android" || (platform === "web" && coarsePointer()),
-  nearby: platform !== "web",
+  nearby: true,
   git: platform !== "web",
   folderPicker: platform === "web" && hasDirectoryPicker(),
   dropImport: platform === "web",

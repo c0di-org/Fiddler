@@ -342,8 +342,34 @@ button {
 }
 
 .place.device { position: relative; }
-.device-lock { margin-left: auto; color: var(--fg-faint); }
+.device-lock { color: var(--fg-faint); }
 .device-self { margin: 5px 6px 1px; color: var(--fg-faint); font-size: 11px; }
+
+/* Whatever trails the name first is what pushes the group right; everything
+   after it only needs a gap. Written as one rule rather than `margin-left:auto`
+   on each marker, because two of them with auto margins would split the space
+   and strand the first one in the middle of the row. */
+.place.device .place-label + * { margin-left: auto; }
+.place.device .place-label + * ~ * { margin-left: 5px; }
+
+/* How the device is attached. Faint on purpose: it is the answer to a question
+   you only ask when two rows look alike, not something to read every time. */
+.device-how { flex: none; color: var(--fg-faint); opacity: 0.75; }
+.place.device.active .device-how { color: inherit; opacity: 0.6; }
+
+/* Only ever rendered by the web build, where there is no USB host and no
+   network transport — so the row must not imply a phone is really attached. */
+.device-demo {
+  flex: none;
+  padding: 1px 5px;
+  border: 1px solid var(--hair-soft);
+  border-radius: 999px;
+  color: var(--fg-faint);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
 
 /* ------------------------------------------------------------------ usb --
  *
@@ -354,7 +380,9 @@ button {
  */
 .usb-device { margin-bottom: 2px; }
 
-.usb-slow { margin-left: auto; color: var(--git-modified); }
+/* Placement is the shared trailing-marker rule up with `.place.device`; this
+   only has to say which colour "slow" is. */
+.usb-slow { color: var(--git-modified); }
 
 .usb-stage {
   display: flex;
@@ -444,24 +472,32 @@ button {
   color: var(--fg-faint);
 }
 
-/* The link banner. Amber rather than red: this is information, not a fault. */
-.usb-link-banner {
+/* A statement about the place you are standing in: the link speed on a cable,
+   or which way files can travel here. Amber for the first, because it is
+   costing you something; the surface's own hairline for the second, because a
+   rule is not a fault and must not read like one. */
+.notice-banner {
   display: flex;
   align-items: flex-start;
   gap: 9px;
   margin: 8px 10px 0;
   padding: 9px 11px;
-  border: 1px solid color-mix(in srgb, var(--git-modified) 30%, transparent);
+  border: 1px solid var(--hair-soft);
   border-radius: var(--r-md);
-  background: color-mix(in srgb, var(--git-modified) 9%, var(--surface-2));
+  background: var(--surface-2);
   font-size: 11.5px;
   line-height: 1.45;
 }
-.usb-link-banner > svg { flex: none; margin-top: 1px; color: var(--git-modified); }
-.usb-link-copy { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.usb-link-copy strong { font-weight: 600; }
-.usb-link-copy span { color: var(--fg-dim); }
-.usb-link-dismiss {
+.notice-banner.warn {
+  border-color: color-mix(in srgb, var(--git-modified) 30%, transparent);
+  background: color-mix(in srgb, var(--git-modified) 9%, var(--surface-2));
+}
+.notice-banner > svg { flex: none; margin-top: 1px; color: var(--fg-dim); }
+.notice-banner.warn > svg { color: var(--git-modified); }
+.notice-copy { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.notice-copy strong { font-weight: 600; }
+.notice-copy span { color: var(--fg-dim); }
+.notice-dismiss {
   flex: none;
   align-self: center;
   padding: 4px 9px;
@@ -472,7 +508,7 @@ button {
   font: inherit;
   font-size: 11px;
 }
-.usb-link-dismiss:hover { background: var(--fill-hover); }
+.notice-dismiss:hover { background: var(--fill-hover); }
 .crumb svg { vertical-align: -2px; margin-right: 4px; }
 
 .favorites-list {
@@ -3195,10 +3231,13 @@ li.md-task {
     flex-basis: 44px;
   }
 
-  /* The lock and the throttle bolt hang off the end of a label that is no
-     longer there, and would sit on top of the icon. */
+  /* The lock, the throttle bolt, the attachment glyph and the demo tag all hang
+     off the end of a label that is no longer there, and would sit on top of the
+     icon. The section heading still carries the cable or the aerial. */
   .device-lock,
-  .usb-slow {
+  .usb-slow,
+  .device-how,
+  .device-demo {
     display: none;
   }
 

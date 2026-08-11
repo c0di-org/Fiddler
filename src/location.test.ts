@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { locationCaps } from "./location.ts";
+import { locationCaps, transferNote } from "./location.ts";
 
 test("a real path can do everything", () => {
   const at = locationCaps("/Users/codi/Developer");
@@ -20,7 +20,7 @@ test("a device takes a paste and nothing else", () => {
     assert.equal(at.modify, false, path);
     assert.equal(at.copy, false, path);
     assert.equal(at.shell, false, path);
-    assert.equal(at.where, "a connected device");
+    assert.equal(at.where, "a device on a cable");
   }
 });
 
@@ -31,5 +31,23 @@ test("a nearby Fiddler can be copied from but not written to", () => {
   assert.equal(at.create, false);
   assert.equal(at.modify, false);
   assert.equal(at.shell, false);
-  assert.equal(at.where, "a nearby device");
+  assert.equal(at.where, "a device over Wi-Fi");
+});
+
+test("the transfer note points the opposite way in each device space", () => {
+  const cable = transferNote("mtp://RFCY71NMVTA/65537/DCIM");
+  const wifi = transferNote("fiddler://abc123/Documents");
+  assert.ok(cable && wifi);
+  // The whole point of the note: the two spaces are inverses, and saying so is
+  // only useful if the wording actually differs between them.
+  assert.notEqual(cable.title, wifi.title);
+  assert.match(cable.title, /onto this device, not off/);
+  assert.match(wifi.title, /off this device, not onto/);
+});
+
+test("a local folder has no transfer note to make", () => {
+  // Nothing to warn about, so nothing is drawn — the banner must not become
+  // furniture that appears above every listing.
+  assert.equal(transferNote("/Users/codi/Developer"), null);
+  assert.equal(transferNote(""), null);
 });

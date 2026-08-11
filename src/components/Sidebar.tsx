@@ -4,7 +4,7 @@ import { FAVORITE_DRAG_TYPE, FOLDER_DRAG_TYPE, currentFolderDrag } from "../favo
 import { dropProps, useDropTarget, type DropItems } from "./use-drop-target.ts";
 import type { Favorite, PeerDevice, Place, UsbDevice } from "../types";
 import { connectionNotice } from "../usb";
-import { BoltIcon, CableIcon, CloseIcon, DeviceIcon, FolderIcon, FolderPlusIcon, HeartIcon, LaptopIcon, LockIcon, SparkIcon, placeIcon } from "./icons";
+import { BoltIcon, CableIcon, CloseIcon, DeviceIcon, FolderIcon, FolderPlusIcon, HeartIcon, LaptopIcon, LockIcon, SparkIcon, WifiIcon, placeIcon } from "./icons";
 import { UsbStorageRow } from "./UsbPanel";
 
 interface Props {
@@ -33,11 +33,16 @@ interface Props {
    * favourite is a bookmark, and dragging a folder there means "remember this",
    * not "put this inside it". */
   onDropItems?: DropItems;
-  /** How many devices hold access in either direction. Keeps the Devices
+  /** How many devices hold access in either direction. Keeps the Over Wi-Fi
    * section — and so the way into the panel — present when a device that was
    * allowed months ago isn't on the network today. */
   accessCount?: number;
   onManageAccess?: () => void;
+  /** These devices are a demonstration rather than hardware. True only in the
+   * web build, which has neither a USB host nor a network transport — so a row
+   * there has to say what it is rather than imply a phone is plugged into a
+   * browser tab. */
+  simulated?: boolean;
 }
 
 type DragKind = "folder" | "favorite";
@@ -84,6 +89,7 @@ export function Sidebar({
   onDropItems,
   accessCount = 0,
   onManageAccess,
+  simulated = false,
 }: Props) {
   const [dropIndex, setDropIndex] = useState<number | null>(null);
   const [draggingFavorite, setDraggingFavorite] = useState(false);
@@ -142,7 +148,7 @@ export function Sidebar({
 
       {usb.length > 0 && (
         <div className="sidebar-devices">
-          <SidebarHeading icon={<CableIcon size={13} />}>Connected</SidebarHeading>
+          <SidebarHeading icon={<CableIcon size={13} />}>On a cable</SidebarHeading>
           {usb.map((device) => {
             const notice = connectionNotice(device);
             const open = current.startsWith(`mtp://${device.serial}/`);
@@ -151,15 +157,21 @@ export function Sidebar({
                 <button
                   className={`place device ${open && device.storages.length <= 1 ? "active" : ""}`}
                   onClick={() => onOpenUsb(device)}
-                  title={notice ? notice.title : `Browse ${device.name}`}
+                  title={notice ? notice.title : `Browse ${device.name} over the cable`}
                 >
                   <span className="place-icon">
                     <DeviceIcon size={18} />
                   </span>
                   <span className="place-label">{device.name}</span>
+                  {simulated && <span className="device-demo">demo</span>}
                   {device.throttled && device.stage === "ready" && (
                     <BoltIcon size={11} className="usb-slow" />
                   )}
+                  {/* How this device got here, on the row rather than only on
+                      the heading above it. The same phone can be on the cable
+                      and on the network at once, and the two rows are otherwise
+                      identical — right down to the glyph. */}
+                  <CableIcon size={11} className="device-how" />
                 </button>
                 {/* The stage sits under the name rather than replacing the row,
                     so the device never disappears while it is still arriving. */}
@@ -191,7 +203,7 @@ export function Sidebar({
           the panel exists, so it must be reachable with nothing in the list. */}
       {(devices.length > 0 || accessCount > 0) && <div className="sidebar-devices">
         <SidebarHeading
-          icon={<DeviceIcon size={13} />}
+          icon={<WifiIcon size={13} />}
           action={
             onManageAccess && (
               <button
@@ -205,16 +217,18 @@ export function Sidebar({
             )
           }
         >
-          Devices
+          Over Wi-Fi
         </SidebarHeading>
         {devices.map((device) => {
           const asking = device.id === askingDeviceId;
           return (
             <div key={device.id} className="peer-device">
-              <button className={`place device ${current.startsWith(`fiddler://${device.id}/`) ? "active" : ""}`} onClick={() => onOpenDevice(device)} title={device.paired ? "Browse this device" : "Ask to browse this device"} disabled={asking}>
+              <button className={`place device ${current.startsWith(`fiddler://${device.id}/`) ? "active" : ""}`} onClick={() => onOpenDevice(device)} title={device.paired ? "Browse this device over Wi-Fi" : "Ask to browse this device over Wi-Fi"} disabled={asking}>
                 <span className="place-icon">{device.platform === "macos" || device.platform === "desktop" ? <LaptopIcon size={18} /> : <DeviceIcon size={18} />}</span>
                 <span className="place-label">{device.name}</span>
+                {simulated && <span className="device-demo">demo</span>}
                 {!device.paired && !asking && <LockIcon size={12} className="device-lock" />}
+                <WifiIcon size={11} className="device-how" />
               </button>
               {/* Under the name rather than replacing it, like a cable's stage:
                   the answer is a tap on the other device, so this can sit here

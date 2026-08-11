@@ -6,6 +6,7 @@
 
 import type { Place } from "../../types";
 import { buildDemo, DEMO_MOUNT } from "./demo";
+import { buildPeer, buildPhone, PEER_ID, PEER_NAME, PHONE_NAME, PHONE_SERIAL } from "./demo-device";
 import { LocalProvider, pickDirectory } from "./local-fs";
 import { MemoryProvider } from "./memory-fs";
 import { addMount, allMounts, joinSegments, mountExists, uniqueMountId } from "./vfs";
@@ -22,6 +23,28 @@ export function initMounts() {
     icon: "code",
     listed: true,
     provider: buildDemo(),
+  });
+
+  // The two simulated devices. Their mount ids *are* their addresses — see the
+  // scheme handling in `vfs.segments` — so `mtp://R5CW42XKPNZ/65537/DCIM`
+  // resolves here exactly the way `/Fiddler Demo/Pictures` does.
+  //
+  // `listed: false` because neither belongs in Places: a device appears in its
+  // own section of the sidebar, drawn from `usbDevices` and `nearbyDevices`,
+  // and listing it twice would suggest they were two different things.
+  addMount({
+    id: `mtp://${PHONE_SERIAL}`,
+    name: PHONE_NAME,
+    icon: "folder",
+    listed: false,
+    provider: buildPhone(),
+  });
+  addMount({
+    id: `fiddler://${PEER_ID}`,
+    name: PEER_NAME,
+    icon: "folder",
+    listed: false,
+    provider: buildPeer(),
   });
 }
 
