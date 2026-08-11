@@ -1,15 +1,26 @@
+<div align="center">
+
+<img src="src-tauri/icons/128x128@2x.png" width="96" alt="">
+
 # Fiddler
 
-A macOS file explorer that happens to understand git. Tauri 2 + React + Rust.
+### A file browser that knows what a repository is.
 
-It's a file browser first: big icons and real thumbnails, a dense sortable list
-view, type-to-jump, a preview pane. Git shows up as a quiet dot next to things
-that changed — and as the answer to the problem Finder can't solve: **worktrees
-you can't see**.
+Real thumbnails instead of grey document glyphs. A preview pane that costs what
+you can see, not what the file is. Git as a quiet dot beside what changed —
+and the one answer Finder has never had: **your worktrees, on screen**.
 
-## The worktree problem
+**[Try it in your browser →](https://files.c0di.com)**
 
-Linked worktrees live wherever the tool that made them decided to put them:
+<img src="docs/hero.png" width="880" alt="Fiddler showing a source folder in icon view — every file drawn as a real page — with the preview pane open on App.tsx">
+
+</div>
+
+---
+
+## The worktrees you can't see
+
+Linked worktrees end up wherever the tool that made them decided to put them:
 
 ```
 ~/Developer/n64/Mine64/.claude/worktrees/pause-tabs   ← hidden dotfolder in the repo
@@ -17,12 +28,66 @@ Linked worktrees live wherever the tool that made them decided to put them:
 /private/tmp/gitto-icon-deploy.9IbjSw                 ← ephemeral, already prunable
 ```
 
-Finder shows none of them. Fiddler reads `.git/worktrees/*` directly and hangs
-them off their repo as a `Worktrees` section, tagged with branch, `elsewhere`
+Finder shows none of them. Fiddler reads `.git/worktrees/*` straight off disk and
+hangs them under the repo they belong to — tagged with their branch, `elsewhere`
 when they live outside the repo tree, and `missing` when the folder is gone and
-`git worktree prune` would clean it up.
+`git worktree prune` would tidy it up.
 
-## Running it
+<div align="center">
+<img src="docs/worktrees.png" width="820" alt="A repository in list view with a Worktrees section expanded, each worktree tagged with its branch">
+</div>
+
+## What you get
+
+- **Thumbnails that mean something.** `main.rs` is drawn as a page of code.
+  `notes.md` is drawn as a page of prose. PDFs show page one, folders show what's
+  inside them, photos reuse the preview already in the file.
+- **Git without a git panel.** A dot for modified, staged, untracked, conflicted.
+  The branch on the folder. Ignored files dimmed rather than hidden.
+- **Two views, both dense.** Big icons or a sortable list you can twist open.
+  Type letters to jump. `space` for Quick Look.
+- **The whole verb list.** Copy, move, rename, trash, `⌘Z` to take it back,
+  multi-select, drag onto folders, favourites, name search and content search —
+  with a progress bar you can cancel on the long ones.
+- **Nearby devices.** Another Mac or Android on the same Wi-Fi appears in the
+  sidebar. Pairing is one tap here and one **Allow** over there; being visible on
+  the network authorises nothing on its own.
+- **A phone on a cable.** Plug in an Android device and browse it over MTP, with
+  real thumbnails for the photos and videos on it.
+
+## Fast on purpose
+
+- **One git pass per repo, not per folder.** `git status --porcelain=v2 -z` runs
+  once, is parsed into a path→code map with per-directory rollups, and is cached
+  until an fsevents watcher says otherwise. `--ignored=traditional` collapses
+  `node_modules/` to one entry instead of listing everything inside it.
+- **Highlighting that tracks the viewport, not the file.** One linear scan stores
+  a byte per line; only the sixty lines on screen are ever tokenised. A lockfile
+  opens like a text file, because to Fiddler it is one.
+- **Each preview takes the cheapest route macOS offers.** ImageIO decodes
+  straight to thumbnail size, Core Text lays text out as a page, Core Graphics
+  rasterises PDF pages at the size they'll be shown — all in-process. Quick Look
+  is kept for what only it can do: video, Keynote, Sketch, Office.
+- **Both views are virtualized**, and thumbnails render off the critical path in
+  four lanes, ordered outward from the middle of the viewport, cached on disk by
+  path, mtime, size and requested pixels.
+
+## Keys
+
+| | |
+|---|---|
+| `⌘1` `⌘2` | Icon / list view |
+| `⌘[` `⌘]` `⌘↑` | Back, forward, enclosing folder |
+| `space` | Quick Look — rendered markdown, highlighted source, paged PDFs |
+| `⇧⌘P` | Preview pane |
+| `⇧⌘.` | Show hidden files |
+| type letters | Jump to the first matching name |
+| `↵` `⌘↵` | Rename / open |
+| `⌘C` `⌘V` `⌘Z` | Copy, paste, undo |
+| `⌘⌫` | Move to Trash |
+| `⇧⌘N` `⌘N` | New folder / new text file |
+
+## Run it
 
 ```bash
 npm install && npm run tauri dev
@@ -35,11 +100,21 @@ produce — build a debug bundle instead:
 npx tauri build --debug --bundles app && open src-tauri/target/debug/bundle/macos/Fiddler.app
 ```
 
-## Web
+## Three targets, one interface
 
-Fiddler also runs in a browser, at [files.c0di.com](https://files.c0di.com).
-It is the same React front end — the whole port is a second implementation of
-one interface.
+`src/ipc.ts` is the seam. `@backend` resolves at build time to `src/backend/tauri.ts`
+(Rust over IPC) or `src/backend/web.ts` (a virtual filesystem in the tab), and
+nothing above that line knows which it got. `src/platform.ts` holds the capability
+flags that decide what each build offers.
+
+**macOS** — the full app: git, worktrees, nearby devices, USB, Quick Look, Trash.
+
+**Web** — [files.c0di.com](https://files.c0di.com), the same React front end.
+Browsing, both views, previews, editing, search. **Open Folder…** mounts a real
+folder read/write via the File System Access API (Chromium), and anything dragged
+onto the window is read in any browser. Nothing is uploaded — there is no server
+behind the page. Deliberately no git: a tab has no repository, and a file browser
+showing invented status is one you can't trust the rest of.
 
 ```bash
 npm run dev:web      # vite, port 1420
@@ -47,159 +122,39 @@ npm run build:web    # → dist-web
 npm run deploy       # build, then wrangler deploy
 ```
 
-`src/ipc.ts` is the seam. `@backend` resolves at build time to
-`src/backend/tauri.ts` (Rust over IPC) or `src/backend/web.ts` (a virtual
-filesystem in the tab), and nothing above that line knows which it got. The
-markdown parser, the highlighter, sort, search, and the thumbnail scheduler are
-all plain TypeScript that never learns the difference.
-
-The browser build opens on a demo folder, and can also browse **real** folders:
-**Open Folder…** in the sidebar uses the File System Access API to mount one
-with read/write access (Chromium only), and files or folders dragged onto the
-window are read in every browser. Nothing is uploaded — there is no server
-behind the page, which is also why edits to the demo folder don't survive a
-reload.
-
-What it does have: browsing, both views, sorting, type-to-jump, the preview
-pane, Quick Look, markdown rendering, syntax highlighting, image and text
-thumbnails, PDF pages via a lazily-loaded pdf.js chunk, creating, renaming,
-editing, copying, deleting, name search, the nearby-folder fallback, and content
-search.
-
-What it deliberately doesn't: **git**. No status dots, no branches, no
-worktrees. A tab has no git, and a file browser showing invented status is one
-you can't trust the rest of. Reveal in Finder, Open in Terminal and nearby
-devices are absent for the same reason. `src/platform.ts` holds the capability
-flags that decide what each build offers.
-
-## Android / Samsung DeX
-
-Fiddler also has an Android target, designed primarily for the wide, keyboard-
-and-pointer layout in Samsung DeX. Build an arm64 debug APK with:
+**Android / Samsung DeX** — built for the wide keyboard-and-pointer layout.
+Browsing, git status, previews, and a full-screen text editor. Deletions are
+permanent, with a confirmation, because Android gives Fiddler no system Trash.
 
 ```bash
 npm run tauri -- android build --debug --target aarch64
 ```
 
-The APK is written to
-`src-tauri/gen/android/app/build/outputs/apk/universal/debug/app-universal-debug.apk`.
-On its first launch, Android opens Fiddler's **All files access** setting. Enable
-it so the app can browse shared storage, then use **Internal storage** or the
-Downloads/Documents shortcuts. DeX keyboards accept both `Ctrl` and `⌘` for the
-existing shortcuts.
-
-The Android build keeps browsing, Git status, folder creation, rename, bounded
-text previews, image previews, cached in-app PDF pages, and streaming audio/video
-previews for formats Android can decode. It also has a full-screen text editor:
-tap the new-file button, name a `.txt`, `.md`, `.json` (or any other) file, then
-write and save it in place. Existing text files open in that editor; large or
-binary files still open in their installed Android app; opening an APK launches
-Android's package installer. Android deletions are permanent (with a
-confirmation), because Android does not provide Fiddler with a general system
-Trash. Terminal launching and macOS Quick Look thumbnails are not available on
-Android.
-
-## Nearby devices
-
-When Fiddler is open on a Mac and Android device on the same Wi-Fi network, the
-phone appears under **Devices** within a few seconds. Pairing is two taps and no
-code: tap the device you want, and a card appears on *that* device naming yours
-and asking whether it may browse. Nothing is readable until someone taps Allow
-there, and later visits are immediate. The paired device is then a normal
-navigable Fiddler location, using the same list/icon views, folder navigation,
-search, and bounded text reading as a local folder.
-
-Being visible on the network authorises nothing. A broadcast is trivial to forge
-on a shared network, so discovery decides only what appears in a sidebar —
-sharing a device name and a temporary LAN address — while the gate on anyone's
-files is the tap. An ask is refused unless it arrives from an address Fiddler
-can currently see broadcasting, it expires unanswered after a minute, and it is
-answered again from scratch the next time that device asks.
-
-## Keys
-
-| | |
-|---|---|
-| `⌘1` / `⌘2` | Icon / List view |
-| `⌘[` `⌘]` `⌘↑` | Back, forward, enclosing folder |
-| `space` | Quick Look — rendered markdown, highlighted source, paged PDFs |
-| `⇧⌘P` | Preview pane |
-| `⇧⌘.` | Show hidden files |
-| type letters | Jump to the first matching name |
-| `↵` / `⌘↵` | Rename / open |
-| `⌘⌫` | Move to Trash (permanently delete on Android) |
-| `↵` on a `.url` | Follow the shortcut |
-| `⇧⌘N` | New folder |
-| `⌘N` | New text file |
-
-## How it stays fast
-
-Performance work concentrated in five places:
-
-- **One git pass per repo, not per folder.** `git status --porcelain=v2 -z` runs
-  once per repo, is parsed into a path→code map plus per-directory rollups, and
-  is cached until an fsevents watcher says otherwise. Navigation is then a hash
-  lookup. `--ignored=traditional` and `-u normal` collapse `node_modules/` to a
-  single entry instead of listing 40,000 files.
-- **Repo discovery is memoized.** Walking up for `.git` costs one `stat` per
-  ancestor on a miss and a hash lookup on a hit; every directory walked past is
-  cached, including negative answers.
-- **Watcher events are filtered and coalesced.** Writes inside ignored
-  directories and git's own `*.lock` churn are dropped before they can trigger a
-  refresh; the rest debounce into one status pass per burst.
-- **Both views are virtualized** over fixed-height rows, and thumbnails are
-  generated off the critical path in four lanes, ordered outward from the middle
-  of the viewport, and cached on disk by (path, mtime, size, requested px).
-- **Previews cost what you can see, not what the file is.** A source file is
-  scanned once for a byte a line, and only the sixty lines on screen are ever
-  tokenized — a 200,000-line lockfile scans in about 10ms and highlights the
-  visible window in a third of a millisecond.
-
-Each preview takes the cheapest route macOS offers. Raster formats go through
-ImageIO, which decodes straight to thumbnail size and reuses an embedded EXIF
-preview when there is one. Text is laid out as a page by Core Text, and PDF
-pages are rasterised by Core Graphics at the size they'll be shown — both
-in-process, both well under a millisecond, where Quick Look would cost tens and
-a round trip to another process. Quick Look still handles what only it can:
-video, Keynote, Sketch, Office.
-
-That's why `main.rs` and `notes.md` get real thumbnails rather than the same
-grey document glyph Finder gives them.
-
-## Layout
+## Inside
 
 ```
 src-tauri/src/
   git/discover.rs   repo + worktree discovery, straight off disk, no subprocess
-  git/status.rs     porcelain-v2 parser, rollups        (13 unit tests)
-  git/mod.rs        the caches
+  git/status.rs     porcelain-v2 parser, rollups
   fs_scan.rs        directory listing, natural sort
-  thumb.rs          thumbnail cache, lane routing
-  thumb_text.rs     text files drawn as a page, via Core Text
-  thumb_pool.rs     four lanes, viewport-ordered              (9 unit tests)
-  page.rs           PDF pages rasterised at any size          (5 unit tests)
+  thumb*.rs         thumbnail cache, four lanes, text drawn via Core Text
+  page.rs           PDF pages rasterised at any size
+  transfer.rs       copy and move, progress and cancellation
+  mtp/              Android devices over USB
+  peers.rs          nearby devices, pairing, access
   watcher.rs        fsevents, filtered and debounced
-  commands.rs       the IPC surface
 src/
   store/tree.ts     navigation, sorting, list flattening
-  preview/          markdown parser + highlighter            (22 unit tests)
-  components/       IconGrid, DetailList, PreviewPane, QuickLook, CodeView,
-                    MarkdownView, PdfView, Thumb, FileGlyph, GitDot
+  preview/          markdown parser + highlighter
+  components/       IconGrid, DetailList, PreviewPane, QuickLook, Sidebar, …
 ```
 
-Tests: `cargo test` in `src-tauri/`, and `npm test` for the parser and
-highlighter — Node runs those TypeScript files directly, so there's no test
+Tests: `cargo test` in `src-tauri/`, and `npm test` for the parser, highlighter
+and web backend — Node runs those TypeScript files directly, so there's no test
 framework to install.
 
-## Known gaps
+## Not yet
 
-Not built yet: copy/paste/duplicate, tabs, column view, and multi-select rename.
-Folders can be dragged into Favorites in the sidebar, then reordered or removed;
-Quick Look renders documents
-itself rather than hosting the system's previews, so formats outside the list
-above show a still image instead.
-
-Shortcut files (`.url`, `.webloc`) are understood everywhere — Quick Look shows
-the destination and offers to open it — but only the web build draws the
-destination onto the tile. The desktop shows a generic shortcut glyph until
-`thumb.rs` learns the lane.
+Tabs, column view, and dragging in and out of Finder. Quick Look renders
+documents itself rather than hosting the system's previews, so formats outside
+the list above show a still image instead.
