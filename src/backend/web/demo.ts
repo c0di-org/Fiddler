@@ -34,6 +34,7 @@ export function buildDemo(): MemoryProvider {
   // ------------------------------------------------------------- the pitch
 
   text("Start Here.md", START_HERE, daysAgo(0, 2));
+  text("Devices.md", DEVICES, daysAgo(0, 1));
 
   // Shortcuts, sitting in the folder like anything else. Fiddler understands
   // `.url` files, so the way out of the demo is the same gesture as everything
@@ -119,6 +120,12 @@ this tab instead of a Rust process.
 Start in **Pictures** to see thumbnails fill in as you scroll, then **Projects**
 for syntax highlighting across Rust, TypeScript, JSON and CSS.
 
+Then look at the sidebar: there is a phone under **On a cable** and a Mac under
+**Over Wi-Fi**. Those two are a demonstration and are tagged as one — a browser
+tab has no USB host and no network transport. [Devices.md](Devices.md) walks
+through them and explains what they do in the Mac and Android builds, where
+they are real.
+
 Search does two things beyond matching names. In **Projects/aurora**, search
 \`backpressure\` — no filename contains it, so Fiddler reads the folder's text
 files and shows you the line. And from **Projects**, search \`parser\` — nothing
@@ -163,6 +170,104 @@ it goes before you follow it, or open it to go straight there.
 
 The signed Mac build isn't out yet, so both download shortcuts currently land on
 the releases page. The repo builds today with \`npm run tauri dev\`.
+`;
+
+const DEVICES = `# Your phone, in the sidebar
+
+Look at the sidebar. There are two sections under Places that a file browser
+does not usually have:
+
+| | |
+|---|---|
+| **On a cable** | A phone plugged into this computer, browsed over MTP |
+| **Over Wi-Fi** | Another Fiddler on the same network, once both ends agree |
+
+Both are showing something here, and both are tagged **demo**, because a
+browser tab has no USB host and no network transport. Everything else in this
+folder is a real filesystem living in this tab; those two rows are the one
+place Fiddler performs rather than reports. What follows is what they do when
+they are real.
+
+## Try the demo
+
+**Open the phone.** Click *Galaxy Z Fold 7* under **On a cable**. It spends a
+moment connecting — that stage line under the name is the real one — then opens
+with two storages, each with a meter showing how full it is. Go into
+\`Internal storage → DCIM → Camera\`. Those thumbnails are the point: a camera
+roll on a phone is otherwise a screen of identical grey glyphs.
+
+**Notice what you can't do.** A banner above the listing says files can go
+*onto* this device but not off it. Try dragging a photo out to the demo folder
+and the cursor refuses before you drop it. That refusal is real — it is the
+same rule the Mac app enforces, for the reason in the next section.
+
+**Open the Mac.** Click *Ada's MacBook Pro* under **Over Wi-Fi**. It has a
+padlock, so the first click asks rather than opens, and the sidebar waits for a
+tap on the other device. Here that tap comes back on its own after a moment. On
+a real network it does not: someone has to walk over and press **Allow**.
+
+The two devices are exact opposites, which is worth seeing side by side. Files
+go onto the phone and come off the Mac.
+
+## What the real thing does
+
+### On a cable
+
+Plug an Android phone into a Mac running Fiddler and it appears in that section
+without anything being installed on either end. What makes it worth having is
+not the browsing — it is what happens between plugging in and browsing, which
+every other MTP app on the Mac reports as *device not detected*:
+
+- **The phone is locked**, or still set to charge-only. It is connected and has
+  told us its model; it is just exposing no storages. Fiddler says so, tells you
+  to pull down the notification shade and choose *File transfer*, and picks it
+  up on its own when you do.
+- **Another app is holding it.** Usually macOS's own \`ptpcamerad\`, which claims
+  every PTP device on connection and then cannot transfer files from an Android
+  — it holds the phone purely to deny it. Fiddler names the process and offers
+  to quit it for you.
+- **The cable is slow.** USB reports the speed both ends negotiated, so Fiddler
+  states that and what it costs, without claiming to know which end was the
+  limit. Most USB-C cables sold with phones are USB 2.0 even though the
+  connector is identical to a USB 3 one.
+
+Thumbnails are the part that took the work. A photo on a phone is several
+megabytes and there are thousands of them, so Fiddler reads the first 256 KB of
+a file and cuts the embedded EXIF thumbnail out of it — about 9 ms — and only
+asks the device to render one when that won't do. Videos always cost the device
+a real decode, 85–138 ms each, which is why nothing reads a head it cannot use.
+
+Copying **onto** the phone works. Copying **off** it does not yet, and neither
+does renaming or deleting: MTP has the calls, Fiddler does not make them. That
+is why the banner says what it says rather than letting you find out at the end
+of a drag.
+
+### Over Wi-Fi
+
+Another Mac or Android running Fiddler on the same network appears by itself.
+Being visible authorises nothing — a device in that list can read nothing at
+all until it is paired, and pairing is one tap here and one **Allow** over
+there. There is no code to type and no account involved.
+
+Access is remembered in both directions and both can be taken back
+independently, which are genuinely two different questions: who can read the
+files on this machine, and whose files this machine kept a key to. The padlock
+beside the section heading opens the list of both.
+
+Files can be copied **off** a nearby device. Putting them onto one is not
+implemented, which is the mirror image of the cable — and the reason those two
+rows, which otherwise look identical, are kept in separate sections with the
+mechanism drawn on each one.
+
+## Why this is faked when the git dots aren't
+
+Fiddler's web build refuses to show git status, because a file browser that
+invents state about **your own files** is one you cannot trust about anything
+else. These devices are a different thing: they are not a claim about anything
+on your disk, they are a labelled demonstration of a feature that cannot be
+screenshotted usefully — and the label is on every row, not buried here.
+
+If you want the real ones, the Mac app is the download shortcut in this folder.
 `;
 
 const AURORA_README = `# aurora
@@ -510,7 +615,9 @@ second implementation of the one interface it talks to.
 **What doesn't, and won't**
 
 - Git status, branches and worktrees. A tab has no git.
-- Reveal in Finder, Open in Terminal, nearby devices.
+- Reveal in Finder and Open in Terminal. There is no shell behind a tab.
+- Devices, for real. A tab has no USB host and no network transport, so the
+  two in the sidebar are a labelled demo — see \`Devices.md\`.
 - HEIC, PSD and camera raw thumbnails — those are macOS decoding the file.
 
 ## 0.0.9 — android

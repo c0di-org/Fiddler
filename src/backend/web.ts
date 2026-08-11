@@ -7,7 +7,8 @@
  * `platform.ts`). */
 
 import { natural } from "../sort";
-import type { Entry, PairingInfo, PdfMeta, RepoInfo, TransferProgress } from "../types";
+import type { Entry, NearbyAccess, PairOutcome, PdfMeta, PeerDevice, RepoInfo, TransferProgress, UsbDevice } from "../types";
+import * as fake from "./web/demo-device";
 import { canThumb } from "./web/render";
 import { nearbyEntries, searchContents } from "./web/search-fs";
 import { importDropped, initMounts, openFolder, places } from "./web/session";
@@ -87,10 +88,55 @@ function invalidate(path: string) {
 
 const unavailable = (what: string) => () => Promise.reject(new Error(`${what} isn’t available in the browser`));
 
+// ------------------------------------------------------- simulated devices
+//
+// The one place this backend performs rather than reports. Everything above is
+// a real answer about a real (if in-memory) filesystem; the two devices below
+// do not exist, and say so on every row they draw — see the reasoning at the
+// top of `demo-device.ts`, and `Devices.md` in the demo tree, which is written
+// for the person looking at it rather than for whoever is reading this.
+//
+// The state machines are here rather than in `demo-device.ts` because they are
+// the part that has to match the Rust backend's shape: a stage that advances on
+// its own and pushes to subscribers, and a pairing call whose ordinary first
+// answer is "still waiting".
+
+/** How long the cable spends connecting. Long enough to see the stage line
+ * under the device name, short enough that nobody waits for a demo. */
+const CONNECT_MS = 1_400;
+/** How long the other device takes to "tap Allow". Two polls of `App.tsx`'s
+ * pairing loop, so the waiting state is genuinely rendered. */
+const ALLOW_MS = 1_800;
+
+let phone: UsbDevice = fake.phoneAt("connecting");
+const usbWatchers = new Set<(devices: UsbDevice[]) => void>();
+let plugTimer: number | null = null;
+
+/** Starts the connection the first time anything asks about devices, which is
+ * on mount — so the stage advances while someone is reading the first folder,
+ * exactly as a real cable does. */
+function beginConnecting() {
+  if (plugTimer !== null || phone.stage === "ready") return;
+  plugTimer = setTimeout(() => {
+    phone = fake.phoneAt("ready");
+    usbWatchers.forEach((fn) => fn([phone]));
+  }, CONNECT_MS) as unknown as number;
+}
+
+let peerPaired = false;
+let pairingSince = 0;
+/** Unix seconds when the peer was allowed, for the access sheet's "since". */
+let pairedAt = 0;
+
 const backend: Backend = {
   // ------------------------------------------------------------ browsing
 
   async listDir(path, showHidden) {
+    // A device root lists its storages rather than a folder's contents, and
+    // those entries can't be derived from the tree — see `storageListing`.
+    const storages = fake.storageListing(path, phone);
+    if (storages) return { path, entries: storages, repoRoot: null, worktrees: [], statusPending: false };
+
     const nodes = await vfs.listDir(path);
     const entries = nodes
       .filter((node) => showHidden || !node.name.startsWith("."))
@@ -145,31 +191,72 @@ const backend: Backend = {
 
   sidebarPlaces: async () => places(),
 
-  nearbyDevices: async () => [],
+  nearbyDevices: async (): Promise<PeerDevice[]> => [fake.peer(peerPaired)],
 
-  nearbyPairingInfo: unavailable("Nearby devices") as () => Promise<PairingInfo>,
+  nearbyPairingInfo: async () => ({ id: "web-tab", name: fake.SELF_NAME, root: "/" }),
 
-  pairNearbyDevice: unavailable("Pairing"),
+  /** The half of pairing that happens over here. `waiting` is the honest first
+   * answer on a real network too — the other half is a tap on that device — so
+   * this waits rather than resolving at once and skipping the state the sidebar
+   * exists to show. */
+  async pairNearbyDevice(): Promise<PairOutcome> {
+    if (peerPaired) return "paired";
+    if (pairingSince === 0) pairingSince = Date.now();
+    if (Date.now() - pairingSince < ALLOW_MS) return "waiting";
+    peerPaired = true;
+    pairedAt = Math.floor(Date.now() / 1000);
+    pairingSince = 0;
+    return "paired";
+  },
 
+  // Nothing out there to ask, so nothing ever arrives asking.
   nearbyRequests: async () => [],
 
   respondNearbyRequest: unavailable("Pairing"),
 
-  // Nothing can be allowed here, so there is never anything to withdraw.
-  nearbyAccess: async () => ({ allowed: [], trusted: [], selfName: "" }),
+  /** Only the outbound direction is ever populated: this tab holds a key to the
+   * other device once you pair, and nothing has been allowed *in* here because
+   * there is nothing out there to allow in. */
+  nearbyAccess: async (): Promise<NearbyAccess> => ({
+    allowed: [],
+    trusted: peerPaired
+      ? [{ id: fake.PEER_ID, name: fake.PEER_NAME, platform: "macos", since: pairedAt, online: true }]
+      : [],
+    selfName: fake.SELF_NAME,
+  }),
 
-  withdrawNearbyDevice: unavailable("Nearby devices"),
+  // Withdrawing needs an inbound grant, and there are none to withdraw.
+  withdrawNearbyDevice: unavailable("Withdrawing access"),
 
-  forgetNearbyDevice: unavailable("Nearby devices"),
+  /** Dropping this tab's own key. Real in the way that matters: the padlock
+   * comes back, and the next open has to ask again. */
+  forgetNearbyDevice: async () => {
+    peerPaired = false;
+    pairedAt = 0;
+  },
 
-  // A browser tab is not a USB host, so there is never a device to report and
-  // never a stage to change. Empty and silent rather than `unavailable`: the
-  // sidebar asks for these unprompted on every start, and a rejected promise
-  // there would be an error nobody caused.
-  usbDevices: async () => [],
-  onUsbDevices: async () => () => {},
+  /** A browser tab is not a USB host. This one device is a demonstration and
+   * every row that draws it says so — see the note above and `Devices.md`. */
+  async usbDevices() {
+    beginConnecting();
+    return [phone];
+  },
+
+  async onUsbDevices(fn) {
+    beginConnecting();
+    usbWatchers.add(fn);
+    return () => usbWatchers.delete(fn);
+  },
+
+  // A listing here is a map lookup rather than a round trip per object, so a
+  // folder is whole by the time `listDir` resolves and there is never a
+  // remainder to stream. The cost this stands in for is described in
+  // `Devices.md`, which is the honest way to convey it.
   onUsbEntries: async () => () => {},
-  releaseUsbDevice: unavailable("USB devices"),
+
+  // Never reached: the demo phone is never `blocked`, so the button that calls
+  // this is never drawn.
+  releaseUsbDevice: unavailable("Releasing a device"),
 
   // ------------------------------------------------------------ mutation
 

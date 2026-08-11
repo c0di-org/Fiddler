@@ -229,7 +229,12 @@ export class TreeStore {
 
   async up() {
     const i = this.path.lastIndexOf("/");
-    if (i > 0) await this.navigate(this.path.slice(0, i));
+    if (i <= 0) return;
+    // A device root has no enclosing folder: cutting `mtp://serial` again gives
+    // `mtp:/`, which is nobody's location and lists as an error. The same guard
+    // is in `drag.ts`'s `parentOf`, for the same reason.
+    if (this.path.slice(0, i).endsWith(":/")) return;
+    await this.navigate(this.path.slice(0, i));
   }
 
   async setShowHidden(v: boolean) {

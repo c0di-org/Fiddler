@@ -30,6 +30,27 @@ test("paths split and rejoin without gaining or losing separators", () => {
   assert.equal(parentOf("/Demo"), "");
 });
 
+test("a device address keeps its scheme through a split and a rejoin", () => {
+  // The whole point: `mtp://SERIAL` is one segment, so a child path stays an
+  // address the rest of the app recognises rather than becoming `/mtp:/SERIAL`.
+  assert.deepEqual(segments("mtp://RFCY71NMVTA/65537/DCIM"), ["mtp://RFCY71NMVTA", "65537", "DCIM"]);
+  assert.equal(joinSegments(["mtp://RFCY71NMVTA", "65537", "DCIM"]), "mtp://RFCY71NMVTA/65537/DCIM");
+  assert.equal(childPath("mtp://RFCY71NMVTA/65537", "DCIM"), "mtp://RFCY71NMVTA/65537/DCIM");
+  assert.equal(parentOf("mtp://RFCY71NMVTA/65537/DCIM"), "mtp://RFCY71NMVTA/65537");
+  assert.equal(basename("mtp://RFCY71NMVTA/65537/DCIM"), "DCIM");
+  // A trailing slash is how the sidebar addresses a device root, and it must
+  // not produce an empty last segment.
+  assert.deepEqual(segments("mtp://RFCY71NMVTA/"), ["mtp://RFCY71NMVTA"]);
+  assert.equal(parentOf("mtp://RFCY71NMVTA"), "");
+
+  assert.deepEqual(segments("fiddler://abc123/Documents"), ["fiddler://abc123", "Documents"]);
+  assert.equal(joinSegments(["fiddler://abc123", "Documents"]), "fiddler://abc123/Documents");
+
+  // A local file whose *name* mentions a scheme is still a local file — the
+  // pattern is anchored, so it can only match at the front of an address.
+  assert.deepEqual(segments("/Demo/notes on mtp://.txt"), ["Demo", "notes on mtp:", ".txt"]);
+});
+
 test("names that could escape their folder are refused", () => {
   assert.equal(validName("  notes.md  "), "notes.md");
   assert.throws(() => validName(""), /can’t be empty/);

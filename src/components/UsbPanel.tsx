@@ -1,5 +1,6 @@
 import type { UsbDevice } from "../types";
 import { capacity, connectionNotice, fullness, linkNotice } from "../usb";
+import { Banner } from "./Banner";
 import { BoltIcon, DeviceIcon, SdCardIcon } from "./icons";
 
 /**
@@ -60,16 +61,13 @@ export function UsbLinkBanner({
   const notice = linkNotice(device);
   if (!notice) return null;
   return (
-    <aside className="usb-link-banner">
-      <BoltIcon size={15} />
-      <div className="usb-link-copy">
-        <strong>{notice.title}</strong>
-        <span>{notice.detail}</span>
-      </div>
-      <button className="usb-link-dismiss" onClick={onDismiss} title="Dismiss">
-        Got it
-      </button>
-    </aside>
+    <Banner
+      icon={<BoltIcon size={15} />}
+      title={notice.title}
+      detail={notice.detail}
+      tone="warn"
+      onDismiss={onDismiss}
+    />
   );
 }
 

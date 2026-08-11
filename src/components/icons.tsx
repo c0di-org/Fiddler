@@ -187,6 +187,17 @@ export const CableIcon = stroked(
   </>
 );
 
+/** The other way a device gets here. Paired with `CableIcon` rather than drawn
+ * on its own: the two are only ever shown to tell one kind of device from the
+ * other, so they have to read as a pair at 13px. */
+export const WifiIcon = stroked(
+  <>
+    <path d="M1.9 5.6a8.6 8.6 0 0 1 12.2 0" />
+    <path d="M4.4 8.4a5 5 0 0 1 7.2 0" />
+    <path d="M6.9 11.2a1.6 1.6 0 0 1 2.2 0" />
+  </>
+);
+
 /** Link speed. Shown when a device negotiated USB 2.0 or slower. */
 export const BoltIcon = stroked(<path d="M9 1.75 3.75 9h3.5l-.75 5.25L12.25 7h-3.5Z" />);
 

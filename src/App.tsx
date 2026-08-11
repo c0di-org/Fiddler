@@ -13,6 +13,7 @@ import { NearbyAccessSheet } from "./components/NearbyAccessSheet";
 import { PairAsk } from "./components/PairAsk";
 import { Toolbar } from "./components/Toolbar";
 import { UsbConnecting, UsbLinkBanner } from "./components/UsbPanel";
+import { TransferNoteBanner } from "./components/Banner";
 import type { FolderTouchDragHandlers } from "./components/folder-touch-drag";
 import { GridIcon } from "./components/icons";
 import { describeItems, type DragItems, type DropVerb } from "./drag";
@@ -21,7 +22,7 @@ import { invalidate as peekChanged, setShowHidden as setPeekHidden } from "./fol
 import { formatSize, tildify } from "./format";
 import * as ipc from "./ipc";
 import { locationCaps } from "./location";
-import { caps, permissionHelp } from "./platform";
+import { caps, permissionHelp, platform } from "./platform";
 import { loadSession, restorable, saveSession } from "./session";
 import { parseShortcut } from "./preview/link";
 import { routeOf } from "./preview/route";
@@ -106,6 +107,10 @@ export default function App() {
   const [usb, setUsb] = useState<UsbDevice[]>([]);
   /** Devices whose slow-link banner has been dismissed, by serial. */
   const [linkSeen, setLinkSeen] = useState<Set<string>>(new Set());
+  /** Address spaces whose transfer-direction note has been dismissed. Keyed by
+   * space rather than by device: the rule is a property of the space, so being
+   * told it once for one phone is being told it for every phone. */
+  const [transferNoteSeen, setTransferNoteSeen] = useState<Set<string>>(new Set());
   const [nearby, setNearby] = useState<NearbyState | null>(null);
   const [nearbyBusy, setNearbyBusy] = useState(false);
   const [content, setContent] = useState<ContentState | null>(null);
@@ -679,6 +684,39 @@ export default function App() {
     () => usb.find((device) => store.path.startsWith(`mtp://${device.serial}/`)) ?? null,
     [usb, store.path]
   );
+
+  /**
+   * Re-read the folder when a cable finishes connecting.
+   *
+   * Opening a device that is still arriving navigates straight into it, so the
+   * listing is fetched from a device that is not sharing anything yet — a phone
+   * reports zero storages until it is unlocked and set to file transfer. The
+   * stage panel covers that, and then hands over to a grid holding the empty
+   * answer from before. Nothing watches a device the way fsevents watches a
+   * disk, so the refresh has to be asked for.
+   *
+   * Keyed on the stage alone: adding `store.path` would re-list every folder as
+   * it was opened, and a listing on a real cable is a round trip per object.
+   */
+  const usbStage = currentUsb?.stage ?? null;
+  const lastUsbStage = useRef<string | null>(null);
+  useEffect(() => {
+    const before = lastUsbStage.current;
+    lastUsbStage.current = usbStage;
+    // Only the transition into `ready`, and never the first observation — that
+    // one is a device that was already connected when we looked.
+    if (before === null || before === "ready" || usbStage !== "ready") return;
+    if (!store.path.startsWith("mtp://")) return;
+    void store.invalidateDirs([store.path]);
+  }, [usbStage]);
+
+  /** Which of the two device address spaces this path is in, or null on a real
+   * one. Only ever used as a key for "you have been told this already". */
+  const transferSpace = store.path.startsWith("mtp://")
+    ? "device"
+    : store.path.startsWith("fiddler://")
+      ? "nearby"
+      : null;
 
   /** Takes on a newly mounted location and goes there. Both ways of gaining one
    * — the folder picker and a drop — add a Place, so both have to re-read them. */
@@ -1649,6 +1687,7 @@ export default function App() {
         onOpenFolder={mountFolder}
         onDropItems={onDropItems}
         accessCount={access ? access.allowed.length + access.trusted.length : 0}
+        simulated={platform === "web"}
         onManageAccess={
           caps.nearby
             ? () => {
@@ -1670,6 +1709,7 @@ export default function App() {
           canForward={store.canForward}
           branch={currentBranch}
           device={devices.find((device) => store.path.startsWith(`fiddler://${device.id}/`))}
+          usbDevice={currentUsb}
           onBack={() => void store.back()}
           onForward={() => void store.forward()}
           onUp={() => void store.up()}
@@ -1682,6 +1722,17 @@ export default function App() {
           onTogglePreview={() => store.togglePreview()}
           onDropItems={onDropItems}
         />
+
+        {/* Which way files can travel here, before anyone finds out the hard
+            way. Held back while a cable is still connecting, because the body
+            underneath is the stage panel rather than a listing, and rules about
+            dragging onto a phone you cannot see yet are just noise. */}
+        {transferSpace && !transferNoteSeen.has(transferSpace) && !(currentUsb && currentUsb.stage !== "ready") && (
+          <TransferNoteBanner
+            path={store.path}
+            onDismiss={() => setTransferNoteSeen((seen) => new Set(seen).add(transferSpace))}
+          />
+        )}
 
         {currentUsb && currentUsb.stage === "ready" && !linkSeen.has(currentUsb.serial) && (
           <UsbLinkBanner

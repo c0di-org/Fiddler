@@ -64,7 +64,7 @@ export function locationCaps(path: string): LocationCaps {
         modify: false,
         copy: false,
         shell: false,
-        where: "a connected device",
+        where: "a device on a cable",
       };
     case "nearby":
       return {
@@ -73,9 +73,47 @@ export function locationCaps(path: string): LocationCaps {
         modify: false,
         copy: true,
         shell: false,
-        where: "a nearby device",
+        where: "a device over Wi-Fi",
       };
     default:
       return LOCAL;
+  }
+}
+
+/**
+ * Which way files can travel here, said before anyone tries it.
+ *
+ * The two device spaces are exact inverses of one another — a cable takes a
+ * paste and gives nothing back, a nearby device gives and takes nothing — and
+ * there is no way to guess which one you are standing in by looking at it. The
+ * rows in the sidebar are the same shape, and both places list files that look
+ * every bit as draggable as a local folder.
+ *
+ * Fiddler already says all of this, but only *after* the attempt, as a toast
+ * (see the refusals in `App.tsx`). Telling someone that the drag they just made
+ * was never going to work is a worse answer than telling them beforehand, so
+ * this is the same fact moved to the front.
+ */
+export interface TransferNote {
+  title: string;
+  detail: string;
+}
+
+export function transferNote(path: string): TransferNote | null {
+  switch (spaceOf(path)) {
+    case "device":
+      return {
+        title: "Files can go onto this device, not off it",
+        detail:
+          "Drag or paste items here and they copy across the cable. Taking them back off — and renaming or deleting what's already here — isn't supported yet.",
+      };
+    case "nearby":
+      return {
+        title: "Files can come off this device, not onto it",
+        detail:
+          "Drag or copy items from here to a folder of your own. Putting items onto it, and changing what's there, isn't supported yet.",
+      };
+    default:
+      return null;
   }
 }

@@ -16,7 +16,7 @@ import {
   LaptopIcon,
 } from "./icons";
 import { dropProps, useDropTarget, type DropItems } from "./use-drop-target.ts";
-import type { PeerDevice } from "../types";
+import type { PeerDevice, UsbDevice } from "../types";
 
 interface Props {
   path: string;
@@ -39,6 +39,10 @@ interface Props {
   onTogglePreview: () => void;
   onNewFile: () => void;
   device?: PeerDevice;
+  /** The cable device the current path belongs to, for the same reason `device`
+   * is here: an `mtp://` address is made of a serial and a storage id, and
+   * neither is a word anyone would recognise as a place. */
+  usbDevice?: UsbDevice | null;
   /** A crumb is a folder, so it takes a drop like any other — which is how an
    * item goes back up the tree without navigating away from where it is. */
   onDropItems?: DropItems;
@@ -46,7 +50,12 @@ interface Props {
 
 export function Toolbar(p: Props) {
   const remote = p.device && p.path.startsWith(`fiddler://${p.device.id}/`);
-  const crumbs = remote ? buildRemoteCrumbs(p.path, p.device!) : buildCrumbs(p.path, p.home);
+  const cabled = p.usbDevice && p.path.startsWith(`mtp://${p.usbDevice.serial}/`);
+  const crumbs = remote
+    ? buildRemoteCrumbs(p.path, p.device!)
+    : cabled
+      ? buildDeviceCrumbs(p.path, p.usbDevice!)
+      : buildCrumbs(p.path, p.home);
   const here = locationCaps(p.path);
 
   // "deep" so the gaps between the controls drag the window too; the drag
@@ -221,5 +230,33 @@ function buildRemoteCrumbs(path: string, device: PeerDevice): Crumb[] {
   const out: Crumb[] = [{ label: device.name, path: `fiddler://${device.id}/` }];
   let acc = `fiddler://${device.id}`;
   for (const part of rest) { acc += `/${part}`; out.push({ label: part, path: acc }); }
+  return out;
+}
+
+/**
+ * Crumbs for a device on a cable.
+ *
+ * Without this an `mtp://` address falls through to `buildCrumbs`, which splits
+ * it on "/" like a filesystem path and produces `mtp:` › `R5CW42XKPNZ` › `65537`
+ * — three crumbs, none of which names anything a person put there. The serial
+ * is the device, and MTP's storage ids are numbers the protocol invented, so
+ * both are swapped for what the device calls itself.
+ */
+function buildDeviceCrumbs(path: string, device: UsbDevice): Crumb[] {
+  const rest = path.slice(`mtp://${device.serial}/`.length).split("/").filter(Boolean);
+  const out: Crumb[] = [{ label: device.name, path: `mtp://${device.serial}/` }];
+  let acc = `mtp://${device.serial}`;
+  for (const [depth, part] of rest.entries()) {
+    acc += `/${part}`;
+    // The first segment is always a storage id. A device with one storage never
+    // shows a crumb for it: the person chose the phone, not a partition of it.
+    if (depth === 0) {
+      if (device.storages.length <= 1) continue;
+      const storage = device.storages.find((s) => String(s.id) === part);
+      out.push({ label: storage?.description ?? part, path: acc });
+      continue;
+    }
+    out.push({ label: part, path: acc });
+  }
   return out;
 }
