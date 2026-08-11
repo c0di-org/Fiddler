@@ -94,8 +94,9 @@ pub struct UsbDevice {
     /// USB serial. Stable across the whole connection sequence and readable
     /// before the device is opened, which is why `mtp://` is keyed on it.
     pub serial: String,
-    /// Best available name: the MTP model once we have a session, else the USB
-    /// product string.
+    /// Best available name, always via `device_label`: the MTP model once there
+    /// is a session, the USB product string before that. Both arrive written
+    /// for software rather than for a sidebar, so neither is used raw.
     pub name: String,
     pub vendor_id: u16,
     pub product_id: u16,
@@ -128,6 +129,90 @@ fn describe_link(speed: Option<mtp_rs::UsbSpeed>) -> (Option<String>, Option<u32
         Some(UsbSpeed::SuperPlus) => (Some("USB 3.2 Gen 2".into()), Some(10_000), false),
         _ => (None, None, false),
     }
+}
+
+/// What to call a device, from whichever strings we have.
+///
+/// USB descriptors and MTP `DeviceInfo` are written for software, not for a
+/// sidebar. A Galaxy reports its USB product string as `SAMSUNG_Android` — a
+/// manufacturer, an underscore, and the name of an operating system, which
+/// tells someone with two Android phones on the desk exactly nothing.
+///
+/// Applied to both sources on purpose. The MTP model is usually better, but it
+/// is only readable once a session opens, so a device that is connecting,
+/// locked, or held by another app shows the USB string for as long as it stays
+/// that way — which can be indefinitely. Cleaning only the good source would
+/// leave the bad one on screen in precisely the cases someone is staring at it
+/// wondering what went wrong.
+///
+/// This never invents a model. Where the string is generic the answer is the
+/// manufacturer and a noun, because "Samsung phone" is honestly less than we
+/// wish we knew, and `SAMSUNG_Android` is a machine's answer to a human's
+/// question. The name a person actually set on the phone lives in MTP's
+/// `DeviceFriendlyName` (property 0xD402), which mtp-rs does not expose.
+fn device_label(manufacturer: Option<&str>, model: Option<&str>) -> String {
+    let maker = tidy(manufacturer);
+    let model = tidy(model);
+
+    let generic = model.is_empty()
+        || model.eq_ignore_ascii_case("android")
+        || model.eq_ignore_ascii_case("mtp")
+        // "SAMSUNG Android" once the underscore is gone: the maker's own name
+        // followed by the OS is the same non-answer as the OS alone.
+        || maker
+            .split_whitespace()
+            .next()
+            .is_some_and(|first| {
+                model.len() > first.len()
+                    && model[..first.len()].eq_ignore_ascii_case(first)
+                    && model[first.len()..].trim().eq_ignore_ascii_case("android")
+            });
+
+    let maker = brand(&maker);
+    match (maker.is_empty(), generic) {
+        (true, true) => "USB device".into(),
+        (true, false) => model,
+        (false, true) => format!("{maker} phone"),
+        // Not repeated when the model already leads with the brand: a Pixel
+        // reports "Pixel 9", not "Google Pixel 9", but some devices do both.
+        (false, false) => {
+            if model.to_ascii_lowercase().starts_with(&maker.to_ascii_lowercase()) {
+                model
+            } else {
+                format!("{maker} {model}")
+            }
+        }
+    }
+}
+
+/// Underscores out, whitespace collapsed. Descriptor strings are frequently
+/// padded or joined with underscores rather than spaces.
+fn tidy(value: Option<&str>) -> String {
+    value
+        .unwrap_or_default()
+        .replace('_', " ")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// A manufacturer as it is written on the box.
+///
+/// Descriptors shout — `SAMSUNG`, `SONY` — but initialisms are genuinely
+/// upper-case, so length decides: `LG` and `HTC` keep their capitals while
+/// `SAMSUNG` becomes `Samsung`. Anything already mixed-case is left alone,
+/// since it was written by someone rather than generated.
+fn brand(maker: &str) -> String {
+    let first = maker.split_whitespace().next().unwrap_or_default();
+    // "Samsung Electronics Co., Ltd." is the manufacturer; "Samsung" is the
+    // brand, and the rest is for lawyers.
+    let first = first.trim_end_matches(',');
+    if first.len() > 3 && first.chars().all(|c| c.is_ascii_uppercase()) {
+        let mut out = first.to_ascii_lowercase();
+        out[..1].make_ascii_uppercase();
+        return out;
+    }
+    first.into()
 }
 
 /// How many entries come back from the initial `list_dir` call.
@@ -479,11 +564,10 @@ impl Worker {
                 listed: HashSet::new(),
                 snapshot: UsbDevice {
                     serial: serial.clone(),
-                    name: info
-                        .product
-                        .clone()
-                        .or_else(|| info.manufacturer.clone())
-                        .unwrap_or_else(|| "USB device".into()),
+                    name: device_label(
+                        info.manufacturer.as_deref(),
+                        info.product.as_deref(),
+                    ),
                     vendor_id: info.vendor_id,
                     product_id: info.product_id,
                     stage: Stage::Connecting,
@@ -982,9 +1066,14 @@ async fn advance(slot: &mut Slot, serial: &str) {
         slot.last_attempt = Some(Instant::now());
         match MtpDevice::open_by_serial(serial).await {
             Ok(device) => {
+                // The session's model is the better source, but it is not
+                // always a better *name* — Samsung answers this with the same
+                // `SAMSUNG_Android` the USB descriptor carries — so it goes
+                // through the same tidying rather than being trusted raw.
                 let info = device.device_info();
-                if !info.model.is_empty() {
-                    slot.snapshot.name = info.model.clone();
+                let named = device_label(Some(&info.manufacturer), Some(&info.model));
+                if named != "USB device" {
+                    slot.snapshot.name = named;
                 }
                 slot.device = Some(device);
             }
@@ -1362,8 +1451,11 @@ mod tests {
         let slot = fake.slot().await;
         assert_eq!(slot.snapshot.stage, Stage::Ready);
         // The USB product string is a placeholder until the session gives us the
-        // real model; reaching Ready must have replaced it.
-        assert_eq!(slot.snapshot.name, "Test Phone");
+        // real model; reaching Ready must have replaced it. The virtual device
+        // reports manufacturer "Fiddler" and model "Test Phone", and
+        // `device_label` puts the brand in front of a model that doesn't carry
+        // it — the same way a real "SM-F966U1" becomes "Samsung SM-F966U1".
+        assert_eq!(slot.snapshot.name, "Fiddler Test Phone");
         assert_eq!(slot.snapshot.storages.len(), 1);
         assert_eq!(slot.snapshot.storages[0].description, "Internal storage");
     }
@@ -1710,6 +1802,48 @@ mod tests {
         let (name, pid) = pick_claimant(&["ptpcamerad"]);
         assert_eq!(name.as_deref(), Some("ptpcamerad"));
         assert_eq!(pid, None);
+    }
+
+    #[test]
+    fn a_generic_descriptor_becomes_a_brand_and_a_noun() {
+        // Measured off a Galaxy Z Fold 7 over USB: this exact pair is what the
+        // descriptor carries, and `SAMSUNG_Android` is what reached the
+        // sidebar before this existed.
+        assert_eq!(device_label(Some("SAMSUNG"), Some("SAMSUNG_Android")), "Samsung phone");
+        assert_eq!(device_label(Some("SAMSUNG"), Some("Android")), "Samsung phone");
+        assert_eq!(device_label(Some("Google"), None), "Google phone");
+        // Nothing at all to go on is the one case that may name no brand.
+        assert_eq!(device_label(None, None), "USB device");
+    }
+
+    #[test]
+    fn a_real_model_survives_and_gains_its_brand() {
+        assert_eq!(device_label(Some("SAMSUNG"), Some("SM-F966U1")), "Samsung SM-F966U1");
+        assert_eq!(device_label(Some("Google"), Some("Pixel 9 Pro")), "Google Pixel 9 Pro");
+        // Already carries the brand, so it is not said twice.
+        assert_eq!(device_label(Some("SAMSUNG"), Some("Samsung Galaxy S24")), "Samsung Galaxy S24");
+        assert_eq!(
+            device_label(Some("Samsung Electronics Co., Ltd."), Some("Galaxy Z Fold7")),
+            "Samsung Galaxy Z Fold7"
+        );
+    }
+
+    #[test]
+    fn initialisms_keep_their_capitals_and_shouting_does_not() {
+        // The rule is length, because `LG` is genuinely upper-case and
+        // `SAMSUNG` is merely a descriptor shouting.
+        assert_eq!(device_label(Some("LG"), None), "LG phone");
+        assert_eq!(device_label(Some("HTC"), Some("HTC_Android")), "HTC phone");
+        assert_eq!(device_label(Some("SONY"), None), "Sony phone");
+        assert_eq!(device_label(Some("XIAOMI"), Some("XIAOMI Android")), "Xiaomi phone");
+    }
+
+    #[test]
+    fn descriptor_padding_never_reaches_the_sidebar() {
+        assert_eq!(device_label(Some("  SAMSUNG  "), Some("SM-F966U1  ")), "Samsung SM-F966U1");
+        assert_eq!(device_label(Some("SAMSUNG"), Some("")), "Samsung phone");
+        // An underscore-joined model is still a model, not a generic string.
+        assert_eq!(device_label(Some("OnePlus"), Some("ONEPLUS_A6013")), "ONEPLUS A6013");
     }
 
     #[test]
