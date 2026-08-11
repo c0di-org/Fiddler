@@ -994,6 +994,18 @@ button {
   contain: strict;
 }
 
+/* The view itself holds the keyboard focus and points at the lead item with
+   aria-activedescendant, so the focus ring belongs on the container. Drawn
+   inside, because an outline around the whole content area would otherwise be
+   clipped by the scroller on three sides and read as a stray line. */
+[data-view-focus]:focus {
+  outline: none;
+}
+
+[data-view-focus]:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--focus-ring);
+}
+
 .grid-sizer {
   position: relative;
 }

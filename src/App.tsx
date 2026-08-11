@@ -1272,14 +1272,132 @@ export default function App() {
     [targets, selection, revealCursor]
   );
 
-  const kb = useRef({ targets, selection, moveCursor, openTarget, copySelected, paste, trashSelected, newFolder, newTextFile, go, jumpTo, quickLook, undo });
-  kb.current = { targets, selection, moveCursor, openTarget, copySelected, paste, trashSelected, newFolder, newTextFile, go, jumpTo, quickLook, undo };
+  const kb = useRef({ targets, selection, moveCursor, openTarget, copySelected, paste, trashSelected, newFolder, newTextFile, go, jumpTo, quickLook, undo, listRows });
+  kb.current = { targets, selection, moveCursor, openTarget, copySelected, paste, trashSelected, newFolder, newTextFile, go, jumpTo, quickLook, undo, listRows };
 
+  /**
+   * ← and → in list view: a treegrid promises the disclosure triangles can be
+   * worked from the keyboard, and until now they could only be clicked. Closed
+   * opens, open steps in, and going left from an already-closed row climbs to
+   * the folder holding it — the shallowest row above it, which is the parent by
+   * construction since the list is a flattened tree.
+   */
+  const twist = useCallback((open: boolean) => {
+    const s = kb.current;
+    const lead = [...s.selection].pop();
+    const at = lead ? s.listRows.findIndex((r) => r.id === lead) : -1;
+    if (at < 0) {
+      s.moveCursor(open ? 1 : -1, false);
+      return;
+    }
+    const row = s.listRows[at];
+    const expandable = row.kind === "wt-group" || row.dirPath !== null;
+    if (expandable && row.expanded !== open) {
+      void store.toggle(row);
+      return;
+    }
+    if (open) {
+      s.moveCursor(1, false);
+      return;
+    }
+    for (let i = at - 1; i >= 0; i--) {
+      if (s.listRows[i].depth < row.depth) {
+        setSelection(new Set([s.listRows[i].id]));
+        anchorRef.current = s.listRows[i].id;
+        revealCursor();
+        return;
+      }
+    }
+  }, [revealCursor]);
+
+  /**
+   * The half of the keyboard that belongs to whichever view has focus. It used
+   * to live on `window` with everything else, where it competed with focus
+   * rather than composing with it: a printable key aimed at any control that
+   * wasn't an `<input>` was eaten by type-to-jump, and Space and ↵ on a focused
+   * button ran the file view's commands instead of pressing it.
+   */
+  const onViewKeyDown = useCallback((e: React.KeyboardEvent) => {
+    const el = e.target as HTMLElement;
+    if (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable) return;
+
+    const s = kb.current;
+    // The overlays own the keyboard while they're up, and the view they're
+    // covering keeps focus underneath them.
+    if (s.quickLook || editorActive.current) return;
+
+    const modifier = e.metaKey || e.ctrlKey;
+    if (modifier) {
+      // Everything else with a modifier is an app-wide command and is still
+      // answered on `window`, so that it works from the sidebar too.
+      if (e.key.toLowerCase() === "a") {
+        e.preventDefault();
+        setSelection(new Set(s.targets.map((t) => t.id)));
+      }
+      return;
+    }
+
+    const lead = [...s.selection].pop();
+    const target = lead ? s.targets.find((t) => t.id === lead) : undefined;
+    const perRow = store.view === "icons" ? iconsPerRow() : 1;
+
+    // Android keyboards are not consistent here: modern ones use a literal
+    // space, older DeX stacks use `Spacebar`, and a few only expose `code`.
+    if ((e.key === " " || e.key === "Spacebar" || e.key === "Space" || e.code === "Space") && target?.entry) {
+      e.preventDefault();
+      setQuickLook(true);
+      return;
+    }
+
+    switch (e.key) {
+      case "ArrowDown":
+        e.preventDefault();
+        s.moveCursor(perRow, e.shiftKey);
+        break;
+      case "ArrowUp":
+        e.preventDefault();
+        s.moveCursor(-perRow, e.shiftKey);
+        break;
+      case "ArrowRight":
+        e.preventDefault();
+        if (store.view === "icons") s.moveCursor(1, e.shiftKey);
+        else twist(true);
+        break;
+      case "ArrowLeft":
+        e.preventDefault();
+        if (store.view === "icons") s.moveCursor(-1, e.shiftKey);
+        else twist(false);
+        break;
+      case "Enter":
+        // Don't open a rename field that has nowhere to commit to: on a
+        // device the name is the one thing that can't be edited.
+        if (target && locationCaps(target.path).modify) {
+          e.preventDefault();
+          setRenamingId(target.id);
+        }
+        break;
+      default:
+        // Anything else printable starts (or continues) a type-to-jump search.
+        if (!e.altKey && e.key.length === 1 && e.key !== " ") {
+          e.preventDefault();
+          s.jumpTo(e.key);
+        }
+    }
+  }, [twist]);
+
+  /**
+   * The other half: commands that belong to the window rather than to the
+   * selection, so that ⌘Z still works with focus in the sidebar. Everything
+   * here takes a modifier — which is what keeps it out of the way of any
+   * control that wants a plain key for itself.
+   */
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const el = e.target as HTMLElement;
       if (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable) {
-        if (e.key === "Escape") (el as HTMLInputElement).blur();
+        // Handing focus to the view blurs the field and leaves the arrow keys
+        // somewhere useful; a bare blur() would drop focus on the body.
+        if (e.key === "Escape") focusView();
         return;
       }
 
@@ -1298,50 +1416,19 @@ export default function App() {
       if (modifier && !e.shiftKey && e.key.toLowerCase() === "z") { e.preventDefault(); void s.undo(); return; }
       const lead = [...s.selection].pop();
       const target = lead ? s.targets.find((t) => t.id === lead) : undefined;
-      const perRow = store.view === "icons" ? iconsPerRow() : 1;
-
-      // Android keyboards are not consistent here: modern ones use a literal
-      // space, older DeX stacks use `Spacebar`, and a few only expose `code`.
-      if ((e.key === " " || e.key === "Spacebar" || e.key === "Space" || e.code === "Space") && target?.entry && !modifier) {
-        e.preventDefault();
-        setQuickLook(true);
-        return;
-      }
 
       switch (e.key) {
-        case "ArrowDown":
-          e.preventDefault();
-          s.moveCursor(perRow, e.shiftKey);
-          break;
         case "ArrowUp":
           if (modifier) {
             e.preventDefault();
             void store.up();
             setSelection(new Set());
-          } else {
-            e.preventDefault();
-            s.moveCursor(-perRow, e.shiftKey);
-          }
-          break;
-        case "ArrowRight":
-          if (store.view === "icons") {
-            e.preventDefault();
-            s.moveCursor(1, e.shiftKey);
-          }
-          break;
-        case "ArrowLeft":
-          if (store.view === "icons") {
-            e.preventDefault();
-            s.moveCursor(-1, e.shiftKey);
           }
           break;
         case "Enter":
-          if (target) {
+          if (modifier && target) {
             e.preventDefault();
-            // Don't open a rename field that has nowhere to commit to: on a
-            // device the name is the one thing that can't be edited.
-            if (modifier) void s.openTarget(target);
-            else if (locationCaps(target.path).modify) setRenamingId(target.id);
+            void s.openTarget(target);
           }
           break;
         case "o":
@@ -1366,28 +1453,30 @@ export default function App() {
             void s.newFolder();
           }
           break;
-        case "a":
-          if (modifier) {
-            e.preventDefault();
-            setSelection(new Set(s.targets.map((t) => t.id)));
-          }
-          break;
         case "p":
           if (modifier && e.shiftKey) {
             e.preventDefault();
             store.togglePreview();
           }
           break;
+        // Switching views is aimed at the view, so it should have the arrow
+        // keys straight afterwards even when the press came from the sidebar.
+        // Focusing the outgoing view is enough to get there: it is unmounted a
+        // moment later, which drops focus to the body, which is the one state
+        // the incoming view will claim. Pressing ⌘1 while already in the grid
+        // remounts nothing, and this is also what handles that.
         case "1":
           if (modifier) {
             e.preventDefault();
             store.setView("icons");
+            focusView();
           }
           break;
         case "2":
           if (modifier) {
             e.preventDefault();
             store.setView("list");
+            focusView();
           }
           break;
         case "[":
@@ -1411,13 +1500,8 @@ export default function App() {
         case "Escape":
           setFilter("");
           setSelection(new Set());
+          focusView();
           break;
-        default:
-          // Anything else printable starts (or continues) a type-to-jump search.
-          if (!e.metaKey && !e.ctrlKey && !e.altKey && e.key.length === 1 && e.key !== " ") {
-            e.preventDefault();
-            s.jumpTo(e.key);
-          }
       }
     };
 
@@ -1440,6 +1524,17 @@ export default function App() {
       ? permissionHelp()
       : err.replace(/^Error:\s*/, "");
   }, [store.listing, searching, localSearchEmpty, nearbyBusy, contentBusy, nearbyResult]);
+
+  /**
+   * What a screen reader calls the grid or the list. The folder's own name, not
+   * its path: the path is already on the breadcrumb, and hearing the whole of
+   * it before every announcement of the contents would be its own punishment.
+   */
+  const viewLabel = useMemo(() => {
+    if (searching) return "Search results";
+    const name = store.path.split("/").filter(Boolean).pop();
+    return name ? `${name} contents` : "Folder contents";
+  }, [store.path, searching]);
 
   const statusText = useMemo(() => {
     // Outranks the count: a folder that couldn't be reopened is the one thing
@@ -1561,6 +1656,8 @@ export default function App() {
               }}
               onContextMenu={(c, x, y) => buildMenu(c ? (byId.get(c.id) ?? null) : null, x, y)}
               onBackgroundClick={() => setSelection(new Set())}
+              onKeyDown={onViewKeyDown}
+              label={viewLabel}
               touchFolderDrag={touchFolderDragHandlers}
               directTouch={caps.directTouch}
               dragItems={dragItems}
@@ -1589,9 +1686,17 @@ export default function App() {
                 if (t) void openTarget(t);
               }}
               onContextMenu={(r, x, y) => buildMenu(r ? (byId.get(r.id) ?? null) : null, x, y)}
-              onRenameCommit={(r, v) => void commitRename(r, v)}
-              onRenameCancel={() => setRenamingId(null)}
+              onRenameCommit={(r, v) => {
+                void commitRename(r, v);
+                focusView();
+              }}
+              onRenameCancel={() => {
+                setRenamingId(null);
+                focusView();
+              }}
               onBackgroundClick={() => setSelection(new Set())}
+              onKeyDown={onViewKeyDown}
+              label={viewLabel}
               touchFolderDrag={touchFolderDragHandlers}
               directTouch={caps.directTouch}
               dragItems={dragItems}
@@ -1639,7 +1744,10 @@ export default function App() {
           index={lead.at}
           total={targets.length}
           onStep={(d) => moveCursor(d, false)}
-          onClose={() => setQuickLook(false)}
+          onClose={() => {
+            setQuickLook(false);
+            focusView();
+          }}
         />
       )}
       {accessOpen && access && (
@@ -1666,7 +1774,10 @@ export default function App() {
           path={editor.path}
           parent={store.path}
           initialText={editor.text}
-          onClose={() => setEditor(null)}
+          onClose={() => {
+            setEditor(null);
+            focusView();
+          }}
           onCreated={(path) => {
             setSelection(new Set([path]));
             void store.navigate(store.path, false);
@@ -1694,6 +1805,17 @@ function reasonFor(error: unknown, path: string): string {
 /** Wait, for a poll that is deliberately paced rather than hammered. */
 function pause(ms: number) {
   return new Promise<void>((resolve) => window.setTimeout(resolve, ms));
+}
+
+/**
+ * The keyboard belongs to whichever view is on screen, so anything that takes
+ * focus away — a rename field, an overlay, the search box — has to hand it back
+ * or the arrows go dead until the next click. Found in the DOM rather than
+ * threaded through as a ref because there is only ever one of them, and the
+ * two views take turns being it.
+ */
+function focusView() {
+  document.querySelector<HTMLElement>("[data-view-focus]")?.focus({ preventScroll: true });
 }
 
 /** Approximate the grid's column count for arrow-key navigation. */

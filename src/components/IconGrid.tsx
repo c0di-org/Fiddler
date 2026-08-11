@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
+import { itemDomId } from "../a11y";
 import type { Entry, WorktreeInfo } from "../types";
 import { EmptyState } from "./EmptyState";
 import { FolderGlyph } from "./FileGlyph";
@@ -63,6 +64,11 @@ interface Props {
   onOpen: (cell: GridCell) => void;
   onContextMenu: (cell: GridCell | null, x: number, y: number) => void;
   onBackgroundClick: () => void;
+  /** Navigation and selection keys, handled here rather than on `window` so
+   * they only fire when this view actually holds focus. */
+  onKeyDown?: (e: React.KeyboardEvent) => void;
+  /** Names the grid for a screen reader — the folder being looked at. */
+  label: string;
   emptyMessage: string;
   /** Suppresses the empty state while a listing is still in flight. */
   loaded: boolean;
@@ -186,6 +192,15 @@ export function IconGrid(props: Props) {
     }
   }, [props.revealSelection, lead, rows, offsets, cellH, gap]);
 
+  // The keyboard lives on this element now, so something has to put focus here
+  // to begin with. Only when nothing else has claimed it: switching views with
+  // ⌘1 while typing in the filter field must not pull the caret out of it.
+  useEffect(() => {
+    if (document.activeElement === document.body) {
+      scrollerRef.current?.focus({ preventScroll: true });
+    }
+  }, []);
+
   const cellFrom = (e: React.MouseEvent): GridCell | null => {
     const host = (e.target as HTMLElement).closest<HTMLElement>("[data-cell-id]");
     if (!host) return null;
@@ -202,6 +217,18 @@ export function IconGrid(props: Props) {
     <div
       className="grid-scroller"
       ref={scrollerRef}
+      role="grid"
+      aria-label={props.label}
+      aria-multiselectable="true"
+      // Both counts describe the whole folder, not the handful of rows that are
+      // mounted: a virtualized grid that reports what it rendered tells a screen
+      // reader there are eleven items in a folder of forty thousand.
+      aria-rowcount={rows.length}
+      aria-colcount={cols}
+      aria-activedescendant={lead ? itemDomId("gc", lead) : undefined}
+      tabIndex={0}
+      data-view-focus
+      onKeyDown={props.onKeyDown}
       onPointerDown={(e) => {
         pointerType.current = e.pointerType;
       }}
@@ -223,23 +250,40 @@ export function IconGrid(props: Props) {
         props.onContextMenu(c, e.clientX, e.clientY);
       }}
     >
-      <div className="grid-sizer" style={{ height: totalH }}>
+      {/* The sizer only exists to give the scrollbar something to measure, so
+          it must not sit between the grid and its rows in the a11y tree. */}
+      <div className="grid-sizer" role="presentation" style={{ height: totalH }}>
         {rows.slice(firstRow, lastRow).map((row, i) => {
           const index = firstRow + i;
           const top = offsets[index];
           if (row.kind === "header") {
             return (
-              <div key={`h${index}`} className="grid-section" style={{ top }}>
-                {row.label}
+              <div
+                key={`h${index}`}
+                className="grid-section"
+                role="row"
+                aria-rowindex={index + 1}
+                style={{ top }}
+              >
+                <span role="gridcell" aria-colindex={1}>
+                  {row.label}
+                </span>
               </div>
             );
           }
           return (
-            <div key={index} className="grid-row" style={{ top, gap, paddingLeft: edge }}>
-              {row.cells.map((cell) => (
+            <div
+              key={index}
+              className="grid-row"
+              role="row"
+              aria-rowindex={index + 1}
+              style={{ top, gap, paddingLeft: edge }}
+            >
+              {row.cells.map((cell, col) => (
                 <Cell
                   key={cell.id}
                   cell={cell}
+                  column={col + 1}
                   width={cellW}
                   iconSize={iconSize}
                   selected={props.selection.has(cell.id)}
@@ -259,6 +303,7 @@ export function IconGrid(props: Props) {
 
 function Cell({
   cell,
+  column,
   width,
   iconSize,
   selected,
@@ -267,6 +312,8 @@ function Cell({
   onDropItems,
 }: {
   cell: GridCell;
+  /** 1-based position in its row, which is what `aria-colindex` counts. */
+  column: number;
   width: number;
   iconSize: number;
   selected: boolean;
@@ -286,6 +333,14 @@ function Cell({
       className={`cell ${selected ? "selected" : ""} ${ignored || e?.hidden ? "muted" : ""} ${
         touchDrag.dragging ? "touch-dragging" : ""
       } ${dropClass}`}
+      id={itemDomId("gc", cell.id)}
+      role="gridcell"
+      aria-colindex={column}
+      aria-selected={selected}
+      // Named outright, because the `title` that gives the cell its hover
+      // tooltip otherwise wins the name and every item is announced as its
+      // whole path. Said this way the path stays, as the description.
+      aria-label={cell.name}
       data-cell-id={cell.id}
       style={{ width }}
       title={cell.path}

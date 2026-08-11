@@ -108,19 +108,47 @@ the progress; the toast can't hold it.
 
 ## Accessibility
 
-The two main views have no roles, no focusable items and no selection semantics.
-`IconGrid` and `DetailList` render plain `div`s, and every key is handled by one
-`window` listener in `App.tsx`, so a screen reader is told nothing at all: not
-what's selected, not how many items there are, not that a list exists.
+### The grid and the list can be heard now
 
-`TextEditor` and `TintPicker` show the standard is understood — this just never
-reached the grid and the list. What it takes: `role="grid"`/`role="listbox"` on
-the scroller with `aria-rowcount`, `role="option"` and `aria-selected` per item,
-a real roving `tabIndex` so the lead item holds focus, and moving the keyboard
-handler onto the focused container so it composes with focus instead of
-competing with it. That last change also fixes a live oddity — type-to-jump
-currently swallows printable keys aimed at any custom control that isn't an
-`<input>`.
+Each view's scroller is the focusable thing: `role="grid"` over the cells,
+`role="treegrid"` over the list, both with `aria-rowcount` and per-row
+`aria-rowindex` describing the whole folder rather than the dozen rows that
+happen to be mounted. List rows carry `aria-level` and `aria-expanded`, the
+column headers carry `aria-sort` and an `aria-colindex` that follows a
+reordering, and every cell names itself — the name cell says so outright,
+because the `title` that gives it its hover tooltip otherwise wins the name and
+each item is announced as its whole path.
+
+Two decisions worth knowing about. The keyboard cursor is
+`aria-activedescendant` on the container rather than a roving `tabIndex` on the
+lead item: both views are virtualized, so scrolling past the lead unmounts it,
+and a roving `tabIndex` drops focus on the body when that happens — dead arrow
+keys until the next click. And the one `window` listener is now two. Navigation
+(arrows, Space, ↵, ⌘A, type-to-jump) belongs to whichever view has focus; the ⌘
+commands stay on `window`, so ⌘Z and ⌘V still work from the sidebar.
+
+That split is what fixed the live oddity, which was worse than the swallowed
+letter this entry used to describe: the listener only ever stepped aside for an
+`<input>`, so Space on *any* focused button opened Quick Look and ↵ started a
+rename on the selected file. The cost is that focus now has to be handed back —
+after a rename, after Quick Look or the editor closes, after Escape, after
+⌘1/⌘2 — or the arrows go dead where they used to work. `focusView` does that,
+and each view claims focus on mount when nothing else holds it.
+
+← and → in list view now work the triangles: closed opens, open steps in, left
+collapses or climbs to the parent. Declaring `aria-expanded` while leaving the
+only way to act on it a mouse click would have been a lie.
+
+What's left: nothing *announces* a change. The status bar's count, the note
+about a folder that couldn't be reopened and every toast are written into the
+page with no live region, so they reach only someone who goes looking. That is
+one `role="status"` and a decision about which of the three earns it. The
+sidebar is also still a column of plain buttons with no list semantics.
+
+And the verification was against the accessibility tree Chrome builds, driven
+from the browser build — the roles, names, counts and levels are right, and the
+keyboard was exercised end to end. How VoiceOver reads that tree aloud is
+untested.
 
 ## Craft
 
@@ -133,9 +161,10 @@ state, USB, pairing and the render. Three pieces come out cleanly, in this order
   nearby fallback, the content-search pass and the merge into `nameEntries` /
   `listRows`. It's the largest and most self-contained unit, it's pure data in
   and data out, and it's the part most worth having tests around.
-- **`useKeyboard`** — the `window` listener and the `kb` ref that feeds it. This
-  one should be extracted *as part of* the accessibility work above rather than
-  before it, since the fix moves where the listener lives.
+- **`useKeyboard`** — the two key handlers and the `kb` ref that feeds them.
+  Waiting on the accessibility work was the right call: the split into a view
+  half and a `window` half is what this hook now has to hold, and extracting it
+  first would have meant extracting the wrong shape. It's ready to come out.
 - **`useNearbyDevices`** — the discovery poll, the ask loop, and the incoming
   requests. Self-contained now that pairing is a real handshake.
 

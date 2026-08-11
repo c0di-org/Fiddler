@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 
+import { itemDomId } from "../a11y";
 import { formatSize, formatStamp } from "../format";
 import { kindOf } from "../kind";
 import type { Row, SortKey } from "../store/tree";
@@ -85,6 +86,11 @@ interface Props {
   onRenameCommit: (row: Row, name: string) => void;
   onRenameCancel: () => void;
   onBackgroundClick: () => void;
+  /** Navigation and selection keys, handled here rather than on `window` so
+   * they only fire when this view actually holds focus. */
+  onKeyDown?: (e: React.KeyboardEvent) => void;
+  /** Names the list for a screen reader — the folder being looked at. */
+  label: string;
   emptyMessage: string;
   /** Suppresses the empty state while a listing is still in flight. */
   loaded: boolean;
@@ -101,6 +107,7 @@ interface Props {
 
 export function DetailList(props: Props) {
   const { rows, selection, renamingId, revealSelection, searching } = props;
+  const viewRef = useRef<HTMLDivElement>(null);
   const scrollerRef = useRef<HTMLDivElement>(null);
   const pointerType = useRef<string | null>(null);
   const revealed = useRef(0);
@@ -124,6 +131,15 @@ export function DetailList(props: Props) {
         .map((key) => COLUMNS.find((column) => column.key === key)!)
         .filter(Boolean),
     [columnPrefs.order, narrow],
+  );
+  /**
+   * A column's visual place, 1-based. It is both what `order` needs (less one)
+   * and what `aria-colindex` counts, and deriving them from the same number is
+   * what stops a reordered list from being described in the saved order.
+   */
+  const columnPlace = useMemo(
+    () => new Map(columns.map((column, i) => [column.key, i + 1])),
+    [columns],
   );
   const columnStyle = useMemo<CSSProperties>(() => ({
     gridTemplateColumns: narrow
@@ -255,18 +271,44 @@ export function DetailList(props: Props) {
     }
   }, [revealSelection, lead, rows]);
 
+  // The keyboard lives on this element now, so something has to put focus here
+  // to begin with. Only when nothing else has claimed it: switching views with
+  // ⌘2 while typing in the filter field must not pull the caret out of it.
+  useEffect(() => {
+    if (document.activeElement === document.body) {
+      viewRef.current?.focus({ preventScroll: true });
+    }
+  }, []);
+
   const rowFrom = (e: React.MouseEvent): Row | null => {
     const host = (e.target as HTMLElement).closest<HTMLElement>("[data-row-id]");
     return host ? (byId.get(host.dataset.rowId!) ?? null) : null;
   };
 
   return (
-    <div className="list-view">
-      <div className="list-header" style={columnStyle}>
+    <div
+      className="list-view"
+      ref={viewRef}
+      role="treegrid"
+      aria-label={props.label}
+      aria-multiselectable="true"
+      // Both counts describe the whole folder rather than the mounted slice —
+      // and the header is a row too, which is what shifts every other one by one.
+      aria-rowcount={rows.length + 1}
+      aria-colcount={columns.length}
+      aria-activedescendant={lead ? itemDomId("lr", lead) : undefined}
+      tabIndex={0}
+      data-view-focus
+      onKeyDown={props.onKeyDown}
+    >
+      <div className="list-header" role="row" aria-rowindex={1} style={columnStyle}>
         {columns.map((c) => (
           <div
             key={c.key}
             className={`column-header column-${c.key}`}
+            role="columnheader"
+            aria-colindex={columnPlace.get(c.key)}
+            aria-sort={props.sortKey === c.key ? (props.sortAsc ? "ascending" : "descending") : "none"}
             onDragOver={(event) => event.preventDefault()}
             onDrop={(event) => {
               event.preventDefault();
@@ -276,7 +318,11 @@ export function DetailList(props: Props) {
             <button
               className={`lh ${props.sortKey === c.key ? "sorted" : ""}`}
               onClick={() => {
-                if (!suppressSort.current) props.onSort(c.key);
+                if (suppressSort.current) return;
+                props.onSort(c.key);
+                // Sorting is a thing you do *to* the list, so the arrows should
+                // still work afterwards; left alone, focus stays on the button.
+                viewRef.current?.focus({ preventScroll: true });
               }}
             >
               {c.label}
@@ -323,6 +369,7 @@ export function DetailList(props: Props) {
       <div
         className="list-scroller"
         ref={scrollerRef}
+        role="rowgroup"
         onPointerDown={(e) => {
           pointerType.current = e.pointerType;
         }}
@@ -348,17 +395,26 @@ export function DetailList(props: Props) {
           props.onContextMenu(row, e.clientX, e.clientY);
         }}
       >
-        <div className="list-sizer" style={{ height: rows.length * ROW_H }}>
-          <div className="list-window" style={{ transform: `translateY(${first * ROW_H}px)` }}>
-            {slice.map((row) => (
+        {/* Neither of these carries meaning — one sizes the scrollbar, the other
+            is the sliding window — so neither may stand between rowgroup and row. */}
+        <div className="list-sizer" role="presentation" style={{ height: rows.length * ROW_H }}>
+          <div
+            className="list-window"
+            role="presentation"
+            style={{ transform: `translateY(${first * ROW_H}px)` }}
+          >
+            {slice.map((row, i) => (
               <RowView
                 key={row.id}
                 row={row}
+                // Header row first, then the rows above the window that aren't
+                // mounted: both have to be counted or the position is a fiction.
+                rowIndex={first + i + 2}
                 selected={selection.has(row.id)}
                 renaming={row.id === renamingId}
                 searching={searching}
                 columnStyle={columnStyle}
-                columnOrder={columnPrefs.order}
+                columnPlace={columnPlace}
                 narrow={narrow}
                 onRenameCommit={props.onRenameCommit}
                 onRenameCancel={props.onRenameCancel}
@@ -377,26 +433,29 @@ export function DetailList(props: Props) {
 
 function RowView({
   row,
+  rowIndex,
   selected,
   renaming,
   searching,
   onRenameCommit,
   onRenameCancel,
   columnStyle,
-  columnOrder,
+  columnPlace,
   narrow,
   touchFolderDrag,
   dragItems,
   onDropItems,
 }: {
   row: Row;
+  /** Place in the whole list, header included — what `aria-rowindex` counts. */
+  rowIndex: number;
   selected: boolean;
   renaming: boolean;
   searching: boolean;
   onRenameCommit: (row: Row, name: string) => void;
   onRenameCancel: () => void;
   columnStyle: CSSProperties;
-  columnOrder: ColumnKey[];
+  columnPlace: Map<ColumnKey, number>;
   /** Two grid tracks instead of five; the cells that have no track must not be
    *  rendered at all, or they wrap onto an implicit row and break the fixed
    *  row height the virtual scroller measures with. */
@@ -427,6 +486,12 @@ function RowView({
       className={`lrow ${selected ? "selected" : ""} ${muted ? "muted" : ""} ${touchDrag.dragging ? "touch-dragging" : ""} ${
         row.kind === "wt-group" ? "section" : ""
       } ${dropClass}`}
+      id={itemDomId("lr", row.id)}
+      role="row"
+      aria-rowindex={rowIndex}
+      aria-selected={selected}
+      aria-level={row.depth + 1}
+      aria-expanded={expandable ? row.expanded : undefined}
       data-row-id={row.id}
       style={{ height: ROW_H, ...columnStyle }}
       {...dropHandlers}
@@ -456,9 +521,21 @@ function RowView({
       onPointerUp={touchDrag.onPointerUp}
       onPointerCancel={touchDrag.onPointerCancel}
     >
-      <div className="c-name" style={{ paddingLeft: 6 + row.depth * 17, order: narrow ? 0 : columnOrder.indexOf("name") }}>
+      <div
+        className="c-name"
+        role="gridcell"
+        aria-colindex={columnPlace.get("name")}
+        // The other four cells are a single string each and name themselves.
+        // This one is a triangle, an icon, the name and up to four pills, and
+        // is left nameless unless it says which of those it goes by.
+        aria-label={name}
+        style={{ paddingLeft: 6 + row.depth * 17, order: columnPlace.get("name")! - 1 }}
+      >
+        {/* The row carries aria-expanded, so the triangle is decoration on top
+            of it rather than a second, separately announced control. */}
         <span
           className={`twisty ${expandable ? "" : "hidden"} ${row.expanded ? "open" : ""}`}
+          aria-hidden="true"
           data-twisty
         >
           <Chevron size={11} />
@@ -514,19 +591,39 @@ function RowView({
 
       {!narrow && (
         <>
-          <div className="c-added" style={{ order: columnOrder.indexOf("added") }}>
+          <div
+            className="c-added"
+            role="gridcell"
+            aria-colindex={columnPlace.get("added")}
+            style={{ order: columnPlace.get("added")! - 1 }}
+          >
             {e && !e.nearby ? formatStamp(e.added) : ""}
           </div>
-          <div className="c-when" style={{ order: columnOrder.indexOf("modified") }}>
+          <div
+            className="c-when"
+            role="gridcell"
+            aria-colindex={columnPlace.get("modified")}
+            style={{ order: columnPlace.get("modified")! - 1 }}
+          >
             {e && !e.nearby ? formatStamp(e.mtime) : ""}
           </div>
         </>
       )}
-      <div className="c-size" style={{ order: narrow ? 1 : columnOrder.indexOf("size") }}>
+      <div
+        className="c-size"
+        role="gridcell"
+        aria-colindex={columnPlace.get("size")}
+        style={{ order: columnPlace.get("size")! - 1 }}
+      >
         {e && !e.nearby ? formatSize(e.size, e.kind === "dir") : ""}
       </div>
       {!narrow && (
-        <div className="c-kind" style={{ order: columnOrder.indexOf("kind") }}>
+        <div
+          className="c-kind"
+          role="gridcell"
+          aria-colindex={columnPlace.get("kind")}
+          style={{ order: columnPlace.get("kind")! - 1 }}
+        >
           {e ? kindOf(e) : row.kind === "worktree" ? "Worktree" : ""}
         </div>
       )}
