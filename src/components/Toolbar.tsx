@@ -1,5 +1,5 @@
 import { tildify } from "../format";
-import { locationCaps } from "../location";
+import { locationCaps, refusal } from "../location";
 import type { ViewMode } from "../store/tree";
 import {
   BranchIcon,
@@ -16,7 +16,7 @@ import {
   LaptopIcon,
 } from "./icons";
 import { dropProps, useDropTarget, type DropItems } from "./use-drop-target.ts";
-import type { PeerDevice, UsbDevice } from "../types";
+import type { PeerDevice, UsbDevice, Volume } from "../types";
 
 interface Props {
   path: string;
@@ -43,6 +43,9 @@ interface Props {
    * is here: an `mtp://` address is made of a serial and a storage id, and
    * neither is a word anyone would recognise as a place. */
   usbDevice?: UsbDevice | null;
+  /** Mounted volumes, so New File knows whether the folder in the crumbs is on
+   * a disk that refuses writes. */
+  volumes?: Volume[];
   /** A crumb is a folder, so it takes a drop like any other — which is how an
    * item goes back up the tree without navigating away from where it is. */
   onDropItems?: DropItems;
@@ -56,7 +59,7 @@ export function Toolbar(p: Props) {
     : cabled
       ? buildDeviceCrumbs(p.path, p.usbDevice!)
       : buildCrumbs(p.path, p.home);
-  const here = locationCaps(p.path);
+  const here = locationCaps(p.path, p.volumes ?? []);
 
   // "deep" so the gaps between the controls drag the window too; the drag
   // script still refuses to start a drag from buttons, inputs and labels.
@@ -118,7 +121,7 @@ export function Toolbar(p: Props) {
           className="tb-btn tb-new-file"
           disabled={!here.create}
           onClick={p.onNewFile}
-          title={here.create ? "New text file (⌘N)" : `Fiddler can’t create files on ${here.where} yet`}
+          title={here.create ? "New text file (⌘N)" : refusal(here, "create files")}
         >
           <NewFileIcon size={17} />
         </button>

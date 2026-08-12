@@ -13,6 +13,7 @@
 import type {
   ContentSearch,
   DirListing,
+  EjectOutcome,
   EntryBatch,
   Inspect,
   NearbyAccess,
@@ -33,6 +34,7 @@ import type {
   TransferProgress,
   Trashed,
   UsbDevice,
+  Volume,
 } from "../types";
 
 /** Stops a subscription. Matches Tauri's `UnlistenFn` so the Tauri backend can
@@ -93,6 +95,24 @@ export interface Backend {
   /** Quit whatever is holding a device, when it's something we recognise.
    * Resolves with the name of what was quit. */
   releaseUsbDevice(serial: string): Promise<string>;
+
+  /** Disks mounted right now: external drives, cards, disk images, shares.
+   * Never the startup disk — that one is not somewhere you arrive by plugging
+   * something in, and everything on it is already reachable from Places.
+   * Always empty in a browser tab, which has no volumes to have. */
+  volumes(): Promise<Volume[]>;
+  /** Fires when something is mounted or unmounted, with the whole list. What
+   * lets a drive appear in the sidebar the moment it is plugged in, and vanish
+   * when it is pulled out, without anything here asking again. */
+  onVolumes(fn: (volumes: Volume[]) => void): Promise<Unlisten>;
+  /** Put a volume away.
+   *
+   * `force` is not a retry: an ordinary eject resolves `busy` and leaves the
+   * volume exactly as it was, naming what is still holding it. Forcing one
+   * takes it out from under whatever that was, so the answer to "should we"
+   * belongs to the person whose files are on it — hence a parameter rather
+   * than a second attempt. */
+  ejectVolume(id: string, force: boolean): Promise<EjectOutcome>;
 
   // ------------------------------------------------------------ mutation
 

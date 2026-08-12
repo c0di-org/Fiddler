@@ -952,6 +952,7 @@ dependencies = [
  "dirs",
  "futures",
  "jni",
+ "libc",
  "mtp-rs",
  "ndk-context",
  "notify",
@@ -960,6 +961,7 @@ dependencies = [
  "objc2-core-foundation",
  "objc2-core-graphics",
  "objc2-core-text",
+ "objc2-disk-arbitration",
  "objc2-foundation",
  "objc2-image-io",
  "objc2-quick-look-thumbnailing",
@@ -2372,6 +2374,16 @@ dependencies = [
  "objc2",
  "objc2-core-foundation",
  "objc2-core-graphics",
+]
+
+[[package]]
+name = "objc2-disk-arbitration"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ee6933800935dccff2b811f1c5b804eb9b3d3347face044712188624bf547b45"
+dependencies = [
+ "libc",
+ "objc2-core-foundation",
 ]
 
 [[package]]

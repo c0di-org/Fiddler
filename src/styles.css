@@ -430,6 +430,72 @@ button {
   background: linear-gradient(90deg, var(--accent), var(--accent-2));
 }
 
+/* -------------------------------------------------------------- volumes --
+ *
+ * A mounted disk is drawn as a storage row — icon, name, meter, free space —
+ * because that is exactly what it is, and the rows above it under a phone are
+ * the same thing seen from the other side. What it adds is the eject control,
+ * which lives outside the navigating button rather than inside it: they are two
+ * different actions on one row, and nesting a button in a button is neither
+ * clickable nor announced correctly.
+ */
+.volume { position: relative; margin-bottom: 2px; }
+
+.volume-row { height: auto; padding-top: 5px; padding-bottom: 5px; }
+
+.volume-body { display: flex; flex-direction: column; gap: 3px; min-width: 0; flex: 1; }
+
+/* Name and padlock on one line, meter under it. */
+.volume-name { display: flex; align-items: center; gap: 5px; min-width: 0; }
+
+/* This disk will refuse a write. Stated on the row rather than discovered at
+   the moment of saving. */
+.volume-locked { flex: none; color: var(--fg-faint); }
+.place.volume-row.active .volume-locked { color: inherit; opacity: 0.7; }
+
+/* Sits over the right-hand end of the row it belongs to. Kept at full opacity
+   on touch, where there is no hover to reveal it with. */
+.volume-eject {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg-faint);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--fast) var(--ease), background var(--fast) var(--ease), color var(--fast) var(--ease);
+}
+
+.volume:hover .volume-eject,
+.volume-eject:focus-visible {
+  opacity: 1;
+}
+
+.volume-eject:hover {
+  background: var(--fill);
+  color: var(--fg);
+}
+
+/* An unmount can take a moment on a full disk, and the row has to look like it
+   heard the first press. */
+.volume-eject:disabled {
+  opacity: 1;
+  color: var(--fg-faint);
+  cursor: progress;
+}
+
+@media (hover: none) {
+  .volume-eject { opacity: 1; }
+}
+
 /* The waiting room: what fills the content area for a device that is still
    arriving. Centred and quiet, because there is nothing to do here. */
 .usb-panel {
@@ -509,6 +575,27 @@ button {
   font-size: 11px;
 }
 .notice-dismiss:hover { background: var(--fill-hover); }
+
+/* The one banner that asks something rather than saying it. Weighted heavier
+   than the dismiss beside it because it is the answer that does something —
+   and it is deliberately not the accent colour, because what it does is the
+   only thing in this app that can lose a write. */
+.notice-action {
+  flex: none;
+  align-self: center;
+  margin-right: 6px;
+  padding: 4px 10px;
+  border: 1px solid var(--hair);
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 560;
+  cursor: pointer;
+  transition: background var(--fast) var(--ease);
+}
+.notice-action:hover { background: var(--fill); }
 .crumb svg { vertical-align: -2px; margin-right: 4px; }
 
 .favorites-list {
@@ -3216,14 +3303,23 @@ li.md-task {
   .favorites-empty,
   .device-self,
   .usb-stage,
-  .usb-storage-body {
+  .usb-storage-body,
+  .volume-body {
+    display: none;
+  }
+
+  /* At 44px there is room for the icon and nothing beside it, so the eject
+     control would land on top of the glyph. The volume is still reachable —
+     tapping it opens the disk — and ejecting stays a Finder-width action. */
+  .volume-eject {
     display: none;
   }
 
   /* `.place.usb-storage` is listed separately because it out-specifies a bare
      `.place` and would otherwise keep its taller auto height. */
   .place,
-  .place.usb-storage {
+  .place.usb-storage,
+  .place.volume-row {
     justify-content: center;
     gap: 0;
     padding: 0;

@@ -18,7 +18,13 @@
  *
  * Offering a menu item that cannot work is worse than leaving it out, so the
  * menus ask here first — and the keyboard shortcuts behind them ask too, since
- * hiding "Move to Trash" while ⌘⌫ still fires would only move the confusion. */
+ * hiding "Move to Trash" while ⌘⌫ still fires would only move the confusion.
+ *
+ * A read-only volume is the fourth thing these menus have to ask about, and it
+ * is deliberately not a fourth address space — see `readOnlyVolume` below. */
+
+import type { Volume } from "./types";
+import { volumeFor } from "./volumes.ts";
 
 /** Which address space a path belongs to. */
 type Space = "local" | "nearby" | "device";
@@ -44,6 +50,19 @@ export interface LocationCaps {
    * The refusals are worth phrasing, because "not yet" is the honest answer:
    * MTP has a create-folder and a delete, and nothing here calls them. */
   where: string | null;
+  /** The name of the read-only volume this path is on, when it is on one.
+   *
+   * A fourth address space would have been the wrong shape. The three above are
+   * properties of the *path* — you can tell them apart by looking at the string
+   * — and read-only is a property of the *disk*, which the same path had and
+   * then didn't when someone flipped the lock tab on a card and remounted it.
+   * So it is a flag, resolved by asking which volume the path is on.
+   *
+   * It also has to be told apart from the three above when phrasing a refusal:
+   * "not yet" is the truth for a phone on a cable and a lie about a read-only
+   * disk, where the answer is not that Fiddler hasn't learned to write, it is
+   * that the kernel will refuse. See `refusal`. */
+  readOnlyVolume: string | null;
 }
 
 const LOCAL: LocationCaps = {
@@ -53,9 +72,19 @@ const LOCAL: LocationCaps = {
   copy: true,
   shell: true,
   where: null,
+  readOnlyVolume: null,
 };
 
-export function locationCaps(path: string): LocationCaps {
+/**
+ * What can be done in a place.
+ *
+ * `volumes` is optional, and the default is not laziness: only the handful of
+ * call sites standing in a real folder have a volume list to hand, and a path
+ * in one of the two device address spaces is never on a volume anyway. Passing
+ * nothing means "no volume is read-only", which is right for every path on the
+ * startup disk — which is all of them, on a machine with nothing plugged in.
+ */
+export function locationCaps(path: string, volumes: Volume[] = []): LocationCaps {
   switch (spaceOf(path)) {
     case "device":
       return {
@@ -65,6 +94,7 @@ export function locationCaps(path: string): LocationCaps {
         copy: false,
         shell: false,
         where: "a device on a cable",
+        readOnlyVolume: null,
       };
     case "nearby":
       return {
@@ -74,10 +104,45 @@ export function locationCaps(path: string): LocationCaps {
         copy: true,
         shell: false,
         where: "a device over Wi-Fi",
+        readOnlyVolume: null,
       };
-    default:
-      return LOCAL;
+    default: {
+      const volume = volumeFor(path, volumes);
+      if (!volume?.readOnly) return LOCAL;
+      return {
+        // Everything that would write is refused here rather than attempted,
+        // because the kernel refuses it anyway and an error from `std::fs` is
+        // a worse way to find out. Reading is untouched: the whole point of a
+        // read-only disk is that you can still take things off it, and Finder
+        // and Terminal are as happy with it as ever.
+        paste: false,
+        create: false,
+        modify: false,
+        copy: true,
+        shell: true,
+        where: volume.name,
+        readOnlyVolume: volume.name,
+      };
+    }
   }
+}
+
+/**
+ * The sentence to show when one of the write capabilities above is false.
+ *
+ * Two different facts wear the same shape, and saying the wrong one is worse
+ * than saying nothing. "Fiddler can't rename items on a device on a cable yet"
+ * is a promise about Fiddler: MTP has a rename and this app hasn't called it.
+ * "ReadOnlyDisk is read-only" is a fact about the disk, and no future version
+ * of Fiddler will change it — so it does not get a "yet".
+ *
+ * `action` is the bare verb phrase: "create folders", "rename items".
+ */
+export function refusal(caps: LocationCaps, action: string): string {
+  if (caps.readOnlyVolume) {
+    return `${caps.readOnlyVolume} is read-only — Fiddler can’t ${action} there`;
+  }
+  return `Fiddler can’t ${action} on ${caps.where} yet`;
 }
 
 /**
@@ -99,7 +164,7 @@ export interface TransferNote {
   detail: string;
 }
 
-export function transferNote(path: string): TransferNote | null {
+export function transferNote(path: string, volumes: Volume[] = []): TransferNote | null {
   switch (spaceOf(path)) {
     case "device":
       return {
@@ -113,7 +178,18 @@ export function transferNote(path: string): TransferNote | null {
         detail:
           "Drag or copy items from here to a folder of your own. Putting items onto it, and changing what's there, isn't supported yet.",
       };
-    default:
-      return null;
+    default: {
+      // The third case, and the only one that isn't about a missing feature.
+      // Worth the same banner because it is the same surprise: a folder full of
+      // files that look every bit as draggable as any other, in a window that
+      // will refuse the drop.
+      const volume = volumeFor(path, volumes);
+      if (!volume?.readOnly) return null;
+      return {
+        title: `${volume.name} is read-only`,
+        detail:
+          "Items can be copied off it, and nothing here can be changed, added or deleted. That's the disk refusing rather than Fiddler — a disk image attached read-only, or a card with its lock switch across, behaves this way everywhere.",
+      };
+    }
   }
 }

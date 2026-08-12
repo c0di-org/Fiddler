@@ -172,6 +172,72 @@ export type UsbDevice = UsbStage & {
   throttled: boolean;
 };
 
+/**
+ * What kind of thing a mounted volume is.
+ *
+ * `startup` never reaches the frontend — the backend leaves the boot volume out
+ * of the list entirely — but it is named here because the classification is
+ * shared, and because leaving it out would make "why is Macintosh HD missing?"
+ * an unanswerable question from this side.
+ */
+export type VolumeKind = "startup" | "internal" | "removable" | "diskImage" | "network";
+
+/**
+ * Whether a mounted volume can actually be read.
+ *
+ * `locked` is the one that matters, and it is the same shape of problem as a
+ * phone sitting on its lock screen: the disk is plainly there, and an app that
+ * simply omitted it would leave someone staring at a drive they can see in
+ * Finder and not here. macOS asks separately about removable volumes; Android
+ * needs All files access.
+ */
+export type VolumeStage =
+  | { stage: "ready" }
+  | { stage: "locked" }
+  | { stage: "unreadable"; message: string };
+
+/** A mounted volume: an external drive, a card, a disk image, or a share. */
+export type Volume = VolumeStage & {
+  /** Stable enough to key a row on and to eject by. Not an address — `path` is. */
+  id: string;
+  name: string;
+  /** The mount point. An ordinary local path, which is the whole reason volumes
+   * needed no new address space the way `mtp://` did. */
+  path: string;
+  kind: VolumeKind;
+  /** Writes will be refused by the kernel: a `.dmg` attached read-only, a locked
+   * card, a share exported read-only. */
+  readOnly: boolean;
+  /** Bytes still writable here, and the size of the whole volume. Both zero
+   * where the filesystem doesn't say. */
+  freeSpace: number;
+  totalCapacity: number;
+  /** Fiddler can offer to put this away. False on Android, which has removable
+   * storage and no way for an app to unmount it safely. */
+  ejectable: boolean;
+};
+
+/** A process holding a volume open, as the system named it. */
+export interface Holder {
+  /** The command. A shell sitting in a folder on the disk is `zsh`, and saying
+   * so is more use than naming a terminal app and being wrong about which
+   * window. */
+  name: string;
+  pid: number;
+}
+
+/**
+ * How an eject went.
+ *
+ * `busy` is an outcome rather than an error because it is the ordinary one —
+ * something is nearly always still holding a disk you have just finished with —
+ * and because it carries the two things an error string can't: who, and the
+ * fact that nothing has happened to the volume yet.
+ */
+export type EjectOutcome =
+  | { outcome: "ejected" }
+  | { outcome: "busy"; holders: Holder[] };
+
 /** A chunk of a device folder, delivered while the rest is still being read. */
 export interface EntryBatch {
   /** The folder these belong to; a batch for a folder you have left is dropped. */

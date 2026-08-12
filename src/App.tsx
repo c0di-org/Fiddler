@@ -13,6 +13,7 @@ import { NearbyAccessSheet } from "./components/NearbyAccessSheet";
 import { PairAsk } from "./components/PairAsk";
 import { Toolbar } from "./components/Toolbar";
 import { UsbConnecting, UsbLinkBanner } from "./components/UsbPanel";
+import { EjectBusyBanner, VolumeBlocked } from "./components/VolumeRow";
 import { TransferNoteBanner } from "./components/Banner";
 import type { FolderTouchDragHandlers } from "./components/folder-touch-drag";
 import { GridIcon } from "./components/icons";
@@ -21,7 +22,7 @@ import { addFavorite, loadFavorites, moveFavorite, saveFavorites } from "./favor
 import { invalidate as peekChanged, setShowHidden as setPeekHidden } from "./folder-peek";
 import { formatSize, tildify } from "./format";
 import * as ipc from "./ipc";
-import { locationCaps } from "./location";
+import { locationCaps, refusal } from "./location";
 import { caps, permissionHelp, platform } from "./platform";
 import { loadSession, restorable, saveSession } from "./session";
 import { parseShortcut } from "./preview/link";
@@ -30,7 +31,8 @@ import { contentTerms, prepareSearch, search, type SearchKind, type SearchRecord
 import { TreeStore, type Row } from "./store/tree";
 import { invert, remember, take as takeUndo, undoStore } from "./undo";
 import { applyTint, hasSystemAccent, loadTint, saveTint, watchTint, type Tint } from "./tint";
-import type { ContentSearch, DeviceAccess, Entry, Favorite, NearbyAccess, NearbyEntry, NearbySearch, PairRequest, PairingInfo, PeerDevice, Place, TransferProgress, UsbDevice, WorktreeInfo } from "./types";
+import type { ContentSearch, DeviceAccess, EjectOutcome, Entry, Favorite, NearbyAccess, NearbyEntry, NearbySearch, PairRequest, PairingInfo, PeerDevice, Place, TransferProgress, UsbDevice, Volume, WorktreeInfo } from "./types";
+import { volumeFor } from "./volumes";
 
 /** Read once, at module load, because the store is built from it. */
 const session = loadSession();
@@ -105,6 +107,13 @@ export default function App() {
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [filter, setFilter] = useState("");
   const [usb, setUsb] = useState<UsbDevice[]>([]);
+  const [volumes, setVolumes] = useState<Volume[]>([]);
+  /** The volume an eject is running for. Unmounting a full disk takes long
+   * enough to press the button a second time. */
+  const [ejecting, setEjecting] = useState<string | null>(null);
+  /** An eject that was refused, and by what. Held rather than flashed: it asks
+   * a question, and the answer decides whether something loses a write. */
+  const [ejectBusy, setEjectBusy] = useState<{ volume: Volume; outcome: EjectOutcome } | null>(null);
   /** Devices whose slow-link banner has been dismissed, by serial. */
   const [linkSeen, setLinkSeen] = useState<Set<string>>(new Set());
   /** Address spaces whose transfer-direction note has been dismissed. Keyed by
@@ -251,6 +260,16 @@ export default function App() {
     let alive = true;
     void ipc.usbDevices().then((found) => alive && setUsb(found)).catch(() => {});
     const stop = ipc.onUsbDevices((found) => alive && setUsb(found));
+    return () => { alive = false; void stop.then((off) => off()); };
+  }, []);
+
+  // Mounting is an event like any other: the backend watches DiskArbitration
+  // and pushes the whole list, so a drive appears the moment it is plugged in
+  // and goes when it is pulled out, without anything here polling.
+  useEffect(() => {
+    let alive = true;
+    void ipc.volumes().then((found) => alive && setVolumes(found)).catch(() => {});
+    const stop = ipc.onVolumes((found) => alive && setVolumes(found));
     return () => { alive = false; void stop.then((off) => off()); };
   }, []);
 
@@ -679,6 +698,89 @@ export default function App() {
     [flash]
   );
 
+  /** The volume the current path is on, if it is on one at all. */
+  const currentVolume = useMemo(() => volumeFor(store.path, volumes), [volumes, store.path]);
+
+  /**
+   * Put a volume away, and say so when something won't let go.
+   *
+   * Two calls rather than one, because the second one is a different decision.
+   * The first asks politely and changes nothing if anything objects; only then
+   * is there something to ask a person about, and only then — with the holders
+   * named — is "eject anyway" a question that can be answered rather than
+   * guessed at. Forcing straight away would be faster and would occasionally
+   * take a disk out from under a save.
+   *
+   * Nothing refreshes the list afterwards: the volume disappearing *is* the
+   * event, and it arrives on its own the way a mount does.
+   */
+  const ejectVolume = useCallback(
+    async (volume: Volume) => {
+      setEjecting(volume.id);
+      setEjectBusy(null);
+      try {
+        const outcome = await ipc.ejectVolume(volume.id, false);
+        if (outcome.outcome === "ejected") {
+          flash(`${volume.name} can be unplugged`);
+          return;
+        }
+        // Asked in the window rather than in a dialog — see `EjectBusyBanner`.
+        // Nothing has happened to the disk, so there is nothing to hurry.
+        setEjectBusy({ volume, outcome });
+      } catch (error) {
+        flash(String(error).replace(/^Error:\s*/, ""));
+      } finally {
+        setEjecting(null);
+      }
+    },
+    [flash]
+  );
+
+  /** Take the volume anyway, having said what that costs. */
+  const forceEject = useCallback(
+    async (volume: Volume) => {
+      setEjectBusy(null);
+      setEjecting(volume.id);
+      try {
+        const outcome = await ipc.ejectVolume(volume.id, true);
+        flash(
+          outcome.outcome === "ejected"
+            ? `${volume.name} can be unplugged`
+            : `${volume.name} still wouldn’t let go`
+        );
+      } catch (error) {
+        flash(String(error).replace(/^Error:\s*/, ""));
+      } finally {
+        setEjecting(null);
+      }
+    },
+    [flash]
+  );
+
+  /**
+   * Leave a folder that has been unplugged.
+   *
+   * Standing in `/Volumes/Archive/photos` when the drive goes is the one case
+   * where doing nothing is worse than moving someone: every listing, thumbnail
+   * and preview from then on is an error about a path that no longer exists,
+   * and the window keeps showing files that are not there. Covers a deliberate
+   * eject and a cable pulled out of the back, because from here they are the
+   * same event.
+   */
+  const volumesRef = useRef<Volume[]>([]);
+  useEffect(() => {
+    const gone = volumesRef.current.find(
+      (before) => !volumes.some((now) => now.path === before.path)
+    );
+    volumesRef.current = volumes;
+    if (!gone || !home) return;
+    if (store.path !== gone.path && !store.path.startsWith(`${gone.path}/`)) return;
+    // The note goes on *after* the move, because `go` clears it — being sent
+    // somewhere you didn't ask to go is exactly the case that line exists for,
+    // and it has to survive the navigation that caused it.
+    void go(home).then(() => setRestoreNote(`${gone.name} was ejected`));
+  }, [volumes, home, go]);
+
   /** The USB device the current path belongs to, if any. */
   const currentUsb = useMemo(
     () => usb.find((device) => store.path.startsWith(`mtp://${device.serial}/`)) ?? null,
@@ -710,13 +812,20 @@ export default function App() {
     void store.invalidateDirs([store.path]);
   }, [usbStage]);
 
-  /** Which of the two device address spaces this path is in, or null on a real
-   * one. Only ever used as a key for "you have been told this already". */
+  /** What makes this place worth a word before anyone drags anything into it,
+   * as a key for "you have been told this already".
+   *
+   * Per *space* for the two device rules, because they are properties of the
+   * space: being told once about one phone is being told about every phone.
+   * Per *volume* for a read-only disk, because that is a property of that disk
+   * and says nothing about the next one. */
   const transferSpace = store.path.startsWith("mtp://")
     ? "device"
     : store.path.startsWith("fiddler://")
       ? "nearby"
-      : null;
+      : currentVolume?.readOnly
+        ? currentVolume.path
+        : null;
 
   /** Takes on a newly mounted location and goes there. Both ways of gaining one
    * — the folder picker and a drop — add a Place, so both have to re-read them. */
@@ -988,9 +1097,9 @@ export default function App() {
     if (paths.length === 0) return;
     // Deleting part of a mixed selection would be the worst of both answers, so
     // one unsupported item refuses the lot.
-    const off = paths.map(locationCaps).find((at) => !at.modify);
+    const off = paths.map((p) => locationCaps(p, volumes)).find((at) => !at.modify);
     if (off) {
-      flash(`Fiddler can’t delete items on ${off.where} yet`);
+      flash(refusal(off, "delete items"));
       return;
     }
     if (!caps.trash) {
@@ -1009,7 +1118,7 @@ export default function App() {
     } catch (e) {
       flash(String(e));
     }
-  }, [selected, flash]);
+  }, [selected, flash, volumes]);
 
   /**
    * Run a copy or a move with the status bar watching it. The job number is
@@ -1048,21 +1157,21 @@ export default function App() {
   const copySelected = useCallback(() => {
     const paths = selected.map((target) => target.path);
     if (paths.length === 0) return;
-    const off = paths.map(locationCaps).find((at) => !at.copy);
+    const off = paths.map((p) => locationCaps(p, volumes)).find((at) => !at.copy);
     if (off) {
       flash(`Fiddler can’t copy items off ${off.where} yet`);
       return;
     }
     setCopiedPaths(paths);
     flash(`Copied ${paths.length} item${paths.length === 1 ? "" : "s"}`);
-  }, [selected, flash]);
+  }, [selected, flash, volumes]);
 
   const paste = useCallback(async () => {
     if (copiedPaths.length === 0 || !store.path) return;
     const destination = store.path;
-    const here = locationCaps(destination);
+    const here = locationCaps(destination, volumes);
     if (!here.paste) {
-      flash(`Fiddler can’t put items on ${here.where} yet`);
+      flash(refusal(here, "put items"));
       return;
     }
     // A cable is slow enough that silence reads as nothing happening: a video
@@ -1088,7 +1197,7 @@ export default function App() {
     } catch (error) {
       flash(String(error).replace(/^Error:\s*/, ""));
     }
-  }, [copiedPaths, flash, runTransfer]);
+  }, [copiedPaths, flash, runTransfer, volumes]);
 
   /**
    * What a drag starting on `id` carries.
@@ -1154,9 +1263,9 @@ export default function App() {
   );
 
   const newFolder = useCallback(async () => {
-    const here = locationCaps(store.path);
+    const here = locationCaps(store.path, volumes);
     if (!here.create) {
-      flash(`Fiddler can’t create folders on ${here.where} yet`);
+      flash(refusal(here, "create folders"));
       return;
     }
     try {
@@ -1167,19 +1276,19 @@ export default function App() {
     } catch (e) {
       flash(String(e));
     }
-  }, [flash]);
+  }, [flash, volumes]);
 
   const newTextFile = useCallback(() => {
     if (!store.path) return;
     // The editor's first save creates the file in the folder behind it, so the
     // question is the same one New Folder asks.
-    const here = locationCaps(store.path);
+    const here = locationCaps(store.path, volumes);
     if (!here.create) {
-      flash(`Fiddler can’t create files on ${here.where} yet`);
+      flash(refusal(here, "create files"));
       return;
     }
     setEditor({ text: "" });
-  }, [flash]);
+  }, [flash, volumes]);
 
   const commitRename = useCallback(
     async (row: Row, name: string) => {
@@ -1187,9 +1296,9 @@ export default function App() {
       const path = row.kind === "entry" ? row.entry.path : row.kind === "worktree" ? row.wt.path : null;
       const current = row.kind === "entry" ? row.entry.name : row.kind === "worktree" ? row.wt.name : "";
       if (!path || name === current) return;
-      const at = locationCaps(path);
+      const at = locationCaps(path, volumes);
       if (!at.modify) {
-        flash(`Fiddler can’t rename items on ${at.where} yet`);
+        flash(refusal(at, "rename items"));
         return;
       }
       try {
@@ -1200,7 +1309,7 @@ export default function App() {
         flash(String(e));
       }
     },
-    [flash]
+    [flash, volumes]
   );
 
   /**
@@ -1258,7 +1367,7 @@ export default function App() {
       // Two different questions: what this build can do, and what the address
       // under the pointer can do. A folder on a phone takes a paste and nothing
       // else, so the items that would fail are left out rather than shown.
-      const at = locationCaps(t ? t.path : store.path);
+      const at = locationCaps(t ? t.path : store.path, volumes);
 
       if (t) {
         items.push({ label: "Open", onPick: () => void openTarget(t) });
@@ -1328,7 +1437,7 @@ export default function App() {
       // empty menu is a blank box that has to be dismissed.
       if (items.length > 0) setMenu({ x, y, items });
     },
-    [openTarget, openInEditor, flash, selected.length, copySelected, trashSelected, copiedPaths.length, paste, newFolder, newTextFile, mountFolder, undoNext, undo]
+    [openTarget, openInEditor, flash, selected.length, copySelected, trashSelected, copiedPaths.length, paste, newFolder, newTextFile, mountFolder, undoNext, undo, volumes]
   );
 
   // ------------------------------------------------------------- keyboard
@@ -1465,7 +1574,7 @@ export default function App() {
       case "Enter":
         // Don't open a rename field that has nowhere to commit to: on a
         // device the name is the one thing that can't be edited.
-        if (target && locationCaps(target.path).modify) {
+        if (target && locationCaps(target.path, volumes).modify) {
           e.preventDefault();
           setRenamingId(target.id);
         }
@@ -1477,7 +1586,7 @@ export default function App() {
           s.jumpTo(e.key);
         }
     }
-  }, [twist]);
+  }, [twist, volumes]);
 
   /**
    * The other half: commands that belong to the window rather than to the
@@ -1680,6 +1789,11 @@ export default function App() {
         askingDeviceId={askingId}
         usb={usb}
         onOpenUsb={(device) => void openUsb(device)}
+        volumes={volumes}
+        // No control at all where nothing can be put away, rather than one
+        // that explains itself only after being pressed.
+        onEjectVolume={volumes.some((volume) => volume.ejectable) ? (volume) => void ejectVolume(volume) : undefined}
+        ejectingVolumeId={ejecting}
         onAddFavorite={favorite}
         onRemoveFavorite={unfavorite}
         onMoveFavorite={reorderFavorite}
@@ -1710,6 +1824,7 @@ export default function App() {
           branch={currentBranch}
           device={devices.find((device) => store.path.startsWith(`fiddler://${device.id}/`))}
           usbDevice={currentUsb}
+          volumes={volumes}
           onBack={() => void store.back()}
           onForward={() => void store.forward()}
           onUp={() => void store.up()}
@@ -1730,7 +1845,19 @@ export default function App() {
         {transferSpace && !transferNoteSeen.has(transferSpace) && !(currentUsb && currentUsb.stage !== "ready") && (
           <TransferNoteBanner
             path={store.path}
+            volumes={volumes}
             onDismiss={() => setTransferNoteSeen((seen) => new Set(seen).add(transferSpace))}
+          />
+        )}
+
+        {/* Above the listing, wherever you happen to be standing: the disk you
+            tried to eject is very often not the folder you are looking at. */}
+        {ejectBusy && (
+          <EjectBusyBanner
+            volume={ejectBusy.volume}
+            outcome={ejectBusy.outcome}
+            onForce={() => void forceEject(ejectBusy.volume)}
+            onDismiss={() => setEjectBusy(null)}
           />
         )}
 
@@ -1746,6 +1873,11 @@ export default function App() {
               instead of showing an empty folder that looks like a failure. */}
           {currentUsb && currentUsb.stage !== "ready" ? (
             <UsbConnecting device={currentUsb} onRelease={releaseUsb} />
+          ) : currentVolume && currentVolume.stage !== "ready" ? (
+            /* A drive that is mounted and unreadable, for the same reason the
+               line above exists: an empty grid is indistinguishable from an
+               empty disk, and here the difference is a permission away. */
+            <VolumeBlocked volume={currentVolume} />
           ) : store.view === "icons" ? (
             <IconGrid
               emptyMessage={emptyMessage}
@@ -1907,6 +2039,7 @@ export default function App() {
           path={editor.path}
           parent={store.path}
           initialText={editor.text}
+          volumes={volumes}
           onClose={() => {
             setEditor(null);
             focusView();
