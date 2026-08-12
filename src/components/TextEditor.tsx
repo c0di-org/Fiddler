@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 
 import * as ipc from "../ipc";
-import { locationCaps } from "../location";
+import { locationCaps, refusal } from "../location";
+import type { Volume } from "../types";
 import { MarkdownView } from "./MarkdownView";
 import { NewFileIcon, PanelIcon } from "./icons";
 
@@ -12,6 +13,10 @@ interface Props {
   path?: string;
   parent: string;
   initialText: string;
+  /** Mounted volumes: Save has to know whether the disk underneath will take
+   * the write, and a read-only one refuses it for a different reason than a
+   * phone does. */
+  volumes?: Volume[];
   onClose: () => void;
   onCreated: (path: string) => void;
   onSaved: (name: string) => void;
@@ -25,7 +30,7 @@ interface Props {
  * text still arrives, but saving would go out through the local filesystem and
  * fail, so the editor says so up front rather than at the end of an edit.
  */
-export function TextEditor({ path: initialPath, parent, initialText, onClose, onCreated, onSaved }: Props) {
+export function TextEditor({ path: initialPath, parent, initialText, volumes = [], onClose, onCreated, onSaved }: Props) {
   const [path, setPath] = useState(initialPath);
   const [name, setName] = useState(initialPath ? basename(initialPath) : "untitled.txt");
   const [text, setText] = useState(initialText);
@@ -38,7 +43,7 @@ export function TextEditor({ path: initialPath, parent, initialText, onClose, on
   // A document with a path would be written over itself; one without would be
   // made in the folder behind the editor. Different questions, different answer
   // on a device, so ask the one that matches what Save would actually do.
-  const at = locationCaps(path ?? parent);
+  const at = locationCaps(path ?? parent, volumes);
   const writable = path ? at.modify : at.create;
   const dirty = text !== savedText;
   const lines = text ? text.split("\n").length : 1;
@@ -199,7 +204,7 @@ export function TextEditor({ path: initialPath, parent, initialText, onClose, on
         {error ? (
           <span className="editor-error">{error}</span>
         ) : (
-          <span>{writable ? (dirty ? "Unsaved" : "Saved") : `Read-only — Fiddler can’t save to ${at.where} yet`}</span>
+          <span>{writable ? (dirty ? "Unsaved" : "Saved") : refusal(at, "save changes")}</span>
         )}
       </footer>
     </section>

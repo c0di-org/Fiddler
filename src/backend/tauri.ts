@@ -11,6 +11,7 @@ import { openPath } from "@tauri-apps/plugin-opener";
 import type {
   ContentSearch,
   DirListing,
+  EjectOutcome,
   EntryBatch,
   Inspect,
   NearbyAccess,
@@ -31,6 +32,7 @@ import type {
   TransferProgress,
   Trashed,
   UsbDevice,
+  Volume,
 } from "../types";
 import type { Backend } from "./types";
 
@@ -82,6 +84,12 @@ const backend: Backend = {
   onUsbEntries: (fn) => listen<EntryBatch>("fiddler:usb-entries", (e) => fn(e.payload)),
 
   releaseUsbDevice: (serial) => invoke<string>("release_usb_device", { serial }),
+
+  volumes: () => invoke<Volume[]>("volumes"),
+
+  onVolumes: (fn) => listen<Volume[]>("fiddler:volumes", (e) => fn(e.payload)),
+
+  ejectVolume: (id, force) => invoke<EjectOutcome>("eject_volume", { id, force }),
 
   createFolder: (parent, name) => invoke<string>("create_folder", { parent, name }),
 

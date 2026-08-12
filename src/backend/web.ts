@@ -7,7 +7,7 @@
  * `platform.ts`). */
 
 import { natural } from "../sort";
-import type { Entry, NearbyAccess, PairOutcome, PdfMeta, PeerDevice, RepoInfo, TransferProgress, UsbDevice } from "../types";
+import type { Entry, NearbyAccess, PairOutcome, PdfMeta, PeerDevice, RepoInfo, TransferProgress, UsbDevice, Volume } from "../types";
 import * as fake from "./web/demo-device";
 import { canThumb } from "./web/render";
 import { nearbyEntries, searchContents } from "./web/search-fs";
@@ -257,6 +257,29 @@ const backend: Backend = {
   // Never reached: the demo phone is never `blocked`, so the button that calls
   // this is never drawn.
   releaseUsbDevice: unavailable("Releasing a device"),
+
+  /** A browser tab has no volumes.
+   *
+   * Deliberately not simulated, unlike the phone above. The two devices are a
+   * demonstration of a section that would otherwise be an empty rectangle, and
+   * every row they draw is labelled `demo`. A drive is different in the way
+   * that matters: the whole point of the volume list is that it tells you what
+   * is *actually attached to this machine right now*, and a tab genuinely
+   * cannot know. An invented drive there would be the one kind of lie this
+   * backend refuses — a claim about the person's own hardware. The section
+   * simply doesn't appear, which is exactly what happens on a Mac with nothing
+   * plugged in.
+   *
+   * The folder picker and drag-and-drop are the browser's real answer to
+   * "point this at something of mine", and both are already offered. */
+  volumes: async (): Promise<Volume[]> => [],
+
+  // Never fires, because nothing here can be mounted or unmounted. The UI's
+  // response to that is no section at all, which is right.
+  onVolumes: async () => () => {},
+
+  // Unreachable: nothing is listed, so no row exists to carry the control.
+  ejectVolume: unavailable("Ejecting a volume"),
 
   // ------------------------------------------------------------ mutation
 

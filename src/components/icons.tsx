@@ -209,6 +209,48 @@ export const SdCardIcon = stroked(
   </>
 );
 
+/** A disk you can unplug: the external drive, and the default for a volume.
+ *
+ * Drawn as a case with a status light rather than as a platter, because what it
+ * has to say is "a box on your desk with a cable", and half the things it
+ * stands for — a stick, an SSD — have no platter in them. */
+export const DriveIcon = stroked(
+  <>
+    <rect x="1.75" y="4.25" width="12.5" height="7.5" rx="1.4" />
+    <path d="M4.4 8h.01" strokeWidth="2.2" />
+    <path d="M7.5 8h4.25" />
+  </>
+);
+
+/** A mounted `.dmg`: a disk drawn as the file it really is. */
+export const DiskImageIcon = stroked(
+  <>
+    <path d="M3.25 1.75h6l3 3v9.5h-9.5V2.75a1 1 0 0 1 1-1Z" />
+    <path d="M9 1.9V4.6a.6.6 0 0 0 .6.6h2.5" />
+    <circle cx="7.6" cy="9.6" r="2.1" />
+  </>
+);
+
+/** A volume that lives on another machine. Distinct from `WifiIcon`, which
+ * means a Fiddler peer: a share is a disk you have mounted, not a device you
+ * have paired with, and the two sit in different sidebar sections. */
+export const NetworkDriveIcon = stroked(
+  <>
+    <circle cx="8" cy="8" r="6.25" />
+    <path d="M1.9 8h12.2" />
+    <path d="M8 1.75a10 10 0 0 1 0 12.5a10 10 0 0 1 0-12.5Z" />
+  </>
+);
+
+/** Put this volume away. The triangle-over-a-bar every desktop has used for
+ * thirty years, which is the entire argument for it. */
+export const EjectIcon = stroked(
+  <>
+    <path d="M8 2.75 13 9.5H3Z" />
+    <path d="M3.5 12.75h9" />
+  </>
+);
+
 export const LaptopIcon = stroked(
   <>
     <rect x="2.75" y="3" width="10.5" height="7.25" rx=".9" />

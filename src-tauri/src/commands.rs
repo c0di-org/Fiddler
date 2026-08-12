@@ -19,6 +19,7 @@ use crate::nearby::{self, NearbySearch};
 use crate::peers::{self, NearbyAccess, PairOutcome, PairRequest, PairingInfo, PeerDevice, PeerService};
 use crate::thumb_pool::{ThumbPool, ThumbReady, ThumbReq};
 use crate::transfer::{self, Stopped};
+use crate::volumes::{EjectOutcome, Volume, VolumeService};
 use crate::watcher::FsWatcher;
 
 pub struct AppState {
@@ -26,6 +27,7 @@ pub struct AppState {
     pub watcher: Arc<FsWatcher>,
     pub thumbs: Arc<ThumbPool>,
     pub peers: Arc<PeerService>,
+    pub volumes: Arc<VolumeService>,
     #[cfg(not(target_os = "android"))]
     pub usb: Arc<MtpService>,
     /// The cancel flag of every transfer currently running, by the job number
@@ -273,6 +275,24 @@ pub fn nearby_devices(state: State<'_, AppState>) -> Vec<PeerDevice> { state.pee
 #[cfg(not(target_os = "android"))]
 #[tauri::command]
 pub fn usb_devices(state: State<'_, AppState>) -> Vec<UsbDevice> { state.usb.devices() }
+
+/// Disks mounted right now: external drives, SD cards, disk images, shares.
+///
+/// Never includes the startup disk. Reads a snapshot the watcher keeps current,
+/// so drawing the sidebar never waits on a disk.
+#[tauri::command]
+pub fn volumes(state: State<'_, AppState>) -> Vec<Volume> { state.volumes.volumes() }
+
+/// Put a volume away.
+///
+/// `force` is not a retry. An ordinary eject answers `busy` and leaves the
+/// volume exactly as it was, naming what is still holding it; forcing one pulls
+/// the volume out from under whatever that was, which is a decision for the
+/// person whose files are on it. So the frontend asks, and passes the answer.
+#[tauri::command]
+pub fn eject_volume(state: State<'_, AppState>, id: String, force: bool) -> Result<EjectOutcome, String> {
+    state.volumes.eject(&id, force)
+}
 
 /// Quit the process holding a USB device, when Fiddler recognises it.
 ///

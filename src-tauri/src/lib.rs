@@ -10,6 +10,7 @@ mod model;
 #[cfg(not(target_os = "android"))]
 mod mtp;
 mod nearby;
+mod volumes;
 mod peers;
 #[cfg(target_os = "macos")]
 mod page;
@@ -45,6 +46,7 @@ pub fn run() {
             let thumbs = ThumbPool::start(app.handle().clone());
             let peer_dir = app.path().app_data_dir().map_err(|e| e.to_string())?.join("peers");
             let peers = peers::PeerService::start(peer_dir, cache.clone())?;
+            let volumes = volumes::VolumeService::start(app.handle().clone());
             #[cfg(not(target_os = "android"))]
             let usb = mtp::MtpService::start(app.handle().clone());
             app.manage(AppState {
@@ -52,6 +54,7 @@ pub fn run() {
                 watcher,
                 thumbs,
                 peers,
+                volumes,
                 #[cfg(not(target_os = "android"))]
                 usb,
                 transfers: Default::default(),
@@ -77,6 +80,8 @@ pub fn run() {
             commands::repo_info,
             commands::refresh_repo,
             commands::sidebar_places,
+            commands::volumes,
+            commands::eject_volume,
             commands::system_accent,
             commands::thumbnail,
             commands::thumbnails,

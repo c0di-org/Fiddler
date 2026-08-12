@@ -2,10 +2,11 @@ import { useState } from "react";
 
 import { FAVORITE_DRAG_TYPE, FOLDER_DRAG_TYPE, currentFolderDrag } from "../favorites";
 import { dropProps, useDropTarget, type DropItems } from "./use-drop-target.ts";
-import type { Favorite, PeerDevice, Place, UsbDevice } from "../types";
+import type { Favorite, PeerDevice, Place, UsbDevice, Volume } from "../types";
 import { connectionNotice } from "../usb";
-import { BoltIcon, CableIcon, CloseIcon, DeviceIcon, FolderIcon, FolderPlusIcon, HeartIcon, LaptopIcon, LockIcon, SparkIcon, WifiIcon, placeIcon } from "./icons";
+import { BoltIcon, CableIcon, CloseIcon, DeviceIcon, DriveIcon, FolderIcon, FolderPlusIcon, HeartIcon, LaptopIcon, LockIcon, SparkIcon, WifiIcon, placeIcon } from "./icons";
 import { UsbStorageRow } from "./UsbPanel";
+import { VolumeRow } from "./VolumeRow";
 
 interface Props {
   places: Place[];
@@ -26,6 +27,16 @@ interface Props {
   /** Devices on the end of a cable. No pairing, so these need no lock state. */
   usb: UsbDevice[];
   onOpenUsb: (device: UsbDevice) => void;
+  /** Disks mounted right now. Never the startup disk — Places already leads
+   * into that one, and it is not something that arrives or leaves. */
+  volumes: Volume[];
+  /** Absent where nothing can be put away: the browser, which has no volumes at
+   * all, and Android, which has them and no safe way for an app to unmount
+   * one. Without it no row draws an eject control. */
+  onEjectVolume?: (volume: Volume) => void;
+  /** The volume an eject is currently running for, if any. Unmounting a large
+   * disk takes long enough to press the button twice. */
+  ejectingVolumeId?: string | null;
   /** Present only where a folder can be mounted — the web build, in a browser
    * that has the File System Access API. */
   onOpenFolder?: () => void;
@@ -85,6 +96,9 @@ export function Sidebar({
   selfDeviceName,
   usb,
   onOpenUsb,
+  volumes,
+  onEjectVolume,
+  ejectingVolumeId = null,
   onOpenFolder,
   onDropItems,
   accessCount = 0,
@@ -144,6 +158,33 @@ export function Sidebar({
           </span>
           <span className="place-label">Open Folder…</span>
         </button>
+      )}
+
+      {/* Disks, between the folders and the devices, because that is what they
+          are: local storage, an ordinary path away, and nearer to Places than
+          to anything on a cable.
+
+          Its own section rather than more Places, and not folded into Wired.
+          Places are five folders that are decided once and are always there;
+          these appear and disappear, are worth a capacity meter, and can be
+          put away. And "Wired" now names a mechanism — MTP over a cable — so
+          widening it to mean "and also disks" would undo the point of the
+          name. An external drive is on a cable too, and it is nothing like a
+          phone: it is a filesystem, not a protocol. */}
+      {volumes.length > 0 && (
+        <div className="sidebar-devices">
+          <SidebarHeading icon={<DriveIcon size={13} />}>Volumes</SidebarHeading>
+          {volumes.map((volume) => (
+            <VolumeRow
+              key={volume.id}
+              volume={volume}
+              active={current === volume.path || current.startsWith(`${volume.path}/`)}
+              busy={volume.id === ejectingVolumeId}
+              onPick={onPick}
+              onEject={onEjectVolume}
+            />
+          ))}
+        </div>
       )}
 
       {usb.length > 0 && (
