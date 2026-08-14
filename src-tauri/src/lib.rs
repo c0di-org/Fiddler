@@ -1,3 +1,5 @@
+#[cfg(target_os = "android")]
+mod android_jni;
 mod apk;
 mod commands;
 mod content_search;
