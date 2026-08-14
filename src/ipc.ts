@@ -60,6 +60,8 @@ export const {
   openExternal,
   hasOpenHandler,
   installApk,
+  takeIncomingFiles,
+  onIncomingFile,
   openFolder,
   importDropped,
 } = backend;

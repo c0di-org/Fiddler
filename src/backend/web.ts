@@ -441,6 +441,16 @@ const backend: Backend = {
 
   installApk: unavailable("Installing apps"),
 
+  /** A tab is not something the OS can hand a file to. Files arrive here by
+   * being dragged onto the window instead — see `importDropped`. */
+  async takeIncomingFiles() {
+    return [];
+  },
+
+  async onIncomingFile() {
+    return () => {};
+  },
+
   // ------------------------------------------------- browser-only additions
 
   openFolder,

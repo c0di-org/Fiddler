@@ -1,4 +1,7 @@
 <resources>
     <string name="app_name">"Fiddler"</string>
     <string name="main_activity_title">"Fiddler"</string>
+    <!-- The row in Android's "Open with" chooser. It says what happens, because
+         the chooser is where someone decides between us and a viewer. -->
+    <string name="open_with_label">"Preview in Fiddler"</string>
 </resources>

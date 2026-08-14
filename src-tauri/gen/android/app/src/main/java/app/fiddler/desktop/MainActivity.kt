@@ -21,5 +21,19 @@ class MainActivity : TauriActivity() {
     if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R && !Environment.isExternalStorageManager()) {
       startActivity(Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION, Uri.parse("package:$packageName")))
     }
+    // A file opened from another app while Fiddler wasn't running. After the
+    // attach above, so the push it ends in has somewhere to land.
+    OpenedFile.offer(this, intent)
+  }
+
+  /**
+   * The same thing while Fiddler is already running. `singleTask` means Android
+   * brings this activity forward and delivers the file here rather than starting
+   * a second copy of the browser.
+   */
+  override fun onNewIntent(intent: Intent) {
+    super.onNewIntent(intent)
+    setIntent(intent)
+    OpenedFile.offer(this, intent)
   }
 }

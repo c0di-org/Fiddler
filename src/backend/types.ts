@@ -189,6 +189,18 @@ export interface Backend {
   /** Launch Android's package installer for a selected APK. */
   installApk(path: string): Promise<void>;
 
+  /** Files another app has asked Fiddler to open, and clear the list.
+   *
+   * Drains rather than peeks, so it is safe to ask from more than one place —
+   * at startup, and again on every `onIncomingFile`. Empty everywhere the OS
+   * has no way to hand a running app a file. */
+  takeIncomingFiles(): Promise<string[]>;
+
+  /** One of those has arrived while Fiddler was already open. Carries no
+   * payload: `takeIncomingFiles` is the list, and a signal that can't disagree
+   * with it is a signal that can't be stale. */
+  onIncomingFile(fn: () => void): Promise<Unlisten>;
+
   // --------------------------------------------------- browser-only additions
   //
   // Optional on purpose: their presence *is* the capability. The Tauri backend

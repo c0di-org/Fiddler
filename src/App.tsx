@@ -17,7 +17,7 @@ import { EjectBusyBanner, VolumeBlocked } from "./components/VolumeRow";
 import { TransferNoteBanner } from "./components/Banner";
 import type { FolderTouchDragHandlers } from "./components/folder-touch-drag";
 import { GridIcon } from "./components/icons";
-import { describeItems, type DragItems, type DropVerb } from "./drag";
+import { describeItems, parentOf, type DragItems, type DropVerb } from "./drag";
 import { addFavorite, loadFavorites, moveFavorite, saveFavorites } from "./favorites";
 import { invalidate as peekChanged, setShowHidden as setPeekHidden } from "./folder-peek";
 import { formatSize, tildify } from "./format";
@@ -182,6 +182,43 @@ export default function App() {
     if (caps.nearby) void refreshAccess();
   }, [refreshAccess]);
 
+  /**
+   * Show a file another app asked Fiddler to open.
+   *
+   * The obvious reading of "Open with Fiddler" would be a lone document on a
+   * blank screen, which is what a viewer does. A file browser can do better and
+   * has to: it opens the folder the file lives in, puts the cursor on it, and
+   * raises Quick Look. What you get is the document *and* the answer to where it
+   * came from, with the arrow keys already able to walk its neighbours.
+   */
+  const openIncoming = useCallback(
+    async (paths: string[]) => {
+      const [first, ...rest] = paths;
+      if (!first) return;
+      // `parentOf` answers "" at a root because it only ever gets compared for
+      // equality; here it has to be somewhere we can actually navigate to.
+      const dir = parentOf(first) || "/";
+      const name = first.slice(first.lastIndexOf("/") + 1);
+
+      setFilter("");
+      setRestoreNote(null);
+      // Being sent a `.env` and shown an empty folder is worse than a preference
+      // moving. The switch is a visible one — `⇧⌘.` — so this doesn't hide.
+      if (name.startsWith(".") && !store.showHidden) await store.setShowHidden(true);
+      await store.navigate(dir);
+
+      // Sharing five photos selects five, so the next thing anyone does — copy
+      // them, move them — has them all. Only the ones that landed in the same
+      // folder, since that's the only folder now open; `first` goes in last
+      // because the most recent selection is what Quick Look shows.
+      const siblings = rest.filter((p) => (parentOf(p) || "/") === dir);
+      setSelection(new Set([...siblings, first]));
+      setQuickLook(true);
+      revealCursor();
+    },
+    [revealCursor]
+  );
+
   // ------------------------------------------------------------ bootstrap
 
   useEffect(() => {
@@ -190,6 +227,20 @@ export default function App() {
       const ps = await ipc.sidebarPlaces();
       if (cancelled) return;
       setPlaces(ps);
+
+      // A file handed over while Fiddler wasn't running outranks the folder we'd
+      // otherwise reopen — someone asked for this one thing by name. Checked
+      // here rather than in its own effect so the two can't race for the first
+      // screen. Arriving later is fine: the nudge below lands on a live browser.
+      if (caps.incomingFiles) {
+        const incoming = await ipc.takeIncomingFiles().catch(() => []);
+        if (cancelled) return;
+        if (incoming.length > 0) {
+          await openIncoming(incoming);
+          return;
+        }
+      }
+
       const usual = ps.find((p) => p.icon === "code") ?? ps[0];
       let start = usual?.path ?? "";
 
@@ -217,6 +268,27 @@ export default function App() {
       cancelled = true;
     };
   }, []);
+
+  // The same thing while Fiddler is already on screen: Android brings the window
+  // forward and the queue is nudged. The nudge carries nothing — the collection
+  // is the payload — so a duplicate one is a wasted call rather than a wrong
+  // screen, and a missed one is caught by the next.
+  useEffect(() => {
+    if (!caps.incomingFiles) return;
+    let alive = true;
+    const stop = ipc.onIncomingFile(() => {
+      void ipc
+        .takeIncomingFiles()
+        .then((incoming) => {
+          if (alive) void openIncoming(incoming);
+        })
+        .catch(() => {});
+    });
+    return () => {
+      alive = false;
+      void stop.then((off) => off());
+    };
+  }, [openIncoming]);
 
   // Six view preferences and the folder, written whenever any of them moves.
   // `useSyncExternalStore` above means a store change has already re-rendered
