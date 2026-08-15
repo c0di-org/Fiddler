@@ -9,7 +9,7 @@ import { isTextual, routeOf } from "../preview/route";
 import type { Entry, TextHead } from "../types";
 import { CodeView } from "./CodeView";
 import { FileGlyph, FolderGlyph } from "./FileGlyph";
-import { LinkMark, ShareIcon } from "./icons";
+import { LinkMark, MoreIcon, ShareIcon } from "./icons";
 import { MarkdownView } from "./MarkdownView";
 import { PdfView } from "./PdfView";
 
@@ -49,9 +49,13 @@ interface Props {
   onClose: () => void;
   /** Hand this file to the system's share sheet. Absent where there is none. */
   onShare?: () => void;
+  /** The full menu for this file. Quick Look covers the view that would
+   * otherwise be right-clicked for it, so without this the verbs are simply
+   * unreachable from here — and on a phone here is where a tap lands you. */
+  onMore?: (x: number, y: number) => void;
 }
 
-export function QuickLook({ entry, index, total, onStep, onClose, onShare }: Props) {
+export function QuickLook({ entry, index, total, onStep, onClose, onShare, onMore }: Props) {
   const route = routeOf(entry.name);
   const isDir = entry.kind === "dir" || (entry.kind === "symlink" && entry.linkToDir);
   const [page, setPage] = useState(1);
@@ -123,6 +127,19 @@ export function QuickLook({ entry, index, total, onStep, onClose, onShare }: Pro
           {caps.share && onShare && !isDir && (
             <button className="ql-share" onClick={onShare} title="Share…" aria-label="Share">
               <ShareIcon size={17} />
+            </button>
+          )}
+          {onMore && (
+            <button
+              className="ql-more"
+              onClick={(e) => {
+                const r = e.currentTarget.getBoundingClientRect();
+                onMore(r.left, r.bottom + 4);
+              }}
+              title="More…"
+              aria-label="More actions"
+            >
+              <MoreIcon size={17} />
             </button>
           )}
           <button className="ql-open" onClick={() => void ipc.openExternal(entry.path)}>

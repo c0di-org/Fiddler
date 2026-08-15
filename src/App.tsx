@@ -2435,6 +2435,7 @@ export default function App() {
           total={targets.length}
           onStep={(d) => moveCursor(d, false)}
           onShare={() => void shareSelected()}
+          onMore={(x, y) => buildMenu(lead.target, x, y, touchDriven)}
           onClose={() => {
             setQuickLook(false);
             focusView();

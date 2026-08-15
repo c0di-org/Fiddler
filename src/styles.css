@@ -2166,7 +2166,9 @@ body.column-resizing * {
 /* Floating surfaces are the one place a real backdrop blur earns its cost. */
 .ctx-menu {
   position: fixed;
-  z-index: 50;
+  /* Above Quick Look, which can now raise this menu itself, and below the
+     editor, which cannot. A menu has to outrank whatever opened it. */
+  z-index: 65;
   min-width: 216px;
   padding: 6px;
   border-radius: var(--r-lg);
@@ -2233,7 +2235,7 @@ body.column-resizing * {
 .ctx-scrim {
   position: fixed;
   inset: 0;
-  z-index: 50;
+  z-index: 65;
   display: flex;
   align-items: flex-end;
   background: rgba(0, 0, 0, 0.32);
@@ -3069,6 +3071,7 @@ li.md-task {
 
 .ql-close,
 .ql-share,
+.ql-more,
 .ql-open {
   flex: none;
   height: 26px;
@@ -3083,14 +3086,16 @@ li.md-task {
 }
 
 .ql-close,
-.ql-share {
+.ql-share,
+.ql-more {
   width: 26px;
   padding: 0;
   font-size: 11px;
 }
 
 /* The glyph carries it, so the square is only as big as the touch target. */
-.ql-share {
+.ql-share,
+.ql-more {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -3098,6 +3103,7 @@ li.md-task {
 
 .ql-close:hover,
 .ql-share:hover,
+.ql-more:hover,
 .ql-open:hover {
   background: var(--fill-hover);
   color: var(--fg);
@@ -3134,13 +3140,15 @@ li.md-task {
 
   .ql-close,
   .ql-share,
+  .ql-more,
   .ql-open {
     min-width: 44px;
     height: 44px;
   }
 
   .ql-close,
-  .ql-share {
+  .ql-share,
+  .ql-more {
     width: 44px;
     font-size: 14px;
   }
