@@ -51,6 +51,10 @@ export interface Capabilities {
   dropImport: boolean;
   /** Opening a file hands it to the OS. Where false, "open" means download. */
   handOff: boolean;
+  /** The other direction: the OS can hand *Fiddler* a file to open, because it
+   * is registered as something that shows one. Android's "Open with" and share
+   * sheet do this; a tab has no such door, and macOS hasn't been wired up. */
+  incomingFiles: boolean;
 }
 
 /** Chromium exposes `showDirectoryPicker`; Safari and Firefox do not, and fall
@@ -69,6 +73,7 @@ export const caps: Capabilities = {
   folderPicker: platform === "web" && hasDirectoryPicker(),
   dropImport: platform === "web",
   handOff: platform !== "web",
+  incomingFiles: platform === "android",
 };
 
 /** Where to send someone whose folder we were not allowed to read. The three

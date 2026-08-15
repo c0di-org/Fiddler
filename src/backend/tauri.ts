@@ -141,6 +141,10 @@ const backend: Backend = {
   hasOpenHandler: (path) => invoke<boolean>("has_open_handler", { path }),
 
   installApk: (path) => invoke<void>("install_apk", { path }),
+
+  takeIncomingFiles: () => invoke<string[]>("take_opened_files"),
+
+  onIncomingFile: (fn) => listen("fiddler:opened-file", () => fn()),
 };
 
 export default backend;

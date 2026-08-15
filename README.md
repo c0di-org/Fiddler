@@ -126,6 +126,13 @@ npm run deploy       # build, then wrangler deploy
 Browsing, git status, previews, and a full-screen text editor. Deletions are
 permanent, with a confirmation, because Android gives Fiddler no system Trash.
 
+Fiddler is also registered for **Open with** and the share sheet, for the types
+Quick Look can draw. Picking it doesn't put the document on a blank screen — it
+opens the folder the file lives in, selects it, and raises Quick Look, so you
+get the file and where it came from. Where the sending app has no real file
+behind its URI — Drive, Photos, a mail attachment — the bytes are copied into
+Fiddler's cache first, and it's that copy you land on.
+
 ```bash
 npm run tauri -- android build --debug --target aarch64
 ```

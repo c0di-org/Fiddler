@@ -847,6 +847,21 @@ pub fn install_apk(path: String) -> Result<(), String> {
     crate::apk::install(&path)
 }
 
+/// Collect the files other apps have asked Fiddler to open since the last call.
+///
+/// Draining rather than peeking is what makes this safe to call from more than
+/// one place — at startup and again on every nudge — without opening the same
+/// file twice. Paths that have since gone are dropped here rather than sent on
+/// to become an empty folder: a share sheet's copy can be cleaned up between
+/// being resolved and being collected.
+#[tauri::command]
+pub fn take_opened_files() -> Vec<String> {
+    crate::opened::take()
+        .into_iter()
+        .filter(|path| Path::new(path).is_file())
+        .collect()
+}
+
 #[tauri::command]
 #[cfg(target_os = "macos")]
 pub fn reveal_in_finder(path: String) -> Result<(), String> {

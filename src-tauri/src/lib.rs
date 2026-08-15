@@ -1,3 +1,5 @@
+#[cfg(target_os = "android")]
+mod android_jni;
 mod apk;
 mod commands;
 mod content_search;
@@ -10,6 +12,7 @@ mod model;
 #[cfg(not(target_os = "android"))]
 mod mtp;
 mod nearby;
+mod opened;
 mod volumes;
 mod peers;
 #[cfg(target_os = "macos")]
@@ -41,6 +44,9 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
+            // Before anything slow: a file opened from another app may already
+            // be waiting, and its nudge needs somewhere to land.
+            opened::remember(app.handle().clone());
             let cache = Arc::new(GitCache::new());
             let watcher = FsWatcher::start(app.handle().clone(), cache.clone());
             let thumbs = ThumbPool::start(app.handle().clone());
@@ -91,6 +97,7 @@ pub fn run() {
             commands::pdf_meta,
             commands::pdf_page,
             commands::install_apk,
+            commands::take_opened_files,
             commands::reveal_in_finder,
             commands::has_open_handler,
             commands::open_terminal_here,
