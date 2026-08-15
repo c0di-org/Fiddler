@@ -1717,7 +1717,10 @@ export default function App() {
 
       // The empty space of a device folder has nothing left to offer, and an
       // empty menu is a blank box that has to be dismissed.
-      if (items.length > 0) setMenu({ x, y, items, sheet, title: t?.name });
+      // Only a sheet shows this, and only a sheet needs it: a popover is
+      // already touching the thing it belongs to.
+      const title = t ? (many > 1 ? `${many} items` : t.name) : undefined;
+      if (items.length > 0) setMenu({ x, y, items, sheet, title });
     },
     [openTarget, openInEditor, flash, go, selection, selected.length, targets, favorites, favorite, unfavorite, copySelected, cutSelected, duplicateSelected, shareable.length, shareSelected, trashSelected, clipboard, paste, newFolder, newTextFile, mountFolder, undoNext, undo, volumes]
   );
