@@ -254,7 +254,11 @@ export function IconGrid(props: Props) {
         // pointer's.
         if (pointerType.current === "touch") return;
         const c = cellFrom(e);
-        if (c) props.onSelect(c.id, e);
+        // Finder's rule, which was being broken here: right-clicking something
+        // already selected keeps the whole selection. Selecting unconditionally
+        // meant picking five files and right-clicking one of them collapsed the
+        // five, so "Copy 5 Items" could never appear.
+        if (c && !props.selection.has(c.id)) props.onSelect(c.id, e);
         props.onContextMenu(c, e.clientX, e.clientY);
       }}
     >

@@ -395,7 +395,8 @@ export function DetailList(props: Props) {
           // See IconGrid: on touch the long press has already answered this.
           if (pointerType.current === "touch") return;
           const row = rowFrom(e);
-          if (row) props.onSelect(row.id, e);
+          // See IconGrid: a right-click inside a selection must not collapse it.
+          if (row && !props.selection.has(row.id)) props.onSelect(row.id, e);
           props.onContextMenu(row, e.clientX, e.clientY);
         }}
       >
