@@ -1242,6 +1242,26 @@ export default function App() {
     flash(`Copied ${paths.length} item${paths.length === 1 ? "" : "s"}`);
   }, [selected, flash, volumes]);
 
+  /** Everything in the selection the system's share sheet could actually take.
+   *
+   * Folders are dropped rather than refusing the whole thing: neither Android
+   * nor macOS has a concept of sharing a directory, and six files and one
+   * folder is a perfectly clear request to send the six. A worktree row has no
+   * `entry` and is not a file at all, so it falls out here too. */
+  const shareable = useMemo(
+    () => selected.filter((target) => target.entry && !target.isDir).map((target) => target.path),
+    [selected]
+  );
+
+  const shareSelected = useCallback(async () => {
+    if (shareable.length === 0) return;
+    try {
+      await ipc.sharePaths(shareable);
+    } catch (error) {
+      flash(String(error).replace(/^Error:\s*/, ""));
+    }
+  }, [shareable, flash]);
+
   const paste = useCallback(async () => {
     if (copiedPaths.length === 0 || !store.path) return;
     const destination = store.path;
@@ -1450,6 +1470,15 @@ export default function App() {
         if (at.copy) {
           items.push({ label: selected.length > 1 ? `Copy ${selected.length} Items` : "Copy", onPick: copySelected });
         }
+        // Offered only when there is something the sheet could take. A "Share"
+        // that always appears and sometimes explains that folders can't be
+        // shared is a menu item that teaches you to distrust the menu.
+        if (caps.share && shareable.length > 0 && at.copy) {
+          items.push({
+            label: shareable.length > 1 ? `Share ${shareable.length} Files…` : "Share…",
+            onPick: () => void shareSelected(),
+          });
+        }
         // The way *into* the editor now that ↵ goes to the OS. It used to call
         // openTarget, which made it a second Open under a different name.
         if (!t.isDir) {
@@ -1513,7 +1542,7 @@ export default function App() {
       // empty menu is a blank box that has to be dismissed.
       if (items.length > 0) setMenu({ x, y, items });
     },
-    [openTarget, openInEditor, flash, selected.length, copySelected, trashSelected, copiedPaths.length, paste, newFolder, newTextFile, mountFolder, undoNext, undo, volumes]
+    [openTarget, openInEditor, flash, selected.length, copySelected, shareable.length, shareSelected, trashSelected, copiedPaths.length, paste, newFolder, newTextFile, mountFolder, undoNext, undo, volumes]
   );
 
   // --------------------------------------------------------- the system Back
@@ -2135,6 +2164,7 @@ export default function App() {
           index={lead.at}
           total={targets.length}
           onStep={(d) => moveCursor(d, false)}
+          onShare={() => void shareSelected()}
           onClose={() => {
             setQuickLook(false);
             focusView();

@@ -31,6 +31,10 @@ export interface Capabilities {
   reveal: boolean;
   /** "Open in Terminal" here. */
   terminal: boolean;
+  /** The system has a share sheet to hand files to. Android's chooser and
+   * macOS's `NSSharingServicePicker` are the same verb; a tab has nothing to
+   * hand a file *to*, and the browser's own Share is about the page. */
+  share: boolean;
   /** Deletion is recoverable. Where it isn't, the UI must say so and confirm. */
   trash: boolean;
   /** Selecting an `.apk` should offer to install it. */
@@ -65,6 +69,7 @@ const hasDirectoryPicker = () =>
 export const caps: Capabilities = {
   reveal: platform === "macos",
   terminal: platform === "macos",
+  share: platform !== "web",
   trash: platform !== "android",
   installApk: platform === "android",
   directTouch: platform === "android" || (platform === "web" && coarsePointer()),

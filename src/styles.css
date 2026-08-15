@@ -2896,6 +2896,7 @@ li.md-task {
 }
 
 .ql-close,
+.ql-share,
 .ql-open {
   flex: none;
   height: 26px;
@@ -2909,13 +2910,22 @@ li.md-task {
   cursor: default;
 }
 
-.ql-close {
+.ql-close,
+.ql-share {
   width: 26px;
   padding: 0;
   font-size: 11px;
 }
 
+/* The glyph carries it, so the square is only as big as the touch target. */
+.ql-share {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
 .ql-close:hover,
+.ql-share:hover,
 .ql-open:hover {
   background: var(--fill-hover);
   color: var(--fg);
@@ -2951,12 +2961,14 @@ li.md-task {
   }
 
   .ql-close,
+  .ql-share,
   .ql-open {
     min-width: 44px;
     height: 44px;
   }
 
-  .ql-close {
+  .ql-close,
+  .ql-share {
     width: 44px;
     font-size: 14px;
   }

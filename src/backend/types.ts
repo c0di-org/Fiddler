@@ -201,6 +201,12 @@ export interface Backend {
    * with it is a signal that can't be stale. */
   onIncomingFile(fn: () => void): Promise<Unlisten>;
 
+  /** Hand these files to the system's share sheet. Takes the whole selection
+   * because both sheets take a list, and sending four photos as four separate
+   * shares is not what anybody meant. Folders are dropped on the way: neither
+   * platform has a concept of sharing a directory to fail at. */
+  sharePaths(paths: string[]): Promise<void>;
+
   /** Claim the system Back gesture, or hand it back.
    *
    * Only Android has one to lend, and there it otherwise closes the app — so

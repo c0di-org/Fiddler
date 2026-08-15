@@ -62,6 +62,7 @@ export const {
   installApk,
   takeIncomingFiles,
   onIncomingFile,
+  sharePaths,
   setBackEnabled,
   onBack,
   openFolder,

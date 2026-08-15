@@ -16,6 +16,7 @@ mod nearby;
 mod opened;
 mod volumes;
 mod peers;
+mod share;
 #[cfg(target_os = "macos")]
 mod page;
 #[cfg(not(target_os = "macos"))]
@@ -102,6 +103,7 @@ pub fn run() {
             commands::install_apk,
             commands::take_opened_files,
             commands::set_back_enabled,
+            commands::share_paths,
             commands::reveal_in_finder,
             commands::has_open_handler,
             commands::open_terminal_here,

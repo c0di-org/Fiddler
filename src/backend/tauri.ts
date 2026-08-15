@@ -146,6 +146,8 @@ const backend: Backend = {
 
   onIncomingFile: (fn) => listen("fiddler:opened-file", () => fn()),
 
+  sharePaths: (paths) => invoke<void>("share_paths", { paths }),
+
   setBackEnabled: (enabled) => invoke<void>("set_back_enabled", { enabled }),
 
   onBack: (fn) => listen("fiddler:back", () => fn()),

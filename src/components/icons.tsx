@@ -260,6 +260,25 @@ export const LaptopIcon = stroked(
 
 export const CloseIcon = stroked(<path d="m4.25 4.25 7.5 7.5m0-7.5-7.5 7.5" />);
 
+/* A box with something leaving it upward — the same shape Android and macOS
+   both draw for their share sheets, so it needs no label to be recognised. */
+export const ShareIcon = stroked(
+  <>
+    <path d="M8 10.25V1.75" />
+    <path d="M5 4.75 8 1.75l3 3" />
+    <path d="M3.75 7.5h-1v6.75h10.5V7.5h-1" />
+  </>
+);
+
+/* The overflow: the whole menu, one tap away, in the same place every time. */
+export const MoreIcon = stroked(
+  <>
+    <circle cx="3.25" cy="8" r=".85" fill="currentColor" stroke="none" />
+    <circle cx="8" cy="8" r=".85" fill="currentColor" stroke="none" />
+    <circle cx="12.75" cy="8" r=".85" fill="currentColor" stroke="none" />
+  </>
+);
+
 /** Empty-state artwork: an open, and pointedly empty, folder. */
 export const EmptyIcon = stroked(
   <>
