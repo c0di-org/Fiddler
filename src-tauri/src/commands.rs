@@ -862,6 +862,17 @@ pub fn take_opened_files() -> Vec<String> {
         .collect()
 }
 
+/// Whether Fiddler wants Android's next Back press for itself.
+///
+/// Called whenever the answer changes, which is often — every folder walked,
+/// every sheet opened, every selection made. It is a setter rather than a
+/// question Android asks because the dispatcher is main-thread-only and the
+/// answer has to be in place *before* the press, not looked up during it.
+#[tauri::command]
+pub fn set_back_enabled(enabled: bool) -> Result<(), String> {
+    crate::back::set_enabled(enabled)
+}
+
 #[tauri::command]
 #[cfg(target_os = "macos")]
 pub fn reveal_in_finder(path: String) -> Result<(), String> {

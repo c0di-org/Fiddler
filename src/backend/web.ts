@@ -451,6 +451,14 @@ const backend: Backend = {
     return () => {};
   },
 
+  /** A tab's Back belongs to the browser's own history, which is not Fiddler's
+   * to take. Accepted and dropped rather than refused — see `types.ts`. */
+  async setBackEnabled() {},
+
+  async onBack() {
+    return () => {};
+  },
+
   // ------------------------------------------------- browser-only additions
 
   openFolder,

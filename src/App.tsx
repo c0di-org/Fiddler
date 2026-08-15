@@ -132,6 +132,10 @@ export default function App() {
   const [tint, setTint] = useState<Tint>(loadTint);
   const [systemTint, setSystemTint] = useState(false);
   const [editor, setEditor] = useState<EditorState | null>(null);
+  /** Bumped to ask the editor to close itself. Routed through the editor rather
+   * than closing it from here because the unsaved-changes question belongs to
+   * the component that knows whether there are any. */
+  const [editorClose, setEditorClose] = useState(0);
   const [dropping, setDropping] = useState(false);
   /** Why the remembered folder couldn't be reopened. Holds the status bar until
    * the next deliberate move, because a silent fallback to the default reads as
@@ -1512,6 +1516,56 @@ export default function App() {
     [openTarget, openInEditor, flash, selected.length, copySelected, trashSelected, copiedPaths.length, paste, newFolder, newTextFile, mountFolder, undoNext, undo, volumes]
   );
 
+  // --------------------------------------------------------- the system Back
+
+  /**
+   * What Android's Back press should be spent on, innermost first.
+   *
+   * This is the same ladder Escape already walks on the desktop, with one rung
+   * on the end that Escape has never had: the folder you came from. That rung
+   * is the whole reason this exists. Back means "up" to everyone who has ever
+   * held a file browser in one hand, and until now it closed Fiddler instead —
+   * so walking three folders in and swiping back lost the whole session.
+   *
+   * `null` is the honest answer that Fiddler has nothing of its own to spend
+   * the press on, and Android should keep it. Derived from state on every
+   * render rather than stored, because a stored flag is one that can drift out
+   * of step with the screen — and the direction it drifts in is an app that
+   * cannot be left.
+   */
+  const backStep = useMemo<(() => void) | null>(() => {
+    if (menu) return () => setMenu(null);
+    if (editor) return () => setEditorClose((n) => n + 1);
+    if (quickLook)
+      return () => {
+        setQuickLook(false);
+        focusView();
+      };
+    if (accessOpen) return () => setAccessOpen(false);
+    // A selection is a state you are *in*, so it is a state Back can leave.
+    // On a phone it is also the only way out of one that doesn't involve
+    // finding a patch of empty grid to tap.
+    if (selection.size > 0) return () => setSelection(new Set());
+    if (store.canBack) return () => void store.back();
+    return null;
+  }, [menu, editor, quickLook, accessOpen, selection.size, store.canBack, focusView]);
+
+  const wantsBack = backStep !== null;
+  useEffect(() => {
+    void ipc.setBackEnabled(wantsBack);
+  }, [wantsBack]);
+
+  // Read through a ref for the same reason the keyboard below does: the
+  // listener is registered once, and re-registering it on every folder change
+  // would mean a press landing during the swap has nowhere to go.
+  const backRef = useRef(backStep);
+  backRef.current = backStep;
+
+  useEffect(() => {
+    const stop = ipc.onBack(() => backRef.current?.());
+    return () => void stop.then((off) => off());
+  }, []);
+
   // ------------------------------------------------------------- keyboard
 
   /**
@@ -2112,6 +2166,7 @@ export default function App() {
           parent={store.path}
           initialText={editor.text}
           volumes={volumes}
+          closeSignal={editorClose}
           onClose={() => {
             setEditor(null);
             focusView();

@@ -18,4 +18,8 @@ object NativeBridge {
 
   /** Files another app asked Fiddler to open, already resolved to paths. */
   @JvmStatic external fun opened(paths: Array<String>)
+
+  /** The user pressed Back while the front end had somewhere of its own to go.
+   * See `BackGesture`, which only forwards the press once asked to. */
+  @JvmStatic external fun back()
 }

@@ -1,6 +1,7 @@
 #[cfg(target_os = "android")]
 mod android_jni;
 mod apk;
+mod back;
 mod commands;
 mod content_search;
 mod transfer;
@@ -47,6 +48,8 @@ pub fn run() {
             // Before anything slow: a file opened from another app may already
             // be waiting, and its nudge needs somewhere to land.
             opened::remember(app.handle().clone());
+            // Same reason, one line later: Back is pressed long before anything slow.
+            back::remember(app.handle().clone());
             let cache = Arc::new(GitCache::new());
             let watcher = FsWatcher::start(app.handle().clone(), cache.clone());
             let thumbs = ThumbPool::start(app.handle().clone());
@@ -98,6 +101,7 @@ pub fn run() {
             commands::pdf_page,
             commands::install_apk,
             commands::take_opened_files,
+            commands::set_back_enabled,
             commands::reveal_in_finder,
             commands::has_open_handler,
             commands::open_terminal_here,

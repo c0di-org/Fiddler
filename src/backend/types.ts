@@ -201,6 +201,19 @@ export interface Backend {
    * with it is a signal that can't be stale. */
   onIncomingFile(fn: () => void): Promise<Unlisten>;
 
+  /** Claim the system Back gesture, or hand it back.
+   *
+   * Only Android has one to lend, and there it otherwise closes the app — so
+   * walking three folders in and swiping back quits rather than going up.
+   * Elsewhere this is accepted and ignored, because the front end's answer
+   * ("I have history") is true everywhere and only one platform can spend it. */
+  setBackEnabled(enabled: boolean): Promise<void>;
+
+  /** The user pressed Back and we had asked for it. Payload-free for the same
+   * reason `onIncomingFile` is: what to do with the press is decided from
+   * front-end state, and a payload would only be a staler copy of it. */
+  onBack(fn: () => void): Promise<Unlisten>;
+
   // --------------------------------------------------- browser-only additions
   //
   // Optional on purpose: their presence *is* the capability. The Tauri backend

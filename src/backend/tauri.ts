@@ -145,6 +145,10 @@ const backend: Backend = {
   takeIncomingFiles: () => invoke<string[]>("take_opened_files"),
 
   onIncomingFile: (fn) => listen("fiddler:opened-file", () => fn()),
+
+  setBackEnabled: (enabled) => invoke<void>("set_back_enabled", { enabled }),
+
+  onBack: (fn) => listen("fiddler:back", () => fn()),
 };
 
 export default backend;
