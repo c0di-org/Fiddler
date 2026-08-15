@@ -46,9 +46,11 @@ when they live outside the repo tree, and `missing` when the folder is gone and
   The branch on the folder. Ignored files dimmed rather than hidden.
 - **Two views, both dense.** Big icons or a sortable list you can twist open.
   Type letters to jump. `space` for Quick Look.
-- **The whole verb list.** Copy, move, rename, trash, `⌘Z` to take it back,
-  multi-select, drag onto folders, favourites, name search and content search —
-  with a progress bar you can cancel on the long ones.
+- **The whole verb list, in whichever hand.** Copy, cut, paste, duplicate,
+  rename, trash, share, `⌘Z` to take it back, multi-select, drag onto folders,
+  favourites, name search and content search — with a progress bar you can
+  cancel on the long ones. A pointer clicks, double-clicks and right-clicks; a
+  finger taps and long-presses; the verbs behind them are the same list.
 - **Nearby devices.** Another Mac or Android on the same Wi-Fi appears in the
   sidebar. Pairing is one tap here and one **Allow** over there; being visible on
   the network authorises nothing on its own.
@@ -83,7 +85,8 @@ when they live outside the repo tree, and `missing` when the folder is gone and
 | `⇧⌘.` | Show hidden files |
 | type letters | Jump to the first matching name |
 | `↵` `⌘↵` | Rename / open |
-| `⌘C` `⌘V` `⌘Z` | Copy, paste, undo |
+| `⌘C` `⌘X` `⌘V` | Copy, cut, paste |
+| `⌘D` `⌘Z` | Duplicate, undo |
 | `⌘⌫` | Move to Trash |
 | `⇧⌘N` `⌘N` | New folder / new text file |
 
@@ -122,9 +125,26 @@ npm run build:web    # → dist-web
 npm run deploy       # build, then wrangler deploy
 ```
 
-**Android / Samsung DeX** — built for the wide keyboard-and-pointer layout.
-Browsing, git status, previews, and a full-screen text editor. Deletions are
-permanent, with a confirmation, because Android gives Fiddler no system Trash.
+**Android / Samsung DeX** — the wide keyboard-and-pointer layout, and the
+narrow one held in a hand. Browsing, git status, previews, and a full-screen
+text editor. Deletions are permanent, with a confirmation, because Android
+gives Fiddler no system Trash.
+
+A finger gets the same three verbs a pointer has, spelled its own way. **Long
+press** takes an item — a haptic tick and a selection while the finger is still
+down — and from there a **tap toggles** rather than opens, which is the whole
+of multi-select: press once, then tap the rest. The status bar becomes the
+action bar, with the overflow opening the very same menu a right-click opens.
+A press on something already selected goes straight to that menu.
+
+**Back** walks the ladder Escape walks on the desktop — menu, editor, Quick
+Look, selection — and then the folder you came from, rather than closing the
+app. **Share** hands the selection to Android's chooser, from the menu, the
+action bar, or Quick Look.
+
+Which hand is holding it is worked out from the last pointer down rather than
+at build time, so DeX with a mouse on a monitor behaves like a desktop and the
+same build on the panel behaves like a phone.
 
 Fiddler is also registered for **Open with** and the share sheet, for the types
 Quick Look can draw. Picking it doesn't put the document on a blank screen — it
