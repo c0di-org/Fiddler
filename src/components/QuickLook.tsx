@@ -4,11 +4,12 @@ import { formatSize } from "../format";
 import * as ipc from "../ipc";
 import { kindOf } from "../kind";
 import { LINK_LABEL, parseShortcut, type Shortcut } from "../preview/link";
+import { caps } from "../platform";
 import { isTextual, routeOf } from "../preview/route";
 import type { Entry, TextHead } from "../types";
 import { CodeView } from "./CodeView";
 import { FileGlyph, FolderGlyph } from "./FileGlyph";
-import { LinkMark } from "./icons";
+import { LinkMark, MoreIcon, ShareIcon } from "./icons";
 import { MarkdownView } from "./MarkdownView";
 import { PdfView } from "./PdfView";
 
@@ -46,9 +47,15 @@ interface Props {
   total: number;
   onStep: (delta: number) => void;
   onClose: () => void;
+  /** Hand this file to the system's share sheet. Absent where there is none. */
+  onShare?: () => void;
+  /** The full menu for this file. Quick Look covers the view that would
+   * otherwise be right-clicked for it, so without this the verbs are simply
+   * unreachable from here — and on a phone here is where a tap lands you. */
+  onMore?: (x: number, y: number) => void;
 }
 
-export function QuickLook({ entry, index, total, onStep, onClose }: Props) {
+export function QuickLook({ entry, index, total, onStep, onClose, onShare, onMore }: Props) {
   const route = routeOf(entry.name);
   const isDir = entry.kind === "dir" || (entry.kind === "symlink" && entry.linkToDir);
   const [page, setPage] = useState(1);
@@ -113,6 +120,28 @@ export function QuickLook({ entry, index, total, onStep, onClose }: Props) {
               {total > 1 && ` · ${index + 1} of ${total}`}
             </span>
           </div>
+          {/* On a phone this bar is where a tap lands you, which makes it the
+              one place a file is reliably in your hands — so the verb everyone
+              reaches for next belongs here rather than three gestures back in
+              the grid. Folders are left out: neither sheet takes one. */}
+          {caps.share && onShare && !isDir && (
+            <button className="ql-share" onClick={onShare} title="Share…" aria-label="Share">
+              <ShareIcon size={17} />
+            </button>
+          )}
+          {onMore && (
+            <button
+              className="ql-more"
+              onClick={(e) => {
+                const r = e.currentTarget.getBoundingClientRect();
+                onMore(r.left, r.bottom + 4);
+              }}
+              title="More…"
+              aria-label="More actions"
+            >
+              <MoreIcon size={17} />
+            </button>
+          )}
           <button className="ql-open" onClick={() => void ipc.openExternal(entry.path)}>
             Open
           </button>

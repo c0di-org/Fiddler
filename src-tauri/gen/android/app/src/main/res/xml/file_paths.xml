@@ -1,5 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  What the FileProvider is allowed to make a `content://` URI for.
+
+  A file browser's answer is "wherever the user is looking", which is why the
+  root entry is here. It is broader than the usual advice, and safe for the
+  reason the usual advice exists: this provider is not exported, nothing but
+  Fiddler can ask it for a URI, and each URI it does hand out carries a
+  read grant for that one file to that one app, for the life of one intent.
+  Narrowing it would only mean a share sheet that works on internal storage and
+  silently refuses the SD card the user just browsed to.
+
+  The two entries above it are kept because they match first and produce
+  shorter, more legible URIs for the two common cases.
+-->
 <paths xmlns:android="http://schemas.android.com/apk/res/android">
-  <external-path name="my_images" path="." />
-  <cache-path name="my_cache_images" path="." />
+  <external-path name="shared" path="." />
+  <cache-path name="cache" path="." />
+  <root-path name="anywhere" path="/" />
 </paths>

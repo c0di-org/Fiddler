@@ -15,6 +15,12 @@
   --surface-2: rgba(255, 255, 255, 0.5);
   --glass: rgba(250, 250, 252, 0.72);
   --glass-strong: rgba(252, 252, 254, 0.86);
+  /* Opaque, unlike everything else here. The one surface that covers most of
+     the screen rather than floating over a corner of it: glass at that size
+     stops reading as depth and starts reading as a rendering fault, and the
+     targets that only appear on touch have no window vibrancy behind them to
+     be glass against. */
+  --panel: #f4f4f7;
 
   /* ink */
   --fg: #1c1c1e;
@@ -94,6 +100,7 @@
     --surface-2: rgba(255, 255, 255, 0.045);
     --glass: rgba(44, 44, 48, 0.72);
     --glass-strong: rgba(48, 48, 52, 0.88);
+    --panel: #202024;
 
     --fg: #f5f5f7;
     --fg-dim: rgba(235, 235, 245, 0.6);
@@ -1169,6 +1176,10 @@ button {
   display: flex;
   flex-direction: column;
   align-items: center;
+  /* A mobile WebView answers a long press with its own callout — a magnifier,
+     a selection handle, a Copy bubble — which would arrive on top of the
+     press gesture's own answer and steal the finger that started it. */
+  -webkit-touch-callout: none;
   /* Tight: the name belongs to the thumbnail above it. The air goes between
      cells (see GAP in IconGrid), not between an item and its own label. */
   gap: 8px;
@@ -1539,6 +1550,8 @@ body.column-resizing * {
 .lrow {
   display: grid;
   align-items: center;
+  /* See `.cell`: the long press is Fiddler's now. */
+  -webkit-touch-callout: none;
   margin: 0 12px;
   padding: 0 4px;
   border-radius: var(--r-md);
@@ -1826,6 +1839,70 @@ body.column-resizing * {
   text-align: center;
 }
 
+/* ------------------------------------------------------- the selection bar */
+
+/* The status bar with verbs in it. Taller than the bar it replaces, because
+   every child of it is now a touch target — and the height change is the
+   clearest signal available that the app is in a state you can leave. */
+.statusbar.acting {
+  display: block;
+  height: 56px;
+  flex: 0 0 56px;
+  padding: 0 6px;
+  /* Lifted off the window's vibrancy so the bar reads as being *over* the
+     folder rather than part of it, the way a selection is. */
+  background: var(--fill);
+  color: var(--fg);
+}
+
+.selbar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 100%;
+}
+
+.selbar-count {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  padding-left: 2px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.selbar-actions {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.selbar-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border: 0;
+  border-radius: var(--r-md);
+  background: transparent;
+  color: var(--fg-dim);
+  cursor: default;
+}
+
+.selbar-btn:active {
+  background: var(--fill-hover);
+  color: var(--fg);
+}
+
+.selbar-btn.danger {
+  color: var(--git-conflict);
+}
+
 /* ------------------------------------------------------- transfer progress */
 
 /* Takes the middle track the count usually holds, so the bar arrives without
@@ -2089,7 +2166,9 @@ body.column-resizing * {
 /* Floating surfaces are the one place a real backdrop blur earns its cost. */
 .ctx-menu {
   position: fixed;
-  z-index: 50;
+  /* Above Quick Look, which can now raise this menu itself, and below the
+     editor, which cannot. A menu has to outrank whatever opened it. */
+  z-index: 65;
   min-width: 216px;
   padding: 6px;
   border-radius: var(--r-lg);
@@ -2142,6 +2221,101 @@ body.column-resizing * {
   height: 1px;
   margin: 5px 8px;
   background: var(--hair);
+}
+
+/* -------------------------------------------------- the same menu, as a sheet
+ *
+ * Identical contents to the popover above — the same `MenuItem[]`, because it
+ * is the same menu. What changes is only what a finger needs: rows it can hit
+ * without seeing them, a title saying what is being acted on now that the menu
+ * is at the far end of the screen from it, and an arrival from the edge the
+ * thumb is already resting on.
+ */
+
+.ctx-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 65;
+  display: flex;
+  align-items: flex-end;
+  background: rgba(0, 0, 0, 0.32);
+  animation: ctx-fade var(--med) ease-out;
+}
+
+.ctx-sheet {
+  width: 100%;
+  max-height: 82%;
+  display: flex;
+  flex-direction: column;
+  padding: 6px 8px calc(8px + env(safe-area-inset-bottom, 0px));
+  border-radius: var(--r-lg) var(--r-lg) 0 0;
+  background: var(--panel);
+  border-top: 0.5px solid var(--hair);
+  box-shadow: var(--shadow-3);
+  animation: ctx-rise var(--med) var(--spring);
+}
+
+@keyframes ctx-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes ctx-rise {
+  from { transform: translateY(14px); }
+  to { transform: none; }
+}
+
+.ctx-grip {
+  flex: none;
+  width: 36px;
+  height: 4px;
+  margin: 4px auto 6px;
+  border-radius: var(--r-pill);
+  background: var(--fill-strong);
+}
+
+.ctx-sheet-title {
+  flex: none;
+  padding: 2px 12px 8px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--fg-dim);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+/* The list scrolls, the grip and title stay: a folder with a repo, a
+   clipboard and a favourite can run to a dozen items on a short screen. */
+.ctx-sheet-items {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.ctx-sheet-item {
+  display: block;
+  width: 100%;
+  /* 48px, which is Android's minimum touch target and about the width of a
+     fingertip. The popover's 30px rows are aimed at with a pointer that has a
+     single pixel of truth in it; this one is aimed at with something that
+     covers the row it is choosing. */
+  min-height: 48px;
+  padding: 13px 12px;
+  border: 0;
+  border-radius: var(--r-md);
+  background: transparent;
+  text-align: left;
+  font-size: 15px;
+}
+
+.ctx-sheet-item:active {
+  background: var(--fill-hover);
+}
+
+.ctx-sheet-item.danger {
+  color: var(--git-conflict);
 }
 
 .toast {
@@ -2896,6 +3070,8 @@ li.md-task {
 }
 
 .ql-close,
+.ql-share,
+.ql-more,
 .ql-open {
   flex: none;
   height: 26px;
@@ -2909,13 +3085,25 @@ li.md-task {
   cursor: default;
 }
 
-.ql-close {
+.ql-close,
+.ql-share,
+.ql-more {
   width: 26px;
   padding: 0;
   font-size: 11px;
 }
 
+/* The glyph carries it, so the square is only as big as the touch target. */
+.ql-share,
+.ql-more {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
 .ql-close:hover,
+.ql-share:hover,
+.ql-more:hover,
 .ql-open:hover {
   background: var(--fill-hover);
   color: var(--fg);
@@ -2951,12 +3139,16 @@ li.md-task {
   }
 
   .ql-close,
+  .ql-share,
+  .ql-more,
   .ql-open {
     min-width: 44px;
     height: 44px;
   }
 
-  .ql-close {
+  .ql-close,
+  .ql-share,
+  .ql-more {
     width: 44px;
     font-size: 14px;
   }
@@ -3402,6 +3594,20 @@ li.md-task {
   .grid-section {
     left: 18px;
     right: 12px;
+  }
+
+  /* --------------------------------------------------- the selection bar */
+
+  /* Five 44px targets and a rail leave the count about fifty pixels, which is
+     not enough for "12 selected" — so the targets come down to the 40px that
+     still clears the platform's minimum, and the word gets its room back. */
+  .selbar-btn {
+    width: 40px;
+    height: 40px;
+  }
+
+  .selbar-count {
+    font-size: 12.5px;
   }
 
   /* -------------------------------------------------------- statusbar --- */

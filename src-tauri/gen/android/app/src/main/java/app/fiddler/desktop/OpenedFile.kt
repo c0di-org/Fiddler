@@ -9,6 +9,7 @@ import android.os.Environment
 import android.provider.DocumentsContract
 import android.provider.MediaStore
 import android.provider.OpenableColumns
+import android.util.Log
 import java.io.File
 import java.util.concurrent.Executors
 
@@ -27,6 +28,8 @@ import java.util.concurrent.Executors
  * has to poll and Rust never has to reach back into Java to ask.
  */
 object OpenedFile {
+  private const val TAG = "Fiddler"
+
   private val worker = Executors.newSingleThreadExecutor { r ->
     Thread(r, "fiddler-opened-file").apply { isDaemon = true }
   }
@@ -165,7 +168,7 @@ object OpenedFile {
 
     val size = sizeOf(context, uri)
     if (size != null && size > MAX_COPY_BYTES) {
-      Logger.warn("Fiddler: $name is too large to open from a provider with no file behind it")
+      Log.w(TAG, "$name is too large to open from a provider with no file behind it")
       return null
     }
 
@@ -190,7 +193,7 @@ object OpenedFile {
       out.absolutePath
     }.getOrElse {
       temp.delete()
-      Logger.warn("Fiddler: couldn't read $name from the app that sent it: $it")
+      Log.w(TAG, "couldn't read $name from the app that sent it: $it")
       null
     }
   }

@@ -6,6 +6,7 @@ import { GlyphDefs } from "./components/FileGlyph";
 import { IconGrid, type GridCell } from "./components/IconGrid";
 import { PreviewPane } from "./components/PreviewPane";
 import { QuickLook } from "./components/QuickLook";
+import { SelectionBar } from "./components/SelectionBar";
 import { Sidebar } from "./components/Sidebar";
 import { TintPicker } from "./components/TintPicker";
 import { TextEditor } from "./components/TextEditor";
@@ -15,7 +16,7 @@ import { Toolbar } from "./components/Toolbar";
 import { UsbConnecting, UsbLinkBanner } from "./components/UsbPanel";
 import { EjectBusyBanner, VolumeBlocked } from "./components/VolumeRow";
 import { TransferNoteBanner } from "./components/Banner";
-import type { FolderTouchDragHandlers } from "./components/folder-touch-drag";
+import type { FolderTouchDragHandlers } from "./components/touch-press";
 import { GridIcon } from "./components/icons";
 import { describeItems, parentOf, type DragItems, type DropVerb } from "./drag";
 import { addFavorite, loadFavorites, moveFavorite, saveFavorites } from "./favorites";
@@ -102,7 +103,12 @@ export default function App() {
   const [folderTouchDrag, setFolderTouchDrag] = useState<FolderTouchDrag | null>(null);
   const folderTouchDragRef = useRef<FolderTouchDrag | null>(null);
   const [selection, setSelection] = useState<Set<string>>(new Set());
-  const [copiedPaths, setCopiedPaths] = useState<string[]>([]);
+  /** What Copy or Cut put aside, and which of the two it was.
+   *
+   * One piece of state rather than two lists, because they are the same
+   * clipboard: cutting after copying has to replace what was copied, and two
+   * lists would leave Paste choosing between them. */
+  const [clipboard, setClipboard] = useState<{ paths: string[]; verb: "copy" | "move" } | null>(null);
   const [revealSelection, setRevealSelection] = useState(0);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [filter, setFilter] = useState("");
@@ -124,7 +130,14 @@ export default function App() {
   const [nearbyBusy, setNearbyBusy] = useState(false);
   const [content, setContent] = useState<ContentState | null>(null);
   const [contentBusy, setContentBusy] = useState(false);
-  const [menu, setMenu] = useState<{ x: number; y: number; items: MenuItem[] } | null>(null);
+  const [menu, setMenu] = useState<{ x: number; y: number; items: MenuItem[]; sheet?: boolean; title?: string } | null>(null);
+  /** Whether the last thing to touch this app was a finger.
+   *
+   * Not a capability but a running observation, because a DeX desktop is both:
+   * the same Android build takes a mouse on a monitor and a thumb on the panel,
+   * often minutes apart. Anything that asks "which hand is this?" has to ask
+   * now rather than at build time. */
+  const [touchDriven, setTouchDriven] = useState(caps.directTouch);
   const [quickLook, setQuickLook] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const toastTimer = useRef(0);
@@ -132,6 +145,10 @@ export default function App() {
   const [tint, setTint] = useState<Tint>(loadTint);
   const [systemTint, setSystemTint] = useState(false);
   const [editor, setEditor] = useState<EditorState | null>(null);
+  /** Bumped to ask the editor to close itself. Routed through the editor rather
+   * than closing it from here because the unsaved-changes question belongs to
+   * the component that knows whether there are any. */
+  const [editorClose, setEditorClose] = useState(0);
   const [dropping, setDropping] = useState(false);
   /** Why the remembered folder couldn't be reopened. Holds the status bar until
    * the next deliberate move, because a silent fallback to the default reads as
@@ -1107,6 +1124,12 @@ export default function App() {
     [go, flash, openInEditor]
   );
 
+  useEffect(() => {
+    const seen = (event: PointerEvent) => setTouchDriven(event.pointerType === "touch");
+    window.addEventListener("pointerdown", seen, true);
+    return () => window.removeEventListener("pointerdown", seen, true);
+  }, []);
+
   /** Touch opens immediately; keyboard and pointer selection keep Finder semantics. */
   const select = useCallback(
     (id: string, e: React.MouseEvent, touch = false) => {
@@ -1114,6 +1137,21 @@ export default function App() {
       // note about the launch once there is a selection to describe.
       setRestoreNote(null);
       if (touch && !e.metaKey && !e.ctrlKey && !e.shiftKey) {
+        // A selection already standing turns every tap into a toggle. This is
+        // the whole of multi-select on a phone: long-press once to begin, then
+        // tap. No mode to enter, no mode to leave — a Mac behaves the same way,
+        // and only spells the toggle ⌘-click because it has a ⌘ to spell it
+        // with. The way out is the way out of any selection: tap the
+        // background, or press Back.
+        if (selection.size > 0) {
+          anchorRef.current = id;
+          setSelection((prev) => {
+            const next = new Set(prev);
+            next.has(id) ? next.delete(id) : next.add(id);
+            return next;
+          });
+          return;
+        }
         const target = targets.find((item) => item.id === id);
         if (target) {
           anchorRef.current = id;
@@ -1142,7 +1180,7 @@ export default function App() {
         return new Set([id]);
       });
     },
-    [targets, go]
+    [targets, selection, go]
   );
 
   const moveCursor = useCallback(
@@ -1234,42 +1272,142 @@ export default function App() {
       flash(`Fiddler can’t copy items off ${off.where} yet`);
       return;
     }
-    setCopiedPaths(paths);
+    setClipboard({ paths, verb: "copy" });
     flash(`Copied ${paths.length} item${paths.length === 1 ? "" : "s"}`);
   }, [selected, flash, volumes]);
 
-  const paste = useCallback(async () => {
-    if (copiedPaths.length === 0 || !store.path) return;
-    const destination = store.path;
-    const here = locationCaps(destination, volumes);
-    if (!here.paste) {
-      flash(refusal(here, "put items"));
+  /**
+   * The other half of Move, which until now existed only as a drag.
+   *
+   * Dragging is fine for a folder you can see. It is no use at all for the
+   * common case — take this out of Downloads and put it four folders away —
+   * and on a phone there is no second window to drag between at all. Cut and
+   * Paste is how that is spelled everywhere else.
+   *
+   * Nothing moves here. The originals stay exactly where they are until a
+   * Paste lands, so a cut that is never pasted has cost nothing, and the file
+   * is never in the state of belonging to neither folder.
+   */
+  const cutSelected = useCallback(() => {
+    const paths = selected.map((target) => target.path);
+    if (paths.length === 0) return;
+    const off = paths.map((p) => locationCaps(p, volumes)).find((at) => !at.modify);
+    if (off) {
+      flash(refusal(off, "move items"));
       return;
     }
-    // A cable is slow enough that silence reads as nothing happening: a video
-    // onto a phone over USB 2.0 is tens of seconds. The device path reports no
-    // progress of its own yet, so it keeps the toast it always had.
-    const device = destination.startsWith("mtp://");
-    if (device) {
-      flash(`Copying ${copiedPaths.length} item${copiedPaths.length === 1 ? "" : "s"} to the device…`);
+    setClipboard({ paths, verb: "move" });
+    flash(`Cut ${paths.length} item${paths.length === 1 ? "" : "s"}`);
+  }, [selected, flash, volumes]);
+
+  /**
+   * A copy of each selected item, beside it.
+   *
+   * The name is the backend's business: `copy_name` already turns a collision
+   * into "report copy.pdf", which is exactly what Duplicate means.
+   */
+  const duplicateSelected = useCallback(async () => {
+    const paths = selected.filter((target) => target.entry).map((target) => target.path);
+    if (paths.length === 0) return;
+    const destination = parentOf(paths[0]);
+    const here = locationCaps(destination, volumes);
+    if (!here.create) {
+      flash(refusal(here, "duplicate items"));
+      return;
     }
     try {
-      const outcome = await runTransfer("copy", copiedPaths, destination);
-      // Nothing watches a folder on a device, so the listing only shows what
-      // just arrived if we go and ask again.
-      if (device) await store.invalidateDirs([destination]);
-      // Nothing is said about a cancellation. The status bar has already gone
-      // quiet, which is the acknowledgement; a toast reading "cancelled" after
-      // you have just cancelled something is the app explaining your own
-      // decision back to you.
+      const outcome = await runTransfer("copy", paths, destination);
       if (outcome.cancelled) return;
       setSelection(new Set(outcome.paths));
-      remember({ label: "Paste", action: { kind: "create", paths: outcome.paths } });
-      flash(`Pasted ${outcome.paths.length} item${outcome.paths.length === 1 ? "" : "s"}`);
+      remember({ label: "Duplicate", action: { kind: "create", paths: outcome.paths } });
+      flash(`Duplicated ${paths.length} item${paths.length === 1 ? "" : "s"}`);
     } catch (error) {
       flash(String(error).replace(/^Error:\s*/, ""));
     }
-  }, [copiedPaths, flash, runTransfer, volumes]);
+  }, [selected, flash, runTransfer, volumes]);
+
+  /** Everything in the selection the system's share sheet could actually take.
+   *
+   * Folders are dropped rather than refusing the whole thing: neither Android
+   * nor macOS has a concept of sharing a directory, and six files and one
+   * folder is a perfectly clear request to send the six. A worktree row has no
+   * `entry` and is not a file at all, so it falls out here too. */
+  const shareable = useMemo(
+    () => selected.filter((target) => target.entry && !target.isDir).map((target) => target.path),
+    [selected]
+  );
+
+  const shareSelected = useCallback(async () => {
+    if (shareable.length === 0) return;
+    try {
+      await ipc.sharePaths(shareable);
+    } catch (error) {
+      flash(String(error).replace(/^Error:\s*/, ""));
+    }
+  }, [shareable, flash]);
+
+  /**
+   * Put the clipboard down — here, or in the folder the menu was opened on.
+   *
+   * `into` is what makes "Paste Into" possible on a folder you can see but are
+   * not standing in, which is the shape most filing actually takes: the thing
+   * you want to put away is in front of you and its home is one row below it.
+   */
+  const paste = useCallback(
+    async (into?: string) => {
+      const held = clipboard;
+      const destination = into ?? store.path;
+      if (!held || held.paths.length === 0 || !destination) return;
+      const here = locationCaps(destination, volumes);
+      if (!here.paste) {
+        flash(refusal(here, "put items"));
+        return;
+      }
+      // Moving something into the folder it is already in is not an error, it
+      // is simply nothing — and the backend would refuse it as a name clash.
+      const paths =
+        held.verb === "move" ? held.paths.filter((path) => parentOf(path) !== destination) : held.paths;
+      if (paths.length === 0) {
+        setClipboard(null);
+        return;
+      }
+      // A cable is slow enough that silence reads as nothing happening: a video
+      // onto a phone over USB 2.0 is tens of seconds. The device path reports no
+      // progress of its own yet, so it keeps the toast it always had.
+      const device = destination.startsWith("mtp://");
+      if (device) {
+        flash(`Copying ${paths.length} item${paths.length === 1 ? "" : "s"} to the device…`);
+      }
+      try {
+        const outcome = await runTransfer(held.verb, paths, destination);
+        // Nothing watches a folder on a device, so the listing only shows what
+        // just arrived if we go and ask again.
+        if (device) await store.invalidateDirs([destination]);
+        // Nothing is said about a cancellation. The status bar has already gone
+        // quiet, which is the acknowledgement; a toast reading "cancelled" after
+        // you have just cancelled something is the app explaining your own
+        // decision back to you.
+        if (outcome.cancelled) return;
+        setSelection(new Set(outcome.paths));
+        if (held.verb === "move") {
+          // A cut is spent once it lands. Leaving it on the clipboard would
+          // offer a second Paste for files that are no longer where it points.
+          setClipboard(null);
+          remember({
+            label: "Move",
+            action: { kind: "move", moves: outcome.paths.map((to, at) => ({ from: paths[at], to })) },
+          });
+          flash(`Moved ${outcome.paths.length} item${outcome.paths.length === 1 ? "" : "s"}`);
+          return;
+        }
+        remember({ label: "Paste", action: { kind: "create", paths: outcome.paths } });
+        flash(`Pasted ${outcome.paths.length} item${outcome.paths.length === 1 ? "" : "s"}`);
+      } catch (error) {
+        flash(String(error).replace(/^Error:\s*/, ""));
+      }
+    },
+    [clipboard, flash, runTransfer, volumes]
+  );
 
   /**
    * What a drag starting on `id` carries.
@@ -1433,51 +1571,105 @@ export default function App() {
   }, [flash, revealCursor, runTransfer]);
 
   const buildMenu = useCallback(
-    (t: Target | null, x: number, y: number) => {
+    (t: Target | null, x: number, y: number, sheet = false) => {
       const items: MenuItem[] = [];
 
       // Two different questions: what this build can do, and what the address
       // under the pointer can do. A folder on a phone takes a paste and nothing
       // else, so the items that would fail are left out rather than shown.
       const at = locationCaps(t ? t.path : store.path, volumes);
+      // Verbs act on the selection, so their labels have to count it — but only
+      // when the item under the pointer is part of that selection. Right-click
+      // something else and the selection has already collapsed to it.
+      const many = t && selection.has(t.id) ? selected.length : 1;
+      const count = (verb: string, plural = "Items") => (many > 1 ? `${verb} ${many} ${plural}` : verb);
 
       if (t) {
-        items.push({ label: "Open", onPick: () => void openTarget(t) });
-        if (at.copy) {
-          items.push({ label: selected.length > 1 ? `Copy ${selected.length} Items` : "Copy", onPick: copySelected });
+        // Single-item verbs. Offering "Open" for twelve files would open
+        // twelve windows, and "Rename…" for twelve has nothing to rename.
+        if (many === 1) {
+          items.push({ label: "Open", onPick: () => void openTarget(t) });
+          // The way *into* the editor now that ↵ goes to the OS. It used to
+          // call openTarget, which made it a second Open under a different name.
+          if (!t.isDir) {
+            items.push({
+              label: "Edit Text File",
+              onPick: () => {
+                void openInEditor(t).then((opened) => {
+                  if (!opened) flash(`“${t.name}” isn’t text Fiddler can edit`);
+                });
+              },
+            });
+          }
         }
-        // The way *into* the editor now that ↵ goes to the OS. It used to call
-        // openTarget, which made it a second Open under a different name.
-        if (!t.isDir) {
+
+        // Offered only when there is something the sheet could take. A "Share"
+        // that always appears and sometimes explains that folders can't be
+        // shared is a menu item that teaches you to distrust the menu.
+        if (caps.share && shareable.length > 0 && at.copy) {
           items.push({
-            label: "Edit Text File",
+            label: shareable.length > 1 ? `Share ${shareable.length} Files…` : "Share…",
+            separatorBefore: true,
+            onPick: () => void shareSelected(),
+          });
+        }
+
+        if (at.copy) items.push({ label: count("Copy"), separatorBefore: true, onPick: copySelected });
+        // Cut is the half of Move that was missing. Dragging is fine for a
+        // folder you can see; it is no use for "take this out of Downloads and
+        // put it four folders away", and on a phone there is no second window
+        // to drag between at all.
+        if (t.entry && at.modify) items.push({ label: count("Cut"), onPick: cutSelected });
+        if (t.entry && at.create) {
+          items.push({ label: count("Duplicate"), onPick: () => void duplicateSelected() });
+        }
+        // Paste *into* the folder under the pointer, which is the shape most
+        // filing takes: the thing to put away is in front of you and its home
+        // is a row below it.
+        if (clipboard && t.isDir && at.paste) {
+          items.push({
+            label: `Paste ${clipboard.paths.length} Item${clipboard.paths.length === 1 ? "" : "s"} Into “${t.name}”`,
+            onPick: () => void paste(t.path),
+          });
+        }
+
+        if (caps.reveal && at.shell) {
+          items.push({ label: "Reveal in Finder", separatorBefore: true, onPick: () => void ipc.revealInFinder(t.path) });
+        }
+        if (caps.terminal && at.shell && t.isDir) {
+          items.push({ label: "Open in Terminal", onPick: () => void ipc.openTerminalHere(t.path) });
+        }
+        // A search result is somewhere else by definition, and "where is this
+        // actually?" is the question a hit in a list of hits always raises.
+        if (many === 1 && parentOf(t.path) && parentOf(t.path) !== store.path) {
+          items.push({
+            label: "Open Enclosing Folder",
             onPick: () => {
-              void openInEditor(t).then((opened) => {
-                if (!opened) flash(`“${t.name}” isn’t text Fiddler can edit`);
-              });
+              setSelection(new Set([t.id]));
+              void go(parentOf(t.path));
             },
           });
         }
-        if (caps.reveal && at.shell) {
-          items.push({ label: "Reveal in Finder", onPick: () => void ipc.revealInFinder(t.path) });
+        if (many === 1 && t.isDir) {
+          const saved = favorites.some((item) => item.path === t.path);
+          items.push({
+            label: saved ? "Remove from Favourites" : "Add to Favourites",
+            onPick: () => (saved ? unfavorite(t.path) : favorite({ name: t.name, path: t.path })),
+          });
         }
-        if (caps.terminal && at.shell) {
-          items.push({ label: "Open in Terminal", onPick: () => void ipc.openTerminalHere(t.path) });
-        }
+
         items.push({
           label: "Copy Path",
           separatorBefore: true,
           onPick: () => void navigator.clipboard.writeText(t.path),
         });
         if (t.entry && at.modify) {
-          items.push({ label: "Rename…", onPick: () => setRenamingId(t.id) });
+          if (many === 1) items.push({ label: "Rename…", onPick: () => setRenamingId(t.id) });
           items.push({
             label: caps.trash
-              ? selected.length > 1
-                ? `Move ${selected.length} Items to Trash`
-                : "Move to Trash"
-              : selected.length > 1
-                ? `Delete ${selected.length} Items…`
+              ? count("Move to Trash", "Items to Trash")
+              : many > 1
+                ? `Delete ${many} Items…`
                 : "Delete…",
             danger: true,
             separatorBefore: true,
@@ -1488,12 +1680,30 @@ export default function App() {
         if (undoNext) {
           items.push({ label: `Undo ${undoNext.label}`, onPick: () => void undo() });
         }
-        if (copiedPaths.length > 0 && at.paste) items.push({ label: "Paste", onPick: () => void paste() });
+        if (clipboard && at.paste) {
+          items.push({
+            label: clipboard.verb === "move"
+              ? `Move ${clipboard.paths.length} Item${clipboard.paths.length === 1 ? "" : "s"} Here`
+              : `Paste ${clipboard.paths.length} Item${clipboard.paths.length === 1 ? "" : "s"}`,
+            onPick: () => void paste(),
+          });
+        }
         if (at.create) {
-          items.push({ label: "New Text File", onPick: newTextFile });
+          items.push({ label: "New Text File", separatorBefore: true, onPick: newTextFile });
           items.push({ label: "New Folder", onPick: () => void newFolder() });
         }
-        if (caps.terminal && at.shell) items.push({ label: "Open in Terminal", onPick: () => void ipc.openTerminalHere(store.path) });
+        // Keyboard-only until now, which on a phone means it did not exist.
+        if (targets.length > 0) {
+          items.push({
+            label: selection.size >= targets.length ? "Deselect All" : `Select All ${targets.length} Items`,
+            separatorBefore: true,
+            onPick: () =>
+              setSelection(
+                selection.size >= targets.length ? new Set() : new Set(targets.map((item) => item.id))
+              ),
+          });
+        }
+        if (caps.terminal && at.shell) items.push({ label: "Open in Terminal", separatorBefore: true, onPick: () => void ipc.openTerminalHere(store.path) });
         if (mountFolder) items.push({ label: "Open Folder…", separatorBefore: true, onPick: mountFolder });
         const root = store.listing?.repoRoot;
         if (root) {
@@ -1507,10 +1717,99 @@ export default function App() {
 
       // The empty space of a device folder has nothing left to offer, and an
       // empty menu is a blank box that has to be dismissed.
-      if (items.length > 0) setMenu({ x, y, items });
+      // Only a sheet shows this, and only a sheet needs it: a popover is
+      // already touching the thing it belongs to.
+      const title = t ? (many > 1 ? `${many} items` : t.name) : undefined;
+      if (items.length > 0) setMenu({ x, y, items, sheet, title });
     },
-    [openTarget, openInEditor, flash, selected.length, copySelected, trashSelected, copiedPaths.length, paste, newFolder, newTextFile, mountFolder, undoNext, undo, volumes]
+    [openTarget, openInEditor, flash, go, selection, selected.length, targets, favorites, favorite, unfavorite, copySelected, cutSelected, duplicateSelected, shareable.length, shareSelected, trashSelected, clipboard, paste, newFolder, newTextFile, mountFolder, undoNext, undo, volumes]
   );
+
+  /**
+   * A long press landed. The item is taken.
+   *
+   * Nothing opens and no menu appears, which is what makes multi-select fluid:
+   * press once, then tap the rest. That is what a hand trained on Google Files
+   * or Photos already expects, and it is the same fact a Mac states as "there
+   * is a selection" — the status bar has been saying it on all three platforms
+   * the whole time, and now grows the verbs to match.
+   *
+   * The exception is a press on something already selected. There the
+   * selection is already the answer, so the press means what a right-click
+   * means and goes straight to the menu.
+   */
+  const pressTarget = useCallback(
+    (id: string) => {
+      setRestoreNote(null);
+      if (selection.has(id)) {
+        buildMenu(byId.get(id) ?? null, 0, 0, true);
+        return;
+      }
+      anchorRef.current = id;
+      // Adding rather than replacing when a selection is already standing: a
+      // press and a tap have to mean the same thing once you are choosing, or
+      // the gesture that starts a multi-selection would also be the one that
+      // throws it away.
+      setSelection((prev) => (prev.size > 0 ? new Set(prev).add(id) : new Set([id])));
+    },
+    [selection, byId, buildMenu]
+  );
+
+  /** The overflow in the selection bar: the same list a right-click gives. */
+  const openSelectionMenu = useCallback(() => {
+    const lead = [...selection].pop();
+    buildMenu(lead ? byId.get(lead) ?? null : null, 0, 0, true);
+  }, [selection, byId, buildMenu]);
+
+  // --------------------------------------------------------- the system Back
+
+  /**
+   * What Android's Back press should be spent on, innermost first.
+   *
+   * This is the same ladder Escape already walks on the desktop, with one rung
+   * on the end that Escape has never had: the folder you came from. That rung
+   * is the whole reason this exists. Back means "up" to everyone who has ever
+   * held a file browser in one hand, and until now it closed Fiddler instead —
+   * so walking three folders in and swiping back lost the whole session.
+   *
+   * `null` is the honest answer that Fiddler has nothing of its own to spend
+   * the press on, and Android should keep it. Derived from state on every
+   * render rather than stored, because a stored flag is one that can drift out
+   * of step with the screen — and the direction it drifts in is an app that
+   * cannot be left.
+   */
+  const backStep = useMemo<(() => void) | null>(() => {
+    if (menu) return () => setMenu(null);
+    if (editor) return () => setEditorClose((n) => n + 1);
+    if (quickLook)
+      return () => {
+        setQuickLook(false);
+        focusView();
+      };
+    if (accessOpen) return () => setAccessOpen(false);
+    // A selection is a state you are *in*, so it is a state Back can leave.
+    // On a phone it is also the only way out of one that doesn't involve
+    // finding a patch of empty grid to tap.
+    if (selection.size > 0) return () => setSelection(new Set());
+    if (store.canBack) return () => void store.back();
+    return null;
+  }, [menu, editor, quickLook, accessOpen, selection.size, store.canBack, focusView]);
+
+  const wantsBack = backStep !== null;
+  useEffect(() => {
+    void ipc.setBackEnabled(wantsBack);
+  }, [wantsBack]);
+
+  // Read through a ref for the same reason the keyboard below does: the
+  // listener is registered once, and re-registering it on every folder change
+  // would mean a press landing during the swap has nowhere to go.
+  const backRef = useRef(backStep);
+  backRef.current = backStep;
+
+  useEffect(() => {
+    const stop = ipc.onBack(() => backRef.current?.());
+    return () => void stop.then((off) => off());
+  }, []);
 
   // ------------------------------------------------------------- keyboard
 
@@ -1547,8 +1846,8 @@ export default function App() {
     [targets, selection, revealCursor]
   );
 
-  const kb = useRef({ targets, selection, moveCursor, openTarget, copySelected, paste, trashSelected, newFolder, newTextFile, go, jumpTo, quickLook, undo, listRows });
-  kb.current = { targets, selection, moveCursor, openTarget, copySelected, paste, trashSelected, newFolder, newTextFile, go, jumpTo, quickLook, undo, listRows };
+  const kb = useRef({ targets, selection, moveCursor, openTarget, copySelected, cutSelected, duplicateSelected, paste, trashSelected, newFolder, newTextFile, go, jumpTo, quickLook, undo, listRows });
+  kb.current = { targets, selection, moveCursor, openTarget, copySelected, cutSelected, duplicateSelected, paste, trashSelected, newFolder, newTextFile, go, jumpTo, quickLook, undo, listRows };
 
   /**
    * ← and → in list view: a treegrid promises the disclosure triangles can be
@@ -1685,7 +1984,9 @@ export default function App() {
       // shortcut must not also toggle the Finder preview behind it.
       if (editorActive.current) return;
       if (modifier && e.key.toLowerCase() === "c") { e.preventDefault(); s.copySelected(); return; }
+      if (modifier && e.key.toLowerCase() === "x") { e.preventDefault(); s.cutSelected(); return; }
       if (modifier && e.key.toLowerCase() === "v") { e.preventDefault(); void s.paste(); return; }
+      if (modifier && e.key.toLowerCase() === "d") { e.preventDefault(); void s.duplicateSelected(); return; }
       // Before the switch, and before type-to-jump: ⌘Z is the first thing a
       // hand reaches for, and it must not depend on where the selection is.
       if (modifier && !e.shiftKey && e.key.toLowerCase() === "z") { e.preventDefault(); void s.undo(); return; }
@@ -1810,6 +2111,48 @@ export default function App() {
     const name = store.path.split("/").filter(Boolean).pop();
     return name ? `${name} contents` : "Folder contents";
   }, [store.path, searching]);
+
+  /**
+   * The action bar, or nothing.
+   *
+   * Only under a finger, and only with something selected. A pointer keeps the
+   * plain status bar because it already has the whole list one right-click
+   * away, and a toolbar it never asked for would just be sitting on the count.
+   *
+   * A running transfer outranks it, for the reason it already outranks the
+   * count: it is the only thing down here still happening, and the only one
+   * with a Cancel worth reaching.
+   */
+  const selectionBar = useMemo(() => {
+    if (!touchDriven || selected.length === 0 || transfer) return null;
+    // The same two questions the menu asks: what this build can do, and what
+    // the address underneath will allow. A phone folder takes a paste and
+    // nothing else, so the verbs that would only fail are left out.
+    const at = locationCaps(store.path, volumes);
+    const deletable = selected.some((target) => target.entry) && at.modify;
+    return (
+      <SelectionBar
+        count={selected.length}
+        onShare={caps.share && shareable.length > 0 && at.copy ? () => void shareSelected() : undefined}
+        onCopy={at.copy ? copySelected : undefined}
+        onTrash={deletable ? () => void trashSelected() : undefined}
+        trashIsPermanent={!caps.trash}
+        onMore={openSelectionMenu}
+        onClear={() => setSelection(new Set())}
+      />
+    );
+  }, [
+    touchDriven,
+    selected,
+    transfer,
+    volumes,
+    store.path,
+    shareable.length,
+    shareSelected,
+    copySelected,
+    trashSelected,
+    openSelectionMenu,
+  ]);
 
   const statusText = useMemo(() => {
     // Outranks the count: a folder that couldn't be reopened is the one thing
@@ -1971,6 +2314,7 @@ export default function App() {
               label={viewLabel}
               touchFolderDrag={touchFolderDragHandlers}
               directTouch={caps.directTouch}
+              onPress={caps.directTouch ? pressTarget : undefined}
               dragItems={dragItems}
               onDropItems={onDropItems}
             />
@@ -2010,6 +2354,7 @@ export default function App() {
               label={viewLabel}
               touchFolderDrag={touchFolderDragHandlers}
               directTouch={caps.directTouch}
+              onPress={caps.directTouch ? pressTarget : undefined}
               dragItems={dragItems}
               onDropItems={onDropItems}
             />
@@ -2030,6 +2375,13 @@ export default function App() {
 
         {/* Zoom lives down here, next to the count it changes, rather than
             competing with navigation for room in the toolbar. */}
+        {/* Under a finger with something selected, the bar that has always
+            described the selection grows the verbs that go with it. It stays
+            the plain status bar for a pointer, where the verbs are a
+            right-click away and a toolbar would only be in the way. */}
+        {selectionBar ? (
+          <footer className="statusbar acting">{selectionBar}</footer>
+        ) : (
         <footer className="statusbar">
           <TintPicker tint={tint} systemAvailable={systemTint} onPick={setTint} />
           {/* A transfer outranks the count while it runs: it is the only thing
@@ -2073,6 +2425,7 @@ export default function App() {
             </label>
           )}
         </footer>
+        )}
       </main>
 
       {quickLook && lead?.target.entry && (
@@ -2081,6 +2434,8 @@ export default function App() {
           index={lead.at}
           total={targets.length}
           onStep={(d) => moveCursor(d, false)}
+          onShare={() => void shareSelected()}
+          onMore={(x, y) => buildMenu(lead.target, x, y, touchDriven)}
           onClose={() => {
             setQuickLook(false);
             focusView();
@@ -2112,6 +2467,7 @@ export default function App() {
           parent={store.path}
           initialText={editor.text}
           volumes={volumes}
+          closeSignal={editorClose}
           onClose={() => {
             setEditor(null);
             focusView();

@@ -17,6 +17,11 @@ interface Props {
    * the write, and a read-only one refuses it for a different reason than a
    * phone does. */
   volumes?: Volume[];
+  /** Bumped by the host to ask for a close it can't perform itself — Android's
+   * Back. It arrives as a signal rather than as a call to `onClose` because the
+   * unsaved-changes question lives here, and a host that closed the editor
+   * directly would step straight over it. */
+  closeSignal?: number;
   onClose: () => void;
   onCreated: (path: string) => void;
   onSaved: (name: string) => void;
@@ -30,7 +35,7 @@ interface Props {
  * text still arrives, but saving would go out through the local filesystem and
  * fail, so the editor says so up front rather than at the end of an edit.
  */
-export function TextEditor({ path: initialPath, parent, initialText, volumes = [], onClose, onCreated, onSaved }: Props) {
+export function TextEditor({ path: initialPath, parent, initialText, volumes = [], closeSignal = 0, onClose, onCreated, onSaved }: Props) {
   const [path, setPath] = useState(initialPath);
   const [name, setName] = useState(initialPath ? basename(initialPath) : "untitled.txt");
   const [text, setText] = useState(initialText);
@@ -68,6 +73,14 @@ export function TextEditor({ path: initialPath, parent, initialText, volumes = [
     if (dirty && !window.confirm("Discard unsaved changes?")) return;
     onClose();
   };
+
+  // Skips the first render: the signal's opening value is not a request.
+  const closeSignalSeen = useRef(closeSignal);
+  useEffect(() => {
+    if (closeSignal === closeSignalSeen.current) return;
+    closeSignalSeen.current = closeSignal;
+    close();
+  });
 
   const save = async () => {
     if (saving || !writable) return;

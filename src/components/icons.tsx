@@ -260,6 +260,41 @@ export const LaptopIcon = stroked(
 
 export const CloseIcon = stroked(<path d="m4.25 4.25 7.5 7.5m0-7.5-7.5 7.5" />);
 
+/* A box with something leaving it upward — the same shape Android and macOS
+   both draw for their share sheets, so it needs no label to be recognised. */
+export const ShareIcon = stroked(
+  <>
+    <path d="M8 10.25V1.75" />
+    <path d="M5 4.75 8 1.75l3 3" />
+    <path d="M3.75 7.5h-1v6.75h10.5V7.5h-1" />
+  </>
+);
+
+/* Two pages, offset — the shape every desktop has used for Copy for decades. */
+export const CopyIcon = stroked(
+  <>
+    <rect x="5.75" y="5.75" width="7.5" height="8.5" rx="1.1" />
+    <path d="M10.5 3.75a1.1 1.1 0 0 0-1.1-1H3.85a1.1 1.1 0 0 0-1.1 1.1v7.4a1.1 1.1 0 0 0 1 1.05" />
+  </>
+);
+
+export const TrashIcon = stroked(
+  <>
+    <path d="M2.75 4.25h10.5" />
+    <path d="M6.25 4.25V2.9h3.5v1.35" />
+    <path d="M3.9 4.25 4.5 13a.9.9 0 0 0 .9.85h5.2a.9.9 0 0 0 .9-.85l.6-8.75" />
+  </>
+);
+
+/* The overflow: the whole menu, one tap away, in the same place every time. */
+export const MoreIcon = stroked(
+  <>
+    <circle cx="3.25" cy="8" r=".85" fill="currentColor" stroke="none" />
+    <circle cx="8" cy="8" r=".85" fill="currentColor" stroke="none" />
+    <circle cx="12.75" cy="8" r=".85" fill="currentColor" stroke="none" />
+  </>
+);
+
 /** Empty-state artwork: an open, and pointedly empty, folder. */
 export const EmptyIcon = stroked(
   <>
