@@ -64,10 +64,13 @@ object Share {
    * The narrowest type that honestly covers the whole set.
    *
    * The type is what decides which apps the sheet offers, so it is worth
-   * getting right: `image/png` puts a photo editor at the front, while `*/*`
-   * offers a flat list of everything that takes a file. Two PNGs stay
-   * `image/png`; a PNG and a JPEG widen to `image/*`; a PNG and a PDF have
-   * nothing in common and widen all the way.
+   * getting right: `image/png` puts a photo editor at the front, where the
+   * fully wild type offers a flat list of everything that takes a file. Two
+   * PNGs stay `image/png`; a PNG and a JPEG widen to the image family; a PNG
+   * and a PDF have nothing in common and widen all the way.
+   *
+   * (The wildcards are spelled out rather than written, because the one that
+   * matches everything ends a block comment.)
    */
   private fun mimeOf(files: List<File>): String {
     val types = files.map { typeOf(it) }.distinct()
