@@ -8,7 +8,7 @@ import { GitDot } from "./GitDot";
 import { Thumb } from "./Thumb";
 import { beginFolderDrag, endFolderDrag, FOLDER_DRAG_TYPE } from "../favorites";
 import { beginItemDrag, endItemDrag, ITEM_DRAG_TYPE, type DragItems } from "../drag.ts";
-import { type FolderTouchDragHandlers, useFolderTouchDrag } from "./folder-touch-drag";
+import { type FolderTouchDragHandlers, useTouchPress } from "./touch-press";
 import { dropProps, useDropTarget, type DropItems } from "./use-drop-target.ts";
 
 /**
@@ -76,6 +76,9 @@ interface Props {
   touchFolderDrag?: FolderTouchDragHandlers;
   /** Touch gets direct open/preview actions; mouse keeps selection behavior. */
   directTouch?: boolean;
+  /** A long press landed on this item: it is now taken. The host decides what
+   * that means — see `pressTarget` in App. */
+  onPress?: (id: string) => void;
   /** What a drag starting on this item carries — the whole selection when the
    * item is part of it. Null where the item isn't a drag source. */
   dragItems?: (id: string) => DragItems | null;
@@ -245,6 +248,11 @@ export function IconGrid(props: Props) {
       }}
       onContextMenu={(e) => {
         e.preventDefault();
+        // A mobile WebView fires this on long press too, which would put a
+        // pointer-shaped popover under a fingertip on top of the press
+        // gesture's own answer. Touch has its own route now; this is the
+        // pointer's.
+        if (pointerType.current === "touch") return;
         const c = cellFrom(e);
         if (c) props.onSelect(c.id, e);
         props.onContextMenu(c, e.clientX, e.clientY);
@@ -288,6 +296,7 @@ export function IconGrid(props: Props) {
                   iconSize={iconSize}
                   selected={props.selection.has(cell.id)}
                   touchFolderDrag={props.touchFolderDrag}
+                  onPress={props.onPress}
                   dragItems={props.dragItems}
                   onDropItems={props.onDropItems}
                 />
@@ -308,6 +317,7 @@ function Cell({
   iconSize,
   selected,
   touchFolderDrag,
+  onPress,
   dragItems,
   onDropItems,
 }: {
@@ -318,13 +328,18 @@ function Cell({
   iconSize: number;
   selected: boolean;
   touchFolderDrag?: FolderTouchDragHandlers;
+  onPress?: (id: string) => void;
   dragItems?: (id: string) => DragItems | null;
   onDropItems?: DropItems;
 }) {
   const e = cell.entry;
   const ignored = e?.code?.index === "!";
   const isFolder = !!cell.wt || e?.kind === "dir" || (e?.kind === "symlink" && e.linkToDir);
-  const touchDrag = useFolderTouchDrag(isFolder ? { name: cell.name, path: cell.path } : null, touchFolderDrag);
+  const touchDrag = useTouchPress({
+    onPress: onPress && (() => onPress(cell.id)),
+    folder: isFolder ? { name: cell.name, path: cell.path } : null,
+    drag: touchFolderDrag,
+  });
   const drop = useDropTarget(isFolder ? cell.path : null, onDropItems);
   const { className: dropClass, ...dropHandlers } = dropProps(drop);
 

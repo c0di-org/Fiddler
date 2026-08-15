@@ -1169,6 +1169,10 @@ button {
   display: flex;
   flex-direction: column;
   align-items: center;
+  /* A mobile WebView answers a long press with its own callout — a magnifier,
+     a selection handle, a Copy bubble — which would arrive on top of the
+     press gesture's own answer and steal the finger that started it. */
+  -webkit-touch-callout: none;
   /* Tight: the name belongs to the thumbnail above it. The air goes between
      cells (see GAP in IconGrid), not between an item and its own label. */
   gap: 8px;
@@ -1539,6 +1543,8 @@ body.column-resizing * {
 .lrow {
   display: grid;
   align-items: center;
+  /* See `.cell`: the long press is Fiddler's now. */
+  -webkit-touch-callout: none;
   margin: 0 12px;
   padding: 0 4px;
   border-radius: var(--r-md);
@@ -1824,6 +1830,70 @@ body.column-resizing * {
 .status-text {
   grid-column: 2;
   text-align: center;
+}
+
+/* ------------------------------------------------------- the selection bar */
+
+/* The status bar with verbs in it. Taller than the bar it replaces, because
+   every child of it is now a touch target — and the height change is the
+   clearest signal available that the app is in a state you can leave. */
+.statusbar.acting {
+  display: block;
+  height: 56px;
+  flex: 0 0 56px;
+  padding: 0 6px;
+  /* Lifted off the window's vibrancy so the bar reads as being *over* the
+     folder rather than part of it, the way a selection is. */
+  background: var(--fill);
+  color: var(--fg);
+}
+
+.selbar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 100%;
+}
+
+.selbar-count {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  padding-left: 2px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.selbar-actions {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.selbar-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border: 0;
+  border-radius: var(--r-md);
+  background: transparent;
+  color: var(--fg-dim);
+  cursor: default;
+}
+
+.selbar-btn:active {
+  background: var(--fill-hover);
+  color: var(--fg);
+}
+
+.selbar-btn.danger {
+  color: var(--git-conflict);
 }
 
 /* ------------------------------------------------------- transfer progress */
@@ -3414,6 +3484,20 @@ li.md-task {
   .grid-section {
     left: 18px;
     right: 12px;
+  }
+
+  /* --------------------------------------------------- the selection bar */
+
+  /* Five 44px targets and a rail leave the count about fifty pixels, which is
+     not enough for "12 selected" — so the targets come down to the 40px that
+     still clears the platform's minimum, and the word gets its room back. */
+  .selbar-btn {
+    width: 40px;
+    height: 40px;
+  }
+
+  .selbar-count {
+    font-size: 12.5px;
   }
 
   /* -------------------------------------------------------- statusbar --- */

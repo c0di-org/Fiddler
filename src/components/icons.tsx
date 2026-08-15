@@ -270,6 +270,22 @@ export const ShareIcon = stroked(
   </>
 );
 
+/* Two pages, offset — the shape every desktop has used for Copy for decades. */
+export const CopyIcon = stroked(
+  <>
+    <rect x="5.75" y="5.75" width="7.5" height="8.5" rx="1.1" />
+    <path d="M10.5 3.75a1.1 1.1 0 0 0-1.1-1H3.85a1.1 1.1 0 0 0-1.1 1.1v7.4a1.1 1.1 0 0 0 1 1.05" />
+  </>
+);
+
+export const TrashIcon = stroked(
+  <>
+    <path d="M2.75 4.25h10.5" />
+    <path d="M6.25 4.25V2.9h3.5v1.35" />
+    <path d="M3.9 4.25 4.5 13a.9.9 0 0 0 .9.85h5.2a.9.9 0 0 0 .9-.85l.6-8.75" />
+  </>
+);
+
 /* The overflow: the whole menu, one tap away, in the same place every time. */
 export const MoreIcon = stroked(
   <>

@@ -9,6 +9,11 @@
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
     <!-- Required before Android will let this app hand an APK to its package installer. -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- The tick at the moment a long press lands. It is what makes the press
+         feel like something the app did rather than something it noticed, and
+         it is the only feedback available while the finger is still covering
+         the thing it just selected. -->
+    <uses-permission android:name="android.permission.VIBRATE" />
 
     <!-- AndroidTV support -->
     <uses-feature android:name="android.software.leanback" android:required="false" />

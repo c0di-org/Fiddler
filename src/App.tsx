@@ -6,6 +6,7 @@ import { GlyphDefs } from "./components/FileGlyph";
 import { IconGrid, type GridCell } from "./components/IconGrid";
 import { PreviewPane } from "./components/PreviewPane";
 import { QuickLook } from "./components/QuickLook";
+import { SelectionBar } from "./components/SelectionBar";
 import { Sidebar } from "./components/Sidebar";
 import { TintPicker } from "./components/TintPicker";
 import { TextEditor } from "./components/TextEditor";
@@ -15,7 +16,7 @@ import { Toolbar } from "./components/Toolbar";
 import { UsbConnecting, UsbLinkBanner } from "./components/UsbPanel";
 import { EjectBusyBanner, VolumeBlocked } from "./components/VolumeRow";
 import { TransferNoteBanner } from "./components/Banner";
-import type { FolderTouchDragHandlers } from "./components/folder-touch-drag";
+import type { FolderTouchDragHandlers } from "./components/touch-press";
 import { GridIcon } from "./components/icons";
 import { describeItems, parentOf, type DragItems, type DropVerb } from "./drag";
 import { addFavorite, loadFavorites, moveFavorite, saveFavorites } from "./favorites";
@@ -124,7 +125,14 @@ export default function App() {
   const [nearbyBusy, setNearbyBusy] = useState(false);
   const [content, setContent] = useState<ContentState | null>(null);
   const [contentBusy, setContentBusy] = useState(false);
-  const [menu, setMenu] = useState<{ x: number; y: number; items: MenuItem[] } | null>(null);
+  const [menu, setMenu] = useState<{ x: number; y: number; items: MenuItem[]; sheet?: boolean } | null>(null);
+  /** Whether the last thing to touch this app was a finger.
+   *
+   * Not a capability but a running observation, because a DeX desktop is both:
+   * the same Android build takes a mouse on a monitor and a thumb on the panel,
+   * often minutes apart. Anything that asks "which hand is this?" has to ask
+   * now rather than at build time. */
+  const [touchDriven, setTouchDriven] = useState(caps.directTouch);
   const [quickLook, setQuickLook] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const toastTimer = useRef(0);
@@ -1111,6 +1119,12 @@ export default function App() {
     [go, flash, openInEditor]
   );
 
+  useEffect(() => {
+    const seen = (event: PointerEvent) => setTouchDriven(event.pointerType === "touch");
+    window.addEventListener("pointerdown", seen, true);
+    return () => window.removeEventListener("pointerdown", seen, true);
+  }, []);
+
   /** Touch opens immediately; keyboard and pointer selection keep Finder semantics. */
   const select = useCallback(
     (id: string, e: React.MouseEvent, touch = false) => {
@@ -1118,6 +1132,21 @@ export default function App() {
       // note about the launch once there is a selection to describe.
       setRestoreNote(null);
       if (touch && !e.metaKey && !e.ctrlKey && !e.shiftKey) {
+        // A selection already standing turns every tap into a toggle. This is
+        // the whole of multi-select on a phone: long-press once to begin, then
+        // tap. No mode to enter, no mode to leave — a Mac behaves the same way,
+        // and only spells the toggle ⌘-click because it has a ⌘ to spell it
+        // with. The way out is the way out of any selection: tap the
+        // background, or press Back.
+        if (selection.size > 0) {
+          anchorRef.current = id;
+          setSelection((prev) => {
+            const next = new Set(prev);
+            next.has(id) ? next.delete(id) : next.add(id);
+            return next;
+          });
+          return;
+        }
         const target = targets.find((item) => item.id === id);
         if (target) {
           anchorRef.current = id;
@@ -1146,7 +1175,7 @@ export default function App() {
         return new Set([id]);
       });
     },
-    [targets, go]
+    [targets, selection, go]
   );
 
   const moveCursor = useCallback(
@@ -1457,7 +1486,7 @@ export default function App() {
   }, [flash, revealCursor, runTransfer]);
 
   const buildMenu = useCallback(
-    (t: Target | null, x: number, y: number) => {
+    (t: Target | null, x: number, y: number, sheet = false) => {
       const items: MenuItem[] = [];
 
       // Two different questions: what this build can do, and what the address
@@ -1540,10 +1569,46 @@ export default function App() {
 
       // The empty space of a device folder has nothing left to offer, and an
       // empty menu is a blank box that has to be dismissed.
-      if (items.length > 0) setMenu({ x, y, items });
+      if (items.length > 0) setMenu({ x, y, items, sheet });
     },
     [openTarget, openInEditor, flash, selected.length, copySelected, shareable.length, shareSelected, trashSelected, copiedPaths.length, paste, newFolder, newTextFile, mountFolder, undoNext, undo, volumes]
   );
+
+  /**
+   * A long press landed. The item is taken.
+   *
+   * Nothing opens and no menu appears, which is what makes multi-select fluid:
+   * press once, then tap the rest. That is what a hand trained on Google Files
+   * or Photos already expects, and it is the same fact a Mac states as "there
+   * is a selection" — the status bar has been saying it on all three platforms
+   * the whole time, and now grows the verbs to match.
+   *
+   * The exception is a press on something already selected. There the
+   * selection is already the answer, so the press means what a right-click
+   * means and goes straight to the menu.
+   */
+  const pressTarget = useCallback(
+    (id: string) => {
+      setRestoreNote(null);
+      if (selection.has(id)) {
+        buildMenu(byId.get(id) ?? null, 0, 0, true);
+        return;
+      }
+      anchorRef.current = id;
+      // Adding rather than replacing when a selection is already standing: a
+      // press and a tap have to mean the same thing once you are choosing, or
+      // the gesture that starts a multi-selection would also be the one that
+      // throws it away.
+      setSelection((prev) => (prev.size > 0 ? new Set(prev).add(id) : new Set([id])));
+    },
+    [selection, byId, buildMenu]
+  );
+
+  /** The overflow in the selection bar: the same list a right-click gives. */
+  const openSelectionMenu = useCallback(() => {
+    const lead = [...selection].pop();
+    buildMenu(lead ? byId.get(lead) ?? null : null, 0, 0, true);
+  }, [selection, byId, buildMenu]);
 
   // --------------------------------------------------------- the system Back
 
@@ -1894,6 +1959,48 @@ export default function App() {
     return name ? `${name} contents` : "Folder contents";
   }, [store.path, searching]);
 
+  /**
+   * The action bar, or nothing.
+   *
+   * Only under a finger, and only with something selected. A pointer keeps the
+   * plain status bar because it already has the whole list one right-click
+   * away, and a toolbar it never asked for would just be sitting on the count.
+   *
+   * A running transfer outranks it, for the reason it already outranks the
+   * count: it is the only thing down here still happening, and the only one
+   * with a Cancel worth reaching.
+   */
+  const selectionBar = useMemo(() => {
+    if (!touchDriven || selected.length === 0 || transfer) return null;
+    // The same two questions the menu asks: what this build can do, and what
+    // the address underneath will allow. A phone folder takes a paste and
+    // nothing else, so the verbs that would only fail are left out.
+    const at = locationCaps(store.path, volumes);
+    const deletable = selected.some((target) => target.entry) && at.modify;
+    return (
+      <SelectionBar
+        count={selected.length}
+        onShare={caps.share && shareable.length > 0 && at.copy ? () => void shareSelected() : undefined}
+        onCopy={at.copy ? copySelected : undefined}
+        onTrash={deletable ? () => void trashSelected() : undefined}
+        trashIsPermanent={!caps.trash}
+        onMore={openSelectionMenu}
+        onClear={() => setSelection(new Set())}
+      />
+    );
+  }, [
+    touchDriven,
+    selected,
+    transfer,
+    volumes,
+    store.path,
+    shareable.length,
+    shareSelected,
+    copySelected,
+    trashSelected,
+    openSelectionMenu,
+  ]);
+
   const statusText = useMemo(() => {
     // Outranks the count: a folder that couldn't be reopened is the one thing
     // about this window that the person didn't ask for and needs to know.
@@ -2054,6 +2161,7 @@ export default function App() {
               label={viewLabel}
               touchFolderDrag={touchFolderDragHandlers}
               directTouch={caps.directTouch}
+              onPress={caps.directTouch ? pressTarget : undefined}
               dragItems={dragItems}
               onDropItems={onDropItems}
             />
@@ -2093,6 +2201,7 @@ export default function App() {
               label={viewLabel}
               touchFolderDrag={touchFolderDragHandlers}
               directTouch={caps.directTouch}
+              onPress={caps.directTouch ? pressTarget : undefined}
               dragItems={dragItems}
               onDropItems={onDropItems}
             />
@@ -2113,6 +2222,13 @@ export default function App() {
 
         {/* Zoom lives down here, next to the count it changes, rather than
             competing with navigation for room in the toolbar. */}
+        {/* Under a finger with something selected, the bar that has always
+            described the selection grows the verbs that go with it. It stays
+            the plain status bar for a pointer, where the verbs are a
+            right-click away and a toolbar would only be in the way. */}
+        {selectionBar ? (
+          <footer className="statusbar acting">{selectionBar}</footer>
+        ) : (
         <footer className="statusbar">
           <TintPicker tint={tint} systemAvailable={systemTint} onPick={setTint} />
           {/* A transfer outranks the count while it runs: it is the only thing
@@ -2156,6 +2272,7 @@ export default function App() {
             </label>
           )}
         </footer>
+        )}
       </main>
 
       {quickLook && lead?.target.entry && (

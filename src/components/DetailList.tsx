@@ -10,7 +10,7 @@ import { EmptyState } from "./EmptyState";
 import { Chevron, ForkIcon, GripIcon, LockIcon, WarnIcon } from "./icons";
 import { beginFolderDrag, endFolderDrag, FOLDER_DRAG_TYPE } from "../favorites";
 import { beginItemDrag, endItemDrag, ITEM_DRAG_TYPE, type DragItems } from "../drag.ts";
-import { type FolderTouchDragHandlers, useFolderTouchDrag } from "./folder-touch-drag";
+import { type FolderTouchDragHandlers, useTouchPress } from "./touch-press";
 import { dropProps, useDropTarget, type DropItems } from "./use-drop-target.ts";
 
 /** Finder's list view: dense, sortable, with disclosure triangles. */
@@ -96,6 +96,8 @@ interface Props {
   loaded: boolean;
   /** Android's WebView needs a touch implementation for folder drops. */
   touchFolderDrag?: FolderTouchDragHandlers;
+  /** A long press landed on this row: it is now taken. */
+  onPress?: (id: string) => void;
   /** Touch gets direct open/preview actions; mouse keeps selection behavior. */
   directTouch?: boolean;
   /** What a drag starting on this row carries — the whole selection when the
@@ -390,6 +392,8 @@ export function DetailList(props: Props) {
         }}
         onContextMenu={(e) => {
           e.preventDefault();
+          // See IconGrid: on touch the long press has already answered this.
+          if (pointerType.current === "touch") return;
           const row = rowFrom(e);
           if (row) props.onSelect(row.id, e);
           props.onContextMenu(row, e.clientX, e.clientY);
@@ -419,6 +423,7 @@ export function DetailList(props: Props) {
                 onRenameCommit={props.onRenameCommit}
                 onRenameCancel={props.onRenameCancel}
                 touchFolderDrag={props.touchFolderDrag}
+                onPress={props.onPress}
                 dragItems={props.dragItems}
                 onDropItems={props.onDropItems}
               />
@@ -443,6 +448,7 @@ function RowView({
   columnPlace,
   narrow,
   touchFolderDrag,
+  onPress,
   dragItems,
   onDropItems,
 }: {
@@ -461,6 +467,7 @@ function RowView({
    *  row height the virtual scroller measures with. */
   narrow: boolean;
   touchFolderDrag?: FolderTouchDragHandlers;
+  onPress?: (id: string) => void;
   dragItems?: (id: string) => DragItems | null;
   onDropItems?: DropItems;
 }) {
@@ -477,7 +484,12 @@ function RowView({
   const muted = e ? e.code?.index === "!" || e.hidden : row.kind === "worktree" && row.wt.prunable;
   const path = row.kind === "entry" ? row.entry.path : row.kind === "worktree" ? row.wt.path : null;
   const isFolder = row.dirPath !== null;
-  const touchDrag = useFolderTouchDrag(isFolder && path ? { name, path } : null, touchFolderDrag);
+  const touchDrag = useTouchPress({
+    // A worktree group heading is a twisty, not a thing to take.
+    onPress: onPress && path ? () => onPress(row.id) : undefined,
+    folder: isFolder && path ? { name, path } : null,
+    drag: touchFolderDrag,
+  });
   const drop = useDropTarget(row.dirPath, onDropItems);
   const { className: dropClass, ...dropHandlers } = dropProps(drop);
 
