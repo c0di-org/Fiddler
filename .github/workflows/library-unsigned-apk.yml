@@ -1,6 +1,10 @@
 name: Library release APK
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/library-unsigned-apk.yml'
   workflow_dispatch:
     inputs:
       version:
@@ -30,7 +34,7 @@ jobs:
       - name: Set release version
         shell: bash
         env:
-          RELEASE_VERSION: ${{ inputs.version }}
+          RELEASE_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.version || '0.1.0' }}
         run: |
           set -euo pipefail
           if ! [[ "$RELEASE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?$ ]]; then
