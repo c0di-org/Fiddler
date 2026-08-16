@@ -1,0 +1,11 @@
+{
+  "name": "Fiddler",
+  "tagline": "Cross-platform file management for Android and Mac.",
+  "description": "A cross-platform file manager with native Android and desktop builds.",
+  "category": "Utilities",
+  "accent": "#7BA8FF",
+  "featured": false,
+  "sourceVisible": true,
+  "provenance": "library-managed",
+  "assetPattern": "^Fiddler-.*\\.apk$"
+}
