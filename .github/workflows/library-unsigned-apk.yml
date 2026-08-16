@@ -1,17 +1,19 @@
-name: Library unsigned APK
+name: Library release APK
 
 on:
-  push:
-    branches: [main]
-  pull_request:
   workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version (for example 0.1.1)"
+        required: true
+        type: string
 
 permissions:
   contents: read
 
 concurrency:
-  group: library-unsigned-apk-${{ github.ref }}
-  cancel-in-progress: true
+  group: library-release-apk
+  cancel-in-progress: false
 
 jobs:
   build:
@@ -19,34 +21,25 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v5
-        with:
-          fetch-depth: 0
 
-      - name: Check Library release gate
-        id: release
+      - name: Set release version
         shell: bash
         env:
-          EVENT_NAME: ${{ github.event_name }}
-          BEFORE_SHA: ${{ github.event.before }}
+          RELEASE_VERSION: ${{ inputs.version }}
         run: |
           set -euo pipefail
-          CURRENT="$(jq -r '.version' src-tauri/tauri.conf.json)"
-          test -n "$CURRENT" && test "$CURRENT" != "null"
-
-          PREVIOUS=""
-          CHANGED=false
-          if [ "$EVENT_NAME" = "push" ]; then
-            if [ -n "${BEFORE_SHA:-}" ] && ! [[ "$BEFORE_SHA" =~ ^0+$ ]]; then
-              PREVIOUS="$(git show "$BEFORE_SHA:src-tauri/tauri.conf.json" | jq -r '.version')"
-            fi
-            if [ "$CURRENT" != "$PREVIOUS" ]; then
-              CHANGED=true
-            fi
+          if ! [[ "$RELEASE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?$ ]]; then
+            echo "Invalid release version: $RELEASE_VERSION" >&2
+            exit 1
           fi
-
-          echo "version=$CURRENT" >> "$GITHUB_OUTPUT"
-          echo "version_changed=$CHANGED" >> "$GITHUB_OUTPUT"
-          echo "Fiddler version: ${PREVIOUS:-<none>} -> $CURRENT; publish candidate: $CHANGED" >> "$GITHUB_STEP_SUMMARY"
+          RELEASE_VERSION="$RELEASE_VERSION" node <<'NODE'
+          const fs = require('fs');
+          const path = 'src-tauri/tauri.conf.json';
+          const config = JSON.parse(fs.readFileSync(path, 'utf8'));
+          config.version = process.env.RELEASE_VERSION;
+          fs.writeFileSync(path, `${JSON.stringify(config, null, 2)}\n`);
+          NODE
+          echo "Building Fiddler $RELEASE_VERSION for Library" >> "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/setup-node@v4
         with:
@@ -94,7 +87,6 @@ jobs:
           cp "$APK" library-artifact/fiddler-release-unsigned.apk
 
       - name: Upload unsigned APK for Library
-        if: github.event_name == 'push' && steps.release.outputs.version_changed == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: library-unsigned-apk
