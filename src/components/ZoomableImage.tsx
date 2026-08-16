@@ -4,6 +4,7 @@ import {
   useRef,
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
   type WheelEvent as ReactWheelEvent,
 } from "react";
@@ -22,6 +23,8 @@ import "./ZoomableImage.css";
 interface Props {
   src: string;
   alt?: string;
+  /** Change this when the logical image changes; src may change for a sharper render. */
+  resetKey?: string;
   /** Lets Quick Look lazily ask for a more detailed render after the first zoom. */
   onZoomChange?: (zoom: number) => void;
 }
@@ -48,7 +51,7 @@ const ZOOM_STEP = 1.4;
  * Wheel zoom is anchored under the cursor so inspecting a small detail does not
  * make it run away from the pointer.
  */
-export function ZoomableImage({ src, alt = "", onZoomChange }: Props) {
+export function ZoomableImage({ src, alt = "", resetKey = src, onZoomChange }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const image = useRef<HTMLImageElement>(null);
   const pointers = useRef(new Map<number, Point>());
@@ -89,7 +92,7 @@ export function ZoomableImage({ src, alt = "", onZoomChange }: Props) {
     setView(1, ZERO);
     pointers.current.clear();
     gesture.current = null;
-  }, [src, setView]);
+  }, [resetKey, setView]);
 
   useEffect(() => {
     const el = host.current;
@@ -227,7 +230,7 @@ export function ZoomableImage({ src, alt = "", onZoomChange }: Props) {
     }
   };
 
-  const toggleZoom = (event: ReactPointerEvent<HTMLDivElement> | React.MouseEvent<HTMLDivElement>) => {
+  const toggleZoom = (event: ReactMouseEvent<HTMLDivElement>) => {
     const wanted = zoomRef.current > 1.05 ? 1 : 2;
     zoomAt(wanted, pointFromClient(event.clientX, event.clientY));
   };
