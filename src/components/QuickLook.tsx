@@ -4,7 +4,7 @@ import { formatSize } from "../format";
 import * as ipc from "../ipc";
 import { kindOf } from "../kind";
 import { LINK_LABEL, parseShortcut, type Shortcut } from "../preview/link";
-import { caps } from "../platform";
+import { caps, platform } from "../platform";
 import { isTextual, routeOf } from "../preview/route";
 import type { Entry, TextHead } from "../types";
 import { CodeView } from "./CodeView";
@@ -12,6 +12,7 @@ import { FileGlyph, FolderGlyph } from "./FileGlyph";
 import { LinkMark, MoreIcon, ShareIcon } from "./icons";
 import { MarkdownView } from "./MarkdownView";
 import { PdfView } from "./PdfView";
+import { ZoomableImage } from "./ZoomableImage";
 
 /** A shortcut that needs more than this is not a shortcut. */
 const LINK_BYTES = 8 * 1024;
@@ -39,6 +40,8 @@ const HEAD_BYTES = 512 * 1024;
  * expand the whole thing first.
  */
 const PICTURE_PX = 2048;
+/** A sharper render is fetched only after zoom begins, so fit-to-window stays cheap. */
+const PICTURE_DETAIL_PX = 4096;
 
 interface Props {
   entry: Entry;
@@ -93,7 +96,10 @@ export function QuickLook({ entry, index, total, onStep, onClose, onShare, onMor
         e.preventDefault();
         e.stopPropagation();
         step(-1);
-      } else if (e.key === "Enter") {
+      } else if (e.key === "Enter" && platform !== "android") {
+        // Tauri's opener accepts file paths on desktop, but Android's plugin
+        // only accepts URLs. Keeping a dead Enter/Open affordance is worse than
+        // leaving the file in Fiddler, where Share and More still work.
         e.preventDefault();
         e.stopPropagation();
         void ipc.openExternal(entry.path);
@@ -142,9 +148,11 @@ export function QuickLook({ entry, index, total, onStep, onClose, onShare, onMor
               <MoreIcon size={17} />
             </button>
           )}
-          <button className="ql-open" onClick={() => void ipc.openExternal(entry.path)}>
-            Open
-          </button>
+          {platform !== "android" && (
+            <button className="ql-open" onClick={() => void ipc.openExternal(entry.path)}>
+              Open
+            </button>
+          )}
         </header>
 
         <div className="ql-body">
@@ -283,10 +291,12 @@ function Folder({ entry }: { entry: Entry }) {
 
 function Picture({ entry }: { entry: Entry }) {
   const [src, setSrc] = useState<string | null>(null);
+  const [detailRequested, setDetailRequested] = useState(false);
 
   useEffect(() => {
     let alive = true;
     setSrc(null);
+    setDetailRequested(false);
     void ipc
       .thumbnail(entry.path, PICTURE_PX)
       .then((p) => alive && setSrc(p))
@@ -295,6 +305,24 @@ function Picture({ entry }: { entry: Entry }) {
       alive = false;
     };
   }, [entry.path]);
+
+  useEffect(() => {
+    if (!detailRequested) return;
+    let alive = true;
+    void ipc
+      .thumbnail(entry.path, PICTURE_DETAIL_PX)
+      .then((p) => {
+        if (alive && p) setSrc(p);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [detailRequested, entry.path]);
+
+  const requestDetail = useCallback((zoom: number) => {
+    if (zoom > 1.05) setDetailRequested(true);
+  }, []);
 
   if (!src) {
     return (
@@ -306,7 +334,11 @@ function Picture({ entry }: { entry: Entry }) {
   }
   return (
     <div className="ql-picture">
-      <img src={ipc.fileSrc(src)} alt="" draggable={false} />
+      <ZoomableImage
+        src={ipc.fileSrc(src)}
+        resetKey={entry.path}
+        onZoomChange={requestDetail}
+      />
     </div>
   );
 }
