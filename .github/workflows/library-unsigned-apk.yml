@@ -1,0 +1,103 @@
+name: Library unsigned APK
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: library-unsigned-apk-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Check Library release gate
+        id: release
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          CURRENT="$(jq -r '.version' src-tauri/tauri.conf.json)"
+          test -n "$CURRENT" && test "$CURRENT" != "null"
+
+          PREVIOUS=""
+          CHANGED=false
+          if [ "$EVENT_NAME" = "push" ]; then
+            if [ -n "${BEFORE_SHA:-}" ] && ! [[ "$BEFORE_SHA" =~ ^0+$ ]]; then
+              PREVIOUS="$(git show "$BEFORE_SHA:src-tauri/tauri.conf.json" | jq -r '.version')"
+            fi
+            if [ "$CURRENT" != "$PREVIOUS" ]; then
+              CHANGED=true
+            fi
+          fi
+
+          echo "version=$CURRENT" >> "$GITHUB_OUTPUT"
+          echo "version_changed=$CHANGED" >> "$GITHUB_OUTPUT"
+          echo "Fiddler version: ${PREVIOUS:-<none>} -> $CURRENT; publish candidate: $CHANGED" >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK and NDK
+        run: |
+          sdkmanager "platforms;android-36" "build-tools;36.0.0" "ndk;27.2.12479018"
+          echo "NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
+
+      - name: Configure Rust for Android
+        run: |
+          rustup default stable
+          rustup target add aarch64-linux-android
+
+      - name: Install JavaScript dependencies
+        run: npm ci
+
+      - name: Verify tracked Android project
+        run: |
+          test -f src-tauri/gen/android/gradlew
+          test -f src-tauri/gen/android/app/build.gradle.kts
+
+      - name: Build unsigned release APK
+        run: npx tauri android build --apk --target aarch64
+
+      - name: Verify unsigned APK
+        run: |
+          APK="$(find src-tauri/gen/android/app/build/outputs/apk -name '*-release-unsigned.apk' -print -quit)"
+          test -n "$APK"
+          "$ANDROID_HOME/build-tools/36.0.0/aapt2" dump badging "$APK" | grep -q "package: name='app.fiddler.desktop'"
+          if "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify "$APK" >/dev/null 2>&1; then
+            echo "Expected an unsigned APK, but apksigner verified it as signed." >&2
+            exit 1
+          fi
+          mkdir -p library-artifact
+          cp "$APK" library-artifact/fiddler-release-unsigned.apk
+
+      - name: Upload unsigned APK for Library
+        if: github.event_name == 'push' && steps.release.outputs.version_changed == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: library-unsigned-apk
+          path: library-artifact/fiddler-release-unsigned.apk
+          if-no-files-found: error
+          retention-days: 7
