@@ -3,14 +3,7 @@ name: Library release APK
 on:
   push:
     branches: [main]
-    paths:
-      - 'src-tauri/tauri.conf.json'
   workflow_dispatch:
-    inputs:
-      version:
-        description: "Release version (for example 0.1.1)"
-        required: true
-        type: string
 
 permissions:
   contents: read
@@ -20,7 +13,67 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  gate:
+    name: Check Android release version
+    runs-on: ubuntu-latest
+    outputs:
+      should_release: ${{ steps.release.outputs.should_release }}
+      version: ${{ steps.release.outputs.version }}
+      latest: ${{ steps.release.outputs.latest }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Compare tracked version with latest Library release
+        id: release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          CURRENT="$(node -p "require('./src-tauri/tauri.conf.json').version")"
+          echo "version=$CURRENT" >> "$GITHUB_OUTPUT"
+
+          if [ "$GITHUB_REF_NAME" != "main" ]; then
+            echo "latest=" >> "$GITHUB_OUTPUT"
+            echo "should_release=false" >> "$GITHUB_OUTPUT"
+            echo "Library releases are only produced from main." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          curl -fsSL \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+            > "$RUNNER_TEMP/releases.json"
+
+          CURRENT="$CURRENT" RELEASES="$RUNNER_TEMP/releases.json" python3 <<'PY' > "$RUNNER_TEMP/gate.env"
+          import json, os, re
+          current_text = os.environ["CURRENT"]
+          hit = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)", current_text)
+          if not hit:
+              raise SystemExit(f"tracked version must be stable X.Y.Z for Library release: {current_text}")
+          current = tuple(map(int, hit.groups()))
+          versions = []
+          for release in json.load(open(os.environ["RELEASES"])):
+              if release.get("draft") or release.get("prerelease"):
+                  continue
+              tag = release.get("tag_name", "")
+              match = re.fullmatch(r"android-v(\d+)\.(\d+)\.(\d+)", tag)
+              if match:
+                  versions.append((tuple(map(int, match.groups())), tag))
+          latest_version, latest_tag = max(versions, default=((0, 0, 0), ""))
+          print(f"latest={latest_tag}")
+          print(f"should_release={'true' if current > latest_version else 'false'}")
+          PY
+
+          cat "$RUNNER_TEMP/gate.env" >> "$GITHUB_OUTPUT"
+          . "$RUNNER_TEMP/gate.env"
+          echo "Fiddler Android version: $CURRENT; latest: ${latest:-<none>}; release: $should_release" >> "$GITHUB_STEP_SUMMARY"
+
   build:
+    name: Build unsigned APK for Library
+    needs: gate
+    if: needs.gate.outputs.should_release == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -30,28 +83,6 @@ jobs:
         with:
           node-version: '22'
           cache: npm
-
-      - name: Set release version
-        shell: bash
-        env:
-          RELEASE_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.version || '' }}
-        run: |
-          set -euo pipefail
-          if [ -z "$RELEASE_VERSION" ]; then
-            RELEASE_VERSION="$(node -p "require('./src-tauri/tauri.conf.json').version")"
-          fi
-          if ! [[ "$RELEASE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?$ ]]; then
-            echo "Invalid release version: $RELEASE_VERSION" >&2
-            exit 1
-          fi
-          RELEASE_VERSION="$RELEASE_VERSION" node <<'NODE'
-          const fs = require('fs');
-          const path = 'src-tauri/tauri.conf.json';
-          const config = JSON.parse(fs.readFileSync(path, 'utf8'));
-          config.version = process.env.RELEASE_VERSION;
-          fs.writeFileSync(path, `${JSON.stringify(config, null, 2)}\n`);
-          NODE
-          echo "Building Fiddler $RELEASE_VERSION for Library" >> "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/setup-java@v5
         with:
@@ -82,7 +113,11 @@ jobs:
         run: npx tauri android build --apk --target aarch64
 
       - name: Verify unsigned APK
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ needs.gate.outputs.version }}
         run: |
+          set -euo pipefail
           APK="$(find src-tauri/gen/android/app/build/outputs/apk -name '*-release-unsigned.apk' -print -quit)"
           test -n "$APK"
           "$ANDROID_HOME/build-tools/36.0.0/aapt2" dump badging "$APK" | grep -q "package: name='app.fiddler.desktop'"
@@ -91,12 +126,12 @@ jobs:
             exit 1
           fi
           mkdir -p library-artifact
-          cp "$APK" library-artifact/fiddler-release-unsigned.apk
+          cp "$APK" "library-artifact/fiddler-${RELEASE_VERSION}-release-unsigned.apk"
 
       - name: Upload unsigned APK for Library
         uses: actions/upload-artifact@v4
         with:
           name: library-unsigned-apk
-          path: library-artifact/fiddler-release-unsigned.apk
+          path: library-artifact/*.apk
           if-no-files-found: error
           retention-days: 7
