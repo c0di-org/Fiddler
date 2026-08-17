@@ -1,0 +1,70 @@
+.hardware-confirm {
+  width: min(420px, calc(100vw - 32px));
+  margin: auto;
+  padding: 0;
+  overflow: hidden;
+  color: var(--fg);
+  background: var(--panel);
+  border: 1px solid var(--hair);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-3);
+  font: 13px/1.45 var(--font);
+}
+
+.hardware-confirm::backdrop {
+  background: rgba(0, 0, 0, 0.34);
+  backdrop-filter: blur(2px);
+}
+
+.hardware-confirm-copy {
+  padding: 20px 20px 16px;
+}
+
+.hardware-confirm h2 {
+  margin: 0 0 7px;
+  font-size: 16px;
+  line-height: 1.25;
+}
+
+.hardware-confirm p {
+  margin: 0;
+  color: var(--fg-dim);
+}
+
+.hardware-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 16px 16px;
+  border-top: 1px solid var(--hair-soft);
+}
+
+.hardware-confirm button {
+  min-width: 84px;
+  min-height: 38px;
+  padding: 7px 14px;
+  border: 1px solid var(--hair);
+  border-radius: var(--r-sm);
+  color: var(--fg);
+  background: var(--fill);
+  font: 600 13px var(--font);
+}
+
+.hardware-confirm button:hover {
+  background: var(--fill-hover);
+}
+
+.hardware-confirm button:focus-visible {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.hardware-confirm button.danger {
+  color: #fff;
+  background: #d93636;
+  border-color: rgba(0, 0, 0, 0.12);
+}
+
+.hardware-confirm button.danger:hover {
+  background: #c62f2f;
+}
