@@ -1,0 +1,90 @@
+.ql-picture .zoom-image {
+  position: relative;
+  flex: 1;
+  align-self: stretch;
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  outline: none;
+  touch-action: none;
+  cursor: zoom-in;
+}
+
+.ql-picture .zoom-image--zoomed {
+  cursor: grab;
+}
+
+.ql-picture .zoom-image--zoomed:active {
+  cursor: grabbing;
+}
+
+.ql-picture .zoom-image > img {
+  max-width: none;
+  max-height: none;
+  object-fit: contain;
+  transform-origin: center center;
+  will-change: transform;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+.zoom-image-controls {
+  position: absolute;
+  left: 50%;
+  bottom: 14px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px;
+  border: 1px solid var(--hair);
+  border-radius: var(--r-pill);
+  background: var(--glass-strong);
+  box-shadow: var(--shadow-2);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+
+.zoom-image-controls button {
+  min-width: 34px;
+  height: 30px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: var(--r-pill);
+  background: transparent;
+  color: var(--fg);
+  font-size: 16px;
+  line-height: 1;
+}
+
+.zoom-image-controls button:hover {
+  background: var(--fill-hover);
+}
+
+.zoom-image-controls button:active {
+  background: var(--fill-strong);
+}
+
+.zoom-image-controls .zoom-image-level {
+  min-width: 54px;
+  color: var(--fg-dim);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.zoom-image:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--focus-ring);
+}
+
+@media (max-width: 680px) {
+  .zoom-image-controls {
+    bottom: max(12px, env(safe-area-inset-bottom, 0px));
+  }
+
+  .zoom-image-controls button {
+    min-width: 42px;
+    height: 36px;
+  }
+}
