@@ -1,39 +1,115 @@
-/**
- * The colour a file wears wherever it's drawn: the band across its own glyph,
- * and the card fanned out of a folder holding it. One table, so a `.rs` file is
- * the same purple in both places.
- */
+import { routeOf } from "./preview/route";
 
+/**
+ * The broad colour family a file wears wherever it is drawn. Keep this small:
+ * colour is the second cue after silhouette, not a logo system.
+ */
 export type Category = "code" | "image" | "media" | "doc" | "archive" | "config" | "link" | "plain";
 
-const CATEGORY: Record<string, Category> = {
-  ts: "code", tsx: "code", js: "code", jsx: "code", mjs: "code", cjs: "code",
-  rs: "code", go: "code", py: "code", rb: "code", swift: "code", java: "code",
-  kt: "code", c: "code", h: "code", cpp: "code", hpp: "code", cs: "code",
-  php: "code", lua: "code", sh: "code", zsh: "code", bash: "code", sql: "code",
-  html: "code", css: "code", scss: "code", vue: "code", svelte: "code",
+/** The silhouette/mark used by the generic file glyph fallback. */
+export type FileVisualKind =
+  | "code"
+  | "config"
+  | "data"
+  | "document"
+  | "pdf"
+  | "image"
+  | "audio"
+  | "video"
+  | "archive"
+  | "link"
+  | "generic";
 
-  json: "config", jsonc: "config", toml: "config", yaml: "config", yml: "config",
-  xml: "config", ini: "config", conf: "config", lock: "config", env: "config",
+const CONFIG = new Set([
+  "json", "jsonc", "json5", "yaml", "yml", "toml", "ini", "cfg", "conf", "env",
+  "properties", "xml", "plist", "lock",
+]);
 
-  png: "image", jpg: "image", jpeg: "image", gif: "image", webp: "image",
-  svg: "image", heic: "image", ico: "image", icns: "image", bmp: "image", tiff: "image",
+const CONFIG_NAMES = new Set([
+  ".env", ".editorconfig", ".prettierrc", ".eslintrc", ".npmrc", ".gitignore",
+  ".gitattributes", ".gitmodules",
+]);
 
-  mp4: "media", mov: "media", webm: "media", avi: "media", mkv: "media",
-  mp3: "media", wav: "media", m4a: "media", flac: "media", aac: "media",
+const DATA = new Set(["csv", "tsv"]);
 
-  pdf: "doc", md: "doc", mdx: "doc", txt: "doc", rtf: "doc", doc: "doc",
-  docx: "doc", pages: "doc", key: "doc", csv: "doc", xlsx: "doc",
+const ARCHIVE = new Set([
+  "zip", "gz", "tgz", "bz2", "xz", "tar", "rar", "7z", "dmg", "pkg", "apk", "ipa",
+]);
 
-  zip: "archive", gz: "archive", tar: "archive", rar: "archive", "7z": "archive",
-  dmg: "archive", pkg: "archive",
+const DOCUMENT_ART = new Set([
+  "rtf", "doc", "docx", "pages", "key", "numbers", "ppt", "pptx", "xls", "xlsx", "epub", "tex",
+]);
 
-  // Shortcuts. The band is all a list row can say — which destination one points
-  // at needs the file read, so that lives in the preview and the thumbnail.
-  url: "link", webloc: "link",
-};
+const DESIGN_ART = new Set(["ai", "sketch"]);
+const VIDEO_ART = new Set(["avi", "mkv"]);
+
+export function extensionOf(nameOrPath: string): string {
+  const name = nameOrPath.split("/").pop() ?? nameOrPath;
+  const dot = name.lastIndexOf(".");
+  return dot > 0 ? name.slice(dot + 1).toLowerCase() : "";
+}
+
+/**
+ * Derive the glyph from the same preview router that decides how the file is
+ * opened. The few extra sets below split code-like config/data and formats that
+ * have no preview route (archives), so icon and preview knowledge cannot drift
+ * into two competing extension encyclopedias again.
+ */
+export function fileVisualKind(nameOrPath: string): FileVisualKind {
+  const name = nameOrPath.split("/").pop() ?? nameOrPath;
+  const ext = extensionOf(name);
+  const route = routeOf(name);
+
+  if (ARCHIVE.has(ext)) return "archive";
+  if (CONFIG_NAMES.has(name) || CONFIG.has(ext)) return "config";
+  if (DATA.has(ext)) return "data";
+
+  switch (route) {
+    case "image":
+      return "image";
+    case "audio":
+      return "audio";
+    case "video":
+      return "video";
+    case "pdf":
+      return "pdf";
+    case "link":
+      return "link";
+    case "markdown":
+    case "text":
+      return "document";
+    case "code":
+      return DOCUMENT_ART.has(ext) ? "document" : "code";
+    case "art":
+      if (VIDEO_ART.has(ext)) return "video";
+      if (DESIGN_ART.has(ext)) return "image";
+      if (DOCUMENT_ART.has(ext)) return "document";
+      return "generic";
+    case "none":
+      return DOCUMENT_ART.has(ext) ? "document" : "generic";
+  }
+}
 
 export function categoryOf(name: string): Category {
-  const dot = name.lastIndexOf(".");
-  return (dot > 0 ? CATEGORY[name.slice(dot + 1).toLowerCase()] : undefined) ?? "plain";
+  switch (fileVisualKind(name)) {
+    case "code":
+      return "code";
+    case "config":
+    case "data":
+      return "config";
+    case "image":
+      return "image";
+    case "audio":
+    case "video":
+      return "media";
+    case "document":
+    case "pdf":
+      return "doc";
+    case "archive":
+      return "archive";
+    case "link":
+      return "link";
+    case "generic":
+      return "plain";
+  }
 }

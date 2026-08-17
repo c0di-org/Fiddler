@@ -7,11 +7,12 @@ import { categoryOf } from "../glyph-category";
 import { folderIconForName, type FolderIcon } from "../folder-icon";
 import { isTextual, routeOf } from "../preview/route";
 import { peek as peekThumb, subscribe as subscribeThumb, thumbPx } from "../thumbs";
+import { FileArtwork } from "./FileArtwork";
 
 /**
  * The icon shown when there's no image preview. Scales from a 20px list row up to
- * a 256px preview: the document sheet gains a coloured type band as it grows, the
- * way Finder's own generic icons do.
+ * a 256px preview. Known file families get distinct silhouettes and marks while
+ * unknown formats keep the classic extension-labelled document sheet.
  *
  * Every gradient lives once in <GlyphDefs>, rendered at the app root, so a folder
  * of 40,000 files doesn't ship 40,000 copies of the same <linearGradient>.
@@ -40,14 +41,10 @@ export function FileGlyph({ entry, size }: { entry: Entry; size: number }) {
   );
 }
 
-/** The classes the sheet's own paint hangs off, wherever it is drawn. */
+/** The classes the artwork's shared category paint hangs off, wherever it is drawn. */
 const fileClass = (name: string) => `glyph-file cat-${categoryOf(name)}`;
 
-/**
- * The document sheet, in the 48-unit space of whatever `<svg>` holds it. `size`
- * is the width it will actually occupy on screen, which is what decides how much
- * detail is worth drawing.
- */
+/** The file artwork lives separately so the dense folder code stays readable. */
 function FileArt({
   name,
   size,
@@ -55,55 +52,9 @@ function FileArt({
 }: {
   name: string;
   size: number;
-  /** The foot of the sheet is hidden, so the ruled lines down there are dropped
-   *  rather than sliced in half by whatever covers it. */
   tucked?: boolean;
 }) {
-  const dot = name.lastIndexOf(".");
-  const ext = dot > 0 ? name.slice(dot + 1).toLowerCase() : "";
-  // The band is the only thing telling one file from another in a list row, so
-  // it survives all the way down; only its lettering needs room to be legible.
-  const showBand = ext.length > 0 && ext.length <= 6;
-  // Lettering is worth drawing well before the sheet has room for ruled lines:
-  // in a folder's fan each sheet is barely a third of the icon, and the type is
-  // the whole reason it's there.
-  const showText = showBand && size >= 28;
-  const showLines = showBand && size >= 44 && !tucked;
-  // Shrink the type text rather than truncating it — "SWIF" reads as a typo.
-  const labelSize = ext.length <= 3 ? 9.4 : ext.length === 4 ? 8 : 6.6;
-
-  return (
-    <>
-      {/* Sheet: rounded on three corners, folded on the fourth. */}
-      <path
-        d="M12 4h17.5L39 13.5V41a3 3 0 0 1-3 3H12a3 3 0 0 1-3-3V7a3 3 0 0 1 3-3Z"
-        className="sheet-face"
-      />
-      <path d="M29.5 4 39 13.5h-6.5a3 3 0 0 1-3-3Z" className="fold" />
-
-      {/* A colour band across the head of the sheet, hung off the fold's lower
-          edge: readable at a glance across a grid, the thing carrying the file's
-          type, and — being up here — the part still showing when a sheet is
-          fanned out of a folder with its foot behind the flap. */}
-      {showBand && <path d="M9 13.5h30v13H9Z" className="band" />}
-
-      {showText && (
-        <text
-          x="24"
-          y="23.3"
-          textAnchor="middle"
-          className="band-text"
-          style={{ fontSize: labelSize }}
-        >
-          {ext.toUpperCase()}
-        </text>
-      )}
-
-      {showLines && <path d="M15 32h18M15 38h12" className="lines" />}
-
-      {!showBand && size >= 44 && <path d="M15 22h18M15 29h18M15 36h11" className="lines" />}
-    </>
-  );
+  return <FileArtwork name={name} size={size} tucked={tucked} />;
 }
 
 export function FolderGlyph({
