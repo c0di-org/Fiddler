@@ -1,6 +1,11 @@
 name: Library release APK
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - 'src-tauri/tauri.conf.json'
+      - '.github/workflows/library-unsigned-apk.yml'
   workflow_dispatch:
     inputs:
       version:
@@ -30,9 +35,12 @@ jobs:
       - name: Set release version
         shell: bash
         env:
-          RELEASE_VERSION: ${{ inputs.version }}
+          RELEASE_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.version || '' }}
         run: |
           set -euo pipefail
+          if [ -z "$RELEASE_VERSION" ]; then
+            RELEASE_VERSION="$(node -p "require('./src-tauri/tauri.conf.json').version")"
+          fi
           if ! [[ "$RELEASE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?$ ]]; then
             echo "Invalid release version: $RELEASE_VERSION" >&2
             exit 1
