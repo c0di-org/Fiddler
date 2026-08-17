@@ -1,6 +1,6 @@
 [package]
 name = "fiddler"
-version = "0.1.0"
+version = "0.1.1"
 description = "A git-native file browser"
 edition = "2021"
 # 1.85 is mtp-rs's floor; everything else here still builds on 1.77.
@@ -26,7 +26,7 @@ num_cpus = "1"
 # Thumbnails go through the same macOS frameworks Finder uses: ImageIO for raster
 # formats and QuickLookThumbnailing for everything else. Both are dramatically
 # faster than decoding in-process, and Quick Look shares the system thumbnail
-# cache, so files Finder has already seen come back essentially for free.
+# cache, so files Finder has already previewed come back essentially for free.
 #
 # Text and PDF skip Quick Look entirely: Core Text lays out a page of source
 # directly, and Core Graphics rasterises a PDF page at whatever size was asked
