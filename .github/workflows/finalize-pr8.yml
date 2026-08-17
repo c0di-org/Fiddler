@@ -22,8 +22,15 @@ jobs:
       - run: npm ci
       - name: Reassemble supplied icon
         run: |
+          test -f .github/icon-parts/part-00
           mkdir -p assets
-          cat .github/icon-parts/part-* | base64 --decode > assets/app-icon.png
+          cat .github/icon-parts/part-* | base64 --decode > /tmp/fiddler-app-icon.jpg
+          python -m pip install --quiet pillow
+          python - <<'PY'
+          from PIL import Image
+          image = Image.open('/tmp/fiddler-app-icon.jpg').convert('RGBA')
+          image.save('assets/app-icon.png', optimize=True)
+          PY
           rm -rf .github/icon-parts
       - name: Apply 0.1.5 and silver default tint
         run: |
@@ -58,7 +65,7 @@ jobs:
           text = index.read_text().replace('    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />\n', '')
           index.write_text(text)
           PY
-      - name: Switch icon regeneration to supplied PNG
+      - name: Regenerate icons from supplied artwork
         run: |
           cat > scripts/regenerate-icons.sh <<'SH'
           #!/usr/bin/env bash
@@ -68,11 +75,8 @@ jobs:
           cd "$repo_root"
           source_icon="$repo_root/assets/app-icon.png"
 
-          # Generate Tauri's desktop, Windows, iOS, and Android icon matrix from
-          # the supplied raster master without redrawing or restyling it.
           npm run tauri icon "$source_icon"
 
-          # Keep Fiddler's extra 64px desktop asset in sync.
           rm -rf /tmp/fiddler-icon-64
           npm run tauri icon -- -p 64 -o /tmp/fiddler-icon-64 "$source_icon"
           cp /tmp/fiddler-icon-64/64x64.png src-tauri/icons/64x64.png
@@ -81,8 +85,6 @@ jobs:
           cp src-tauri/icons/icon.ico public/favicon.ico
           rm -f public/favicon.svg
 
-          # The generated Android project is checked in, so mirror launcher
-          # resources created by Tauri under src-tauri/icons/android.
           for dir in mipmap-anydpi-v26 mipmap-mdpi mipmap-hdpi mipmap-xhdpi mipmap-xxhdpi mipmap-xxxhdpi; do
             rm -rf "src-tauri/gen/android/app/src/main/res/$dir"
             cp -R "src-tauri/icons/android/$dir" "src-tauri/gen/android/app/src/main/res/$dir"
