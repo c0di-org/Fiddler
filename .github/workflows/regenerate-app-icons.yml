@@ -26,14 +26,15 @@ jobs:
         run: |
           python3 - <<'PY'
           from pathlib import Path
+          import re
+
           p = Path('src-tauri/Cargo.lock')
           text = p.read_text()
-          marker = 'name = "fiddler"\nversion = "0.1.3"'
-          replacement = 'name = "fiddler"\nversion = "0.1.4"'
-          if marker in text:
-              p.write_text(text.replace(marker, replacement, 1))
-          elif replacement not in text:
+          pattern = r'(\[\[package\]\]\nname = "fiddler"\nversion = ")[^"]+("\n)'
+          text, count = re.subn(pattern, r'\g<1>0.1.4\g<2>', text, count=1)
+          if count != 1:
               raise SystemExit('Could not find Fiddler package entry in Cargo.lock')
+          p.write_text(text)
           PY
       - name: Commit generated icon assets
         run: |
