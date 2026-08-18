@@ -1,0 +1,115 @@
+name: Finalize PR 8 icon refresh
+
+on:
+  push:
+    branches: [design/app-icon-refresh]
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Reassemble supplied icon
+        run: |
+          test -f .github/icon-parts/part-00
+          mkdir -p assets
+          cat .github/icon-parts/part-* | base64 --decode > /tmp/fiddler-app-icon.jpg
+          python -m pip install --quiet pillow
+          python - <<'PY'
+          from PIL import Image
+          image = Image.open('/tmp/fiddler-app-icon.jpg').convert('RGBA')
+          image.save('assets/app-icon.png', optimize=True)
+          PY
+          rm -rf .github/icon-parts
+      - name: Apply 0.1.5 and silver default tint
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import json
+
+          cargo = Path('src-tauri/Cargo.toml')
+          text = cargo.read_text()
+          text = text.replace('version = "0.1.4"', 'version = "0.1.5"', 1)
+          cargo.write_text(text)
+
+          conf = Path('src-tauri/tauri.conf.json')
+          data = json.loads(conf.read_text())
+          data['version'] = '0.1.5'
+          conf.write_text(json.dumps(data, indent=2) + '\n')
+
+          lock = Path('src-tauri/Cargo.lock')
+          text = lock.read_text()
+          marker = '[[package]]\nname = "fiddler"\nversion = "0.1.4"'
+          if marker not in text:
+              raise SystemExit('fiddler 0.1.4 package entry not found in Cargo.lock')
+          lock.write_text(text.replace(marker, '[[package]]\nname = "fiddler"\nversion = "0.1.5"', 1))
+
+          tint = Path('src/tint.ts')
+          text = tint.read_text()
+          text = text.replace('const FALLBACK = "#0a84ff";', 'const DEFAULT_TINT = "#abb1bf";\nconst FALLBACK = DEFAULT_TINT;', 1)
+          text = text.replace('  return "system";\n}\n\nexport function saveTint', '  return DEFAULT_TINT;\n}\n\nexport function saveTint', 1)
+          tint.write_text(text)
+
+          index = Path('index.html')
+          text = index.read_text().replace('    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />\n', '')
+          index.write_text(text)
+          PY
+      - name: Regenerate icons from supplied artwork
+        run: |
+          cat > scripts/regenerate-icons.sh <<'SH'
+          #!/usr/bin/env bash
+          set -euo pipefail
+
+          repo_root="$(cd "$(dirname "$0")/.." && pwd)"
+          cd "$repo_root"
+          source_icon="$repo_root/assets/app-icon.png"
+
+          npm run tauri icon "$source_icon"
+
+          rm -rf /tmp/fiddler-icon-64
+          npm run tauri icon -- -p 64 -o /tmp/fiddler-icon-64 "$source_icon"
+          cp /tmp/fiddler-icon-64/64x64.png src-tauri/icons/64x64.png
+
+          cp src-tauri/icons/ios/AppIcon-60x60@3x.png public/apple-touch-icon.png
+          cp src-tauri/icons/icon.ico public/favicon.ico
+          rm -f public/favicon.svg
+
+          for dir in mipmap-anydpi-v26 mipmap-mdpi mipmap-hdpi mipmap-xhdpi mipmap-xxhdpi mipmap-xxxhdpi; do
+            rm -rf "src-tauri/gen/android/app/src/main/res/$dir"
+            cp -R "src-tauri/icons/android/$dir" "src-tauri/gen/android/app/src/main/res/$dir"
+          done
+          cp src-tauri/icons/android/values/ic_launcher_background.xml \
+            src-tauri/gen/android/app/src/main/res/values/ic_launcher_background.xml
+          SH
+          chmod +x scripts/regenerate-icons.sh
+          rm -f src-tauri/icons/icon.svg src-tauri/icons/icon-manifest.json \
+            src-tauri/icons/android-background.svg src-tauri/icons/android-foreground.svg \
+            src-tauri/icons/android-monochrome.svg
+          ./scripts/regenerate-icons.sh
+      - name: Validate
+        run: |
+          npm run build
+          git diff --check
+          test "$(python - <<'PY'
+          import json
+          print(json.load(open('src-tauri/tauri.conf.json'))['version'])
+          PY
+          )" = "0.1.5"
+      - name: Commit finalized PR changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Use supplied silver icon and bump to 0.1.5"
+          git push
