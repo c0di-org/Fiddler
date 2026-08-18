@@ -1,0 +1,58 @@
+name: Bump Fiddler to 0.1.5
+
+on:
+  push:
+    branches:
+      - design/app-icon-refresh
+    paths:
+      - .github/workflows/bump-fiddler-015.yml
+
+permissions:
+  contents: write
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: design/app-icon-refresh
+          fetch-depth: 0
+      - name: Bump version and remove one-shot workflow
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          cargo = Path('src-tauri/Cargo.toml')
+          text = cargo.read_text()
+          old = 'version = "0.1.4"'
+          if old not in text:
+              raise SystemExit('Cargo.toml is not at 0.1.4')
+          cargo.write_text(text.replace(old, 'version = "0.1.5"', 1))
+
+          conf = Path('src-tauri/tauri.conf.json')
+          text = conf.read_text()
+          old = '"version": "0.1.4"'
+          if old not in text:
+              raise SystemExit('tauri.conf.json is not at 0.1.4')
+          conf.write_text(text.replace(old, '"version": "0.1.5"', 1))
+
+          lock = Path('src-tauri/Cargo.lock')
+          text = lock.read_text()
+          marker = 'name = "fiddler"\nversion = "0.1.4"'
+          if marker not in text:
+              raise SystemExit('Cargo.lock fiddler package is not at 0.1.4')
+          lock.write_text(text.replace(marker, 'name = "fiddler"\nversion = "0.1.5"', 1))
+          PY
+          rm .github/workflows/bump-fiddler-015.yml
+          git diff --check
+          git diff --exit-code --quiet || true
+      - name: Commit and push
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src-tauri/Cargo.toml src-tauri/tauri.conf.json src-tauri/Cargo.lock .github/workflows/bump-fiddler-015.yml
+          git commit -m "Bump Fiddler to 0.1.5"
+          git push origin HEAD:design/app-icon-refresh
