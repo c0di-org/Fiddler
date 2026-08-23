@@ -69,6 +69,16 @@ const TURN_MS = 420;
 const SWIPE_PX = 56;
 const SWIPE_SHARE = 0.14;
 
+/** How far a finger has to travel before it has said which gesture it is.
+ * Below this it hasn't said anything, and is still a tap. */
+const SLOP = 8;
+
+/** The band along the top of the page that reaches the controls, as a share of
+ * the page and as a floor in pixels. Full width, so it can be hit without
+ * aiming — the thing a middle third can never be. */
+const TOP_BAND = 0.2;
+const TOP_BAND_PX = 96;
+
 /** A trackpad reports a page-turn's worth of scroll in a lot of small events. */
 const WHEEL_STEP = 140;
 
@@ -322,6 +332,31 @@ export function PdfReader({ path, name, onClose, onShare, onOpenExternal }: Prop
     return () => window.clearTimeout(hideTimer.current);
   }, [wake]);
 
+  /** Show or hide the controls, deliberately.
+   *
+   * A pointer has movement to ask with, so it gets the idle timer back. A
+   * finger has only the tap it just made, and a timer would take the controls
+   * away again while the thumb was still travelling towards them — so on
+   * touch they stay until something says otherwise. */
+  const toggleChrome = useCallback(
+    (touch: boolean) => {
+      if (showing.current) show(false);
+      else if (touch) show(true);
+      else wake();
+    },
+    [show, wake]
+  );
+
+  /** A turn asked for by hand, on the page itself. Reading is what the gesture
+   * was for, so the controls that were covering the page get out of the way. */
+  const turned = useCallback(
+    (delta: 1 | -1, touch: boolean) => {
+      step(delta);
+      if (touch && showing.current) show(false);
+    },
+    [step, show]
+  );
+
   const fullAvailable =
     typeof document !== "undefined" && typeof document.documentElement.requestFullscreen === "function";
 
@@ -403,11 +438,31 @@ export function PdfReader({ path, name, onClose, onShare, onOpenExternal }: Prop
 
   // ------------------------------------------------------------- the thumb
 
-  const drag = useRef({ id: -1, x: 0, y: 0, dx: 0, live: false, moved: false });
+  const drag = useRef({
+    id: -1,
+    x: 0,
+    y: 0,
+    dx: 0,
+    live: false,
+    /** Past the slop, going sideways: this is a page being dragged. */
+    moved: false,
+    /** Past the slop, going up or down: this belongs to the scroller, not us. */
+    vertical: false,
+    touch: false,
+  });
 
   const onPointerDown = (e: React.PointerEvent) => {
     if (e.button !== 0) return;
-    drag.current = { id: e.pointerId, x: e.clientX, y: e.clientY, dx: 0, live: true, moved: false };
+    drag.current = {
+      id: e.pointerId,
+      x: e.clientX,
+      y: e.clientY,
+      dx: 0,
+      live: true,
+      moved: false,
+      vertical: false,
+      touch: e.pointerType !== "mouse",
+    };
     // So a fast swipe that leaves the paper still finishes as a turn.
     try {
       e.currentTarget.setPointerCapture(e.pointerId);
@@ -421,12 +476,18 @@ export function PdfReader({ path, name, onClose, onShare, onOpenExternal }: Prop
     if (!d.live || e.pointerId !== d.id) return;
     const dx = e.clientX - d.x;
     const dy = e.clientY - d.y;
-    // A vertical drag in fit-width is the scroll, and belongs to the stage.
-    if (!d.moved && Math.abs(dy) > Math.abs(dx)) {
-      d.live = false;
-      return;
+
+    // Which gesture this is gets decided once, and only once the finger has
+    // gone far enough to have said anything. Deciding on the first pixel is
+    // what made a tap unreliable: a thumb never lands and lifts on exactly the
+    // same point, and three pixels of downward drift used to cancel the whole
+    // gesture — no turn, and no controls either.
+    if (!d.moved && !d.vertical) {
+      if (Math.abs(dy) > SLOP && Math.abs(dy) >= Math.abs(dx)) d.vertical = true;
+      else if (Math.abs(dx) > SLOP) d.moved = true;
     }
-    if (Math.abs(dx) > 4) d.moved = true;
+    if (!d.moved) return;
+
     d.dx = dx;
     // Written straight to the element: a turn's worth of pointer events is not
     // a turn's worth of React renders.
@@ -445,21 +506,29 @@ export function PdfReader({ path, name, onClose, onShare, onOpenExternal }: Prop
       el.style.transition = "";
       el.style.transform = "";
     }
-    const far = Math.max(SWIPE_PX, box.w * SWIPE_SHARE);
-    if (d.moved && Math.abs(d.dx) > far) {
-      step(d.dx < 0 ? 1 : -1);
+    // A drag that went up or down was the scroller's, and ends as nothing.
+    if (d.vertical) return;
+
+    if (d.moved) {
+      const far = Math.max(SWIPE_PX, box.w * SWIPE_SHARE);
+      if (Math.abs(d.dx) > far) turned(d.dx < 0 ? 1 : -1, d.touch);
       return;
     }
-    if (d.moved) return;
-    // A tap: the outer thirds turn, the middle shows or hides the chrome —
-    // the arrangement every reading app has landed on independently.
+
     const r = stage.current?.getBoundingClientRect();
     if (!r) return;
+    // The controls live along the top of the page as well as down the middle.
+    // A band the full width of the screen is a target you can hit without
+    // aiming, which a middle third is not — and it is where every reader that
+    // has solved this puts it.
+    if (e.clientY - r.top < Math.max(TOP_BAND_PX, r.height * TOP_BAND)) {
+      toggleChrome(d.touch);
+      return;
+    }
     const at = (e.clientX - r.left) / Math.max(1, r.width);
-    if (at < 0.3) step(-1);
-    else if (at > 0.7) step(1);
-    else if (showing.current) show(false);
-    else wake();
+    if (at < 0.3) turned(-1, d.touch);
+    else if (at > 0.7) turned(1, d.touch);
+    else toggleChrome(d.touch);
   };
 
   const wheel = useRef({ acc: 0, at: 0 });

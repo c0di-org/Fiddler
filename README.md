@@ -45,7 +45,8 @@ when they live outside the repo tree, and `missing` when the folder is gone and
 - **A reader for PDFs, not a hand-off.** Open one and it opens *here*: paper
   centred in a dark room, a spread when the window is wide enough, page turns
   by arrow key, swipe, scroll or tap, full screen on `f` — and it reopens on
-  the page you left it on. No second application, and nothing to apologise for
+  the page you left it on. Tap the top of the page for the controls, the outer
+  thirds to turn it. No second application, and nothing to apologise for
   on a phone or in a browser, where there was never an application to hand it
   to.
 - **Git without a git panel.** A dot for modified, staged, untracked, conflicted.
