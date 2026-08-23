@@ -9,7 +9,7 @@ import { isTextual, routeOf } from "../preview/route";
 import type { Entry, TextHead } from "../types";
 import { CodeView } from "./CodeView";
 import { FileGlyph, FolderGlyph } from "./FileGlyph";
-import { LinkMark, MoreIcon, ShareIcon } from "./icons";
+import { BookIcon, Chevron, ChevronLeft, LinkMark, MoreIcon, ShareIcon } from "./icons";
 import { MarkdownView } from "./MarkdownView";
 import { PdfView } from "./PdfView";
 import { ZoomableImage } from "./ZoomableImage";
@@ -56,9 +56,12 @@ interface Props {
    * otherwise be right-clicked for it, so without this the verbs are simply
    * unreachable from here — and on a phone here is where a tap lands you. */
   onMore?: (x: number, y: number) => void;
+  /** Promote this file to the full-screen reader. Only ever passed for the
+   * routes that have one, which today means PDFs. */
+  onRead?: () => void;
 }
 
-export function QuickLook({ entry, index, total, onStep, onClose, onShare, onMore }: Props) {
+export function QuickLook({ entry, index, total, onStep, onClose, onShare, onMore, onRead }: Props) {
   const route = routeOf(entry.name);
   const isDir = entry.kind === "dir" || (entry.kind === "symlink" && entry.linkToDir);
   const [page, setPage] = useState(1);
@@ -96,6 +99,12 @@ export function QuickLook({ entry, index, total, onStep, onClose, onShare, onMor
         e.preventDefault();
         e.stopPropagation();
         step(-1);
+      } else if (e.key === "Enter" && onRead) {
+        // A PDF has somewhere better to go than the desktop: its own reader,
+        // on every platform including the two with no desktop to go to.
+        e.preventDefault();
+        e.stopPropagation();
+        onRead();
       } else if (e.key === "Enter" && platform !== "android") {
         // Tauri's opener accepts file paths on desktop, but Android's plugin
         // only accepts URLs. Keeping a dead Enter/Open affordance is worse than
@@ -108,7 +117,7 @@ export function QuickLook({ entry, index, total, onStep, onClose, onShare, onMor
     // Capture, so the browser's own shortcuts see these last.
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [onClose, step, entry.path]);
+  }, [onClose, step, entry.path, onRead]);
 
   return (
     <div className="ql-scrim" onClick={onClose}>
@@ -148,15 +157,45 @@ export function QuickLook({ entry, index, total, onStep, onClose, onShare, onMor
               <MoreIcon size={17} />
             </button>
           )}
-          {platform !== "android" && (
-            <button className="ql-open" onClick={() => void ipc.openExternal(entry.path)}>
-              Open
+          {onRead ? (
+            <button className="ql-open ql-read" onClick={onRead}>
+              <BookIcon size={13} />
+              Read
             </button>
+          ) : (
+            platform !== "android" && (
+              <button className="ql-open" onClick={() => void ipc.openExternal(entry.path)}>
+                Open
+              </button>
+            )
           )}
         </header>
 
         <div className="ql-body">
           <Body entry={entry} route={route} isDir={isDir} page={page} onPages={setPages} />
+          {route === "pdf" && pages > 1 && (
+            // Paging used to be arrow keys and nothing else, which on a phone
+            // is not a way through a document at all.
+            <div className="ql-pager">
+              <button
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                disabled={page <= 1}
+                aria-label="Back a page"
+              >
+                <ChevronLeft size={14} />
+              </button>
+              <span>
+                {page} <i>/</i> {pages}
+              </span>
+              <button
+                onClick={() => setPage((p) => Math.min(pages, p + 1))}
+                disabled={page >= pages}
+                aria-label="On a page"
+              >
+                <Chevron size={14} />
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </div>

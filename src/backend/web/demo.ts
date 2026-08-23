@@ -10,7 +10,7 @@
  * why they read as `Projects`, `Documents`, `Pictures`, `Music` and `Downloads`
  * rather than anything more imaginative. */
 
-import { architectureDiagram, chord, PALETTES, wallpaper } from "./demo-art";
+import { architectureDiagram, booklet, chord, PALETTES, wallpaper } from "./demo-art";
 import { MemoryProvider } from "./memory-fs";
 
 export const DEMO_MOUNT = "Fiddler Demo";
@@ -75,6 +75,9 @@ export function buildDemo(): MemoryProvider {
   text("Documents/Release Notes.md", RELEASE_NOTES, daysAgo(1));
   text("Documents/Field Notes.md", FIELD_NOTES, daysAgo(7));
   text("Documents/todo.txt", TODO, daysAgo(0, 9));
+  // The one document here that isn't read in a text pane. Open it — the reader
+  // it opens in is what it's about.
+  fs.seedFile("Documents/The Reader.pdf", booklet(), daysAgo(0, 5));
 
   // ------------------------------------------------------------------ Data
 
@@ -111,6 +114,7 @@ this tab instead of a Rust process.
 |---|---|
 | \`⌘1\` / \`⌘2\` | Switch between icon and list view |
 | \`space\` | Quick Look — this file renders, source highlights, PDFs page |
+| \`⌘↵\` | Open — a PDF opens in the reader; try \`Documents/The Reader.pdf\` |
 | \`⇧⌘P\` | Open the preview pane |
 | \`⇧⌘.\` | Show hidden files — there are two in here |
 | type letters | Jump to the first matching name |
@@ -606,7 +610,8 @@ second implementation of the one interface it talks to.
 
 - Browsing, sorting, both views, type-to-jump, the preview pane and Quick Look
 - Markdown rendering and syntax highlighting for around ninety file types
-- Image thumbnails, text thumbnails, and PDF pages
+- Image thumbnails, text thumbnails, and the PDF reader — pdf.js stands in
+  for Core Graphics, in a chunk that is only fetched when a PDF is opened
 - Creating, renaming, editing, copying and deleting
 - Name search, the bounded nearby-folder fallback, and content search
 - Opening a real folder from your disk, in browsers that support it

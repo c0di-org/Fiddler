@@ -74,6 +74,32 @@ async function mediaUrl(path: string): Promise<string> {
   return url;
 }
 
+// ------------------------------------------------------------ pdf pages
+
+/** Rasterised PDF pages, by path, page and render size.
+ *
+ * `page.rs` and Android's `PdfRenderer` both write rendered pages into an
+ * on-disk cache, which is what makes turning back a page free on those two
+ * builds. A browser has no such cache, and without one the reader would
+ * re-rasterise — and mint a fresh, never-revoked object URL — every time you
+ * turned back to a page you had just left. This is that cache: bounded, and
+ * revoked on the way out.
+ *
+ * The bound is a reader's working set, not a document: a couple of spreads
+ * either side of the page being read, at one or two render sizes.
+ */
+const pageUrls = new Map<string, string>();
+const PAGE_CAP = 24;
+
+function dropPages(path: string) {
+  for (const key of [...pageUrls.keys()]) {
+    if (key.startsWith(`${path}\u0000`)) {
+      URL.revokeObjectURL(pageUrls.get(key)!);
+      pageUrls.delete(key);
+    }
+  }
+}
+
 /** Everything cached about a file's contents, dropped together. Called after
  * any write so a saved file stops previewing as the file it used to be. */
 function invalidate(path: string) {
@@ -83,6 +109,7 @@ function invalidate(path: string) {
     URL.revokeObjectURL(media);
     mediaUrls.delete(path);
   }
+  dropPages(path);
   void import("./web/pdf").then((pdf) => pdf.forget(path)).catch(() => {});
 }
 
@@ -394,10 +421,29 @@ const backend: Backend = {
   },
 
   async pdfPage(path, page, maxPx) {
+    const key = `${path}\u0000${page}@${maxPx}`;
+    const hit = pageUrls.get(key);
+    if (hit) return hit;
+
     const pdf = await import("./web/pdf");
     const blob = await pdf.renderPage(path, page, maxPx);
     if (!blob) throw new Error("That page couldn’t be rendered");
-    return URL.createObjectURL(blob);
+
+    // Two renders of the same page can be in flight at once — the reader asks
+    // for the page it is turning to and prefetches from the page it lands on.
+    // Whichever finishes second keeps the URL the first one handed out.
+    const already = pageUrls.get(key);
+    if (already) return already;
+
+    const url = URL.createObjectURL(blob);
+    pageUrls.set(key, url);
+    while (pageUrls.size > PAGE_CAP) {
+      const oldest = pageUrls.keys().next();
+      if (oldest.done || oldest.value === key) break;
+      URL.revokeObjectURL(pageUrls.get(oldest.value)!);
+      pageUrls.delete(oldest.value);
+    }
+    return url;
   },
 
   // Thumbnails and rendered pages already come back as object URLs, so there is

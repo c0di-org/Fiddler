@@ -4,6 +4,7 @@ import { ContextMenu, type MenuItem } from "./components/ContextMenu";
 import { DetailList } from "./components/DetailList";
 import { GlyphDefs } from "./components/FileGlyph";
 import { IconGrid, type GridCell } from "./components/IconGrid";
+import { PdfReader } from "./components/PdfReader";
 import { PreviewPane } from "./components/PreviewPane";
 import { QuickLook } from "./components/QuickLook";
 import { SelectionBar } from "./components/SelectionBar";
@@ -145,6 +146,11 @@ export default function App() {
   const [tint, setTint] = useState<Tint>(loadTint);
   const [systemTint, setSystemTint] = useState(false);
   const [editor, setEditor] = useState<EditorState | null>(null);
+  /** The PDF being read, if one is. A reader rather than a hand-off: a phone
+   * and a browser have nothing to hand a PDF *to*, and on a Mac the answer to
+   * "open this" being another application's launch animation was never much of
+   * an answer either. */
+  const [reader, setReader] = useState<{ path: string; name: string } | null>(null);
   /** Bumped to ask the editor to close itself. Routed through the editor rather
    * than closing it from here because the unsaved-changes question belongs to
    * the component that knows whether there are any. */
@@ -165,6 +171,8 @@ export default function App() {
   const typeAhead = useRef({ buffer: "", at: 0 });
   const editorActive = useRef(false);
   editorActive.current = !!editor;
+  const readerActive = useRef(false);
+  readerActive.current = !!reader;
 
   const home = places.find((p) => p.icon === "home")?.path ?? "";
 
@@ -1097,6 +1105,15 @@ export default function App() {
           await ipc.installApk(t.path);
           return;
         }
+        // A PDF opens here, in Fiddler's own reader. Every other route asks
+        // the system first, but this one has no system to ask on two of the
+        // three platforms — and on the third, a file browser that already
+        // rasterises any page of a PDF at any size has no business making you
+        // wait for another application to launch to read one.
+        if (routeOf(t.name) === "pdf") {
+          setReader({ path: t.path, name: t.name });
+          return;
+        }
         // A shortcut's only content is where it goes, so opening it means going
         // there — not opening the file that holds the address.
         if (routeOf(t.name) === "link") {
@@ -1780,6 +1797,7 @@ export default function App() {
    */
   const backStep = useMemo<(() => void) | null>(() => {
     if (menu) return () => setMenu(null);
+    if (reader) return () => setReader(null);
     if (editor) return () => setEditorClose((n) => n + 1);
     if (quickLook)
       return () => {
@@ -1793,7 +1811,7 @@ export default function App() {
     if (selection.size > 0) return () => setSelection(new Set());
     if (store.canBack) return () => void store.back();
     return null;
-  }, [menu, editor, quickLook, accessOpen, selection.size, store.canBack, focusView]);
+  }, [menu, reader, editor, quickLook, accessOpen, selection.size, store.canBack, focusView]);
 
   const wantsBack = backStep !== null;
   useEffect(() => {
@@ -1898,7 +1916,7 @@ export default function App() {
     const s = kb.current;
     // The overlays own the keyboard while they're up, and the view they're
     // covering keeps focus underneath them.
-    if (s.quickLook || editorActive.current) return;
+    if (s.quickLook || editorActive.current || readerActive.current) return;
 
     const modifier = e.metaKey || e.ctrlKey;
     if (modifier) {
@@ -1983,6 +2001,9 @@ export default function App() {
       // Same rule for the editor overlay. In particular, its Markdown preview
       // shortcut must not also toggle the Finder preview behind it.
       if (editorActive.current) return;
+      // And for the reader, which owns the arrows, space and Escape while a
+      // book is open.
+      if (readerActive.current) return;
       if (modifier && e.key.toLowerCase() === "c") { e.preventDefault(); s.copySelected(); return; }
       if (modifier && e.key.toLowerCase() === "x") { e.preventDefault(); s.cutSelected(); return; }
       if (modifier && e.key.toLowerCase() === "v") { e.preventDefault(); void s.paste(); return; }
@@ -2369,6 +2390,11 @@ export default function App() {
                   : undefined
               }
               count={selected.length}
+              onRead={
+                selected.length === 1 && selected[0].entry
+                  ? () => setReader({ path: selected[0].path, name: selected[0].name })
+                  : undefined
+              }
             />
           )}
         </div>
@@ -2436,10 +2462,33 @@ export default function App() {
           onStep={(d) => moveCursor(d, false)}
           onShare={() => void shareSelected()}
           onMore={(x, y) => buildMenu(lead.target, x, y, touchDriven)}
+          onRead={
+            routeOf(lead.target.entry.name) === "pdf"
+              ? () => {
+                  setQuickLook(false);
+                  setReader({ path: lead.target.path, name: lead.target.name });
+                }
+              : undefined
+          }
           onClose={() => {
             setQuickLook(false);
             focusView();
           }}
+        />
+      )}
+      {reader && (
+        <PdfReader
+          key={reader.path}
+          path={reader.path}
+          name={reader.name}
+          onClose={() => {
+            setReader(null);
+            focusView();
+          }}
+          onShare={caps.share ? () => void shareSelected() : undefined}
+          onOpenExternal={
+            caps.handOff ? () => void ipc.openExternal(reader.path).catch(() => {}) : undefined
+          }
         />
       )}
       {accessOpen && access && (

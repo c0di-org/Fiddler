@@ -79,6 +79,9 @@
   --spring: cubic-bezier(0.34, 1.4, 0.64, 1);
   --fast: 130ms;
   --med: 220ms;
+  /* One page turning over another. Long enough to read as paper, short enough
+     that holding an arrow key still flips through a document. */
+  --turn: 340ms;
 
   --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
   --mono: ui-monospace, "SF Mono", Menlo, monospace;
@@ -2623,6 +2626,32 @@ body.column-resizing * {
   margin-top: 2px;
 }
 
+/* The one verb the pane offers, for the one route where page one is visibly
+   not the whole file. */
+.preview-read {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  align-self: center;
+  height: 26px;
+  margin-top: 12px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: var(--r-pill);
+  background: var(--fill);
+  color: var(--fg-dim);
+  font-family: inherit;
+  font-size: 12px;
+  cursor: default;
+}
+
+.preview-read:hover {
+  background: var(--fill-hover);
+  color: var(--fg);
+}
+
 .preview-git {
   display: inline-flex;
   align-items: center;
@@ -3155,10 +3184,81 @@ li.md-task {
 }
 
 .ql-body {
+  position: relative;
   flex: 1;
   min-height: 0;
   display: flex;
   flex-direction: column;
+}
+
+/* Paging a PDF in Quick Look was arrow keys and nothing else — invisible on a
+   desktop and unreachable on a phone. The control floats over the page rather
+   than taking a strip from it, because the page is the point. */
+.ql-pager {
+  position: absolute;
+  left: 50%;
+  bottom: 14px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  border-radius: var(--r-pill);
+  border: 1px solid var(--hair);
+  background: var(--glass-strong);
+  backdrop-filter: blur(20px) saturate(140%);
+  box-shadow: var(--shadow-2);
+}
+
+.ql-pager button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--fg-dim);
+  cursor: default;
+}
+
+.ql-pager button:hover {
+  background: var(--fill);
+  color: var(--fg);
+}
+
+.ql-pager button:disabled {
+  opacity: 0.3;
+  background: transparent;
+}
+
+.ql-pager span {
+  padding: 0 6px;
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--fg-dim);
+}
+
+.ql-pager i {
+  font-style: normal;
+  opacity: 0.45;
+}
+
+/* The way out of the peek and into the book. */
+.ql-read {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding-left: 10px;
+}
+
+@media (pointer: coarse) {
+  .ql-pager button {
+    width: 38px;
+    height: 38px;
+  }
 }
 
 /* Prose gets a measure it can be read at, rather than the full window width. */
@@ -3450,6 +3550,429 @@ li.md-task {
 .pdf-holding {
   height: 100%;
   background: var(--fill);
+}
+
+/* ================================================================ reader ==
+ *
+ * The one screen in Fiddler that isn't a file browser. Everything here is in
+ * service of the page: the room is dark and neutral so paper is the brightest
+ * thing in it, both bars float over the page rather than taking space from it,
+ * and neither of them is on screen while you're actually reading.
+ */
+
+.reader {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  /* Not a token: this is a reading room, not a Fiddler surface, and it should
+     be the same shade of quiet whichever way the system's appearance is set. */
+  background: #151517;
+  color: rgba(255, 255, 255, 0.92);
+  animation: reader-in var(--med) var(--ease);
+  /* A swipe across the paper is a page turn, so the browser must not also read
+     it as a back gesture or a rubber-band scroll. */
+  touch-action: pan-y;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* A hint of the room being lit from above the book. */
+.reader::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(120% 78% at 50% 0%, rgba(255, 255, 255, 0.07), transparent 62%);
+}
+
+@keyframes reader-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* ---------------------------------------------------------------- paper -- */
+
+.reader-stage {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: clamp(14px, 3.2vmin, 44px);
+  padding-top: calc(clamp(14px, 3.2vmin, 44px) + env(safe-area-inset-top, 0px));
+  padding-bottom: calc(clamp(14px, 3.2vmin, 44px) + env(safe-area-inset-bottom, 0px));
+  cursor: default;
+}
+
+/* Fit-the-width is the one mode where the page is taller than the room, so it
+   is the one mode where the room scrolls. */
+.reader-stage.scrolls {
+  align-items: flex-start;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
+}
+
+.reader-paper {
+  position: relative;
+  flex: none;
+  transition: transform var(--fast) var(--ease);
+  /* The turn happens in the page's own depth, not the screen's. */
+  perspective: 2200px;
+}
+
+.reader-sheets {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  gap: 1px;
+  border-radius: 3px;
+  overflow: hidden;
+  background: #fff;
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.45),
+    0 18px 50px rgba(0, 0, 0, 0.55);
+}
+
+/* The page being turned away from stays underneath until the new one lands, so
+   the turn covers something rather than covering a hole. */
+.reader-sheets.ghost {
+  z-index: 0;
+}
+
+.reader-sheets[data-dir] {
+  z-index: 1;
+  animation: reader-turn var(--turn) var(--ease) both;
+  transform-origin: left center;
+}
+
+.reader-sheets[data-dir="back"] {
+  animation-name: reader-turn-back;
+  transform-origin: right center;
+}
+
+/* A page swinging in over the one before it. Two composited properties and no
+   canvas: a curl that costs a rasterisation per frame would undo the whole
+   point of prefetching the page. */
+@keyframes reader-turn {
+  from { transform: translate3d(7%, 0, 0) rotateY(-11deg); opacity: 0.35; }
+  to { transform: none; opacity: 1; }
+}
+
+@keyframes reader-turn-back {
+  from { transform: translate3d(-7%, 0, 0) rotateY(11deg); opacity: 0.35; }
+  to { transform: none; opacity: 1; }
+}
+
+.reader-sheet {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  object-fit: contain;
+  background: #fff;
+}
+
+/* Holds the page's proportions while it rasterises, so nothing jumps. */
+.reader-sheet.holding {
+  background: linear-gradient(105deg, #f4f4f6 30%, #fbfbfd 50%, #f4f4f6 70%);
+  background-size: 280% 100%;
+  animation: reader-wait 1.3s linear infinite;
+}
+
+@keyframes reader-wait {
+  from { background-position: 100% 0; }
+  to { background-position: -100% 0; }
+}
+
+/* The spine: a soft crease where two pages meet, which is most of what makes a
+   spread read as one book rather than two pictures side by side.
+   Drawn over the pages rather than as an inset shadow on them, because an
+   inset shadow on an <img> paints underneath the image and is never seen. */
+.reader-sheets[data-two]::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 76px;
+  transform: translateX(-50%);
+  pointer-events: none;
+  background: linear-gradient(
+    90deg,
+    rgba(0, 0, 0, 0) 0%,
+    rgba(0, 0, 0, 0.05) 34%,
+    rgba(0, 0, 0, 0.13) 49%,
+    rgba(0, 0, 0, 0.13) 51%,
+    rgba(0, 0, 0, 0.05) 66%,
+    rgba(0, 0, 0, 0) 100%
+  );
+}
+
+/* A page that takes longer than a moment says so, quietly, in the corner —
+   rather than by blanking the page you're still reading. */
+.reader-busy {
+  position: absolute;
+  right: 18px;
+  bottom: 18px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.22);
+  border-top-color: rgba(255, 255, 255, 0.75);
+  animation: reader-spin 700ms linear infinite;
+}
+
+@keyframes reader-spin {
+  to { transform: rotate(1turn); }
+}
+
+/* ---------------------------------------------------------------- chrome -- */
+
+.reader-top,
+.reader-bottom {
+  position: absolute;
+  left: 0;
+  right: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px calc(14px + env(safe-area-inset-right, 0px)) 10px calc(14px + env(safe-area-inset-left, 0px));
+  color: rgba(255, 255, 255, 0.86);
+  background: rgba(20, 20, 22, 0.72);
+  backdrop-filter: blur(24px) saturate(140%);
+  transition: opacity var(--med) var(--ease), transform var(--med) var(--ease);
+}
+
+.reader-top {
+  top: 0;
+  padding-top: calc(10px + env(safe-area-inset-top, 0px));
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.reader-bottom {
+  bottom: 0;
+  padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+/* Reading is the state this screen is for, so it is the state the chrome
+   leaves you in. A movement, a tap in the middle or any key brings it back. */
+.reader.bare .reader-top {
+  opacity: 0;
+  transform: translateY(-100%);
+  pointer-events: none;
+}
+
+.reader.bare .reader-bottom {
+  opacity: 0;
+  transform: translateY(100%);
+  pointer-events: none;
+}
+
+.reader-name {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.reader-tools {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.reader-icon {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-pill);
+  background: transparent;
+  color: rgba(255, 255, 255, 0.72);
+  cursor: default;
+  transition: background var(--fast) var(--ease), color var(--fast) var(--ease);
+}
+
+.reader-icon:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+}
+
+.reader-icon:disabled {
+  opacity: 0.28;
+  background: transparent;
+}
+
+.reader-count {
+  flex: none;
+  min-width: 74px;
+  text-align: center;
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  color: rgba(255, 255, 255, 0.72);
+}
+
+.reader-count i {
+  font-style: normal;
+  opacity: 0.4;
+  padding: 0 1px;
+}
+
+/* ------------------------------------------------------------- scrubbing -- */
+
+.reader-scrub {
+  flex: 1;
+  min-width: 0;
+  height: 20px;
+  margin: 0;
+  appearance: none;
+  background: transparent;
+  cursor: default;
+}
+
+.reader-scrub::-webkit-slider-runnable-track {
+  height: 3px;
+  border-radius: var(--r-pill);
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.reader-scrub::-webkit-slider-thumb {
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  margin-top: -4.5px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+}
+
+.reader-scrub::-moz-range-track {
+  height: 3px;
+  border-radius: var(--r-pill);
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.reader-scrub::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border: 0;
+  border-radius: 50%;
+  background: #fff;
+}
+
+/* How far through you are, on screen even when nothing else is. One line, two
+   pixels, no numbers — the thing a book tells you by its own thickness. */
+.reader-rail {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 1;
+  height: 2px;
+  background: rgba(255, 255, 255, 0.08);
+  pointer-events: none;
+}
+
+.reader-rail i {
+  display: block;
+  height: 100%;
+  background: rgba(255, 255, 255, 0.5);
+  transition: width var(--med) var(--ease);
+}
+
+.reader:not(.bare) .reader-rail {
+  opacity: 0;
+}
+
+/* --------------------------------------------------------------- refusal -- */
+
+.reader-sorry {
+  margin: auto;
+  max-width: 420px;
+  padding: 28px;
+  text-align: center;
+  font-size: 13.5px;
+}
+
+.reader-sorry-why {
+  margin-top: 6px;
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 11.5px;
+  overflow-wrap: anywhere;
+}
+
+.reader-sorry-do {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  margin-top: 20px;
+}
+
+.reader-sorry-do button {
+  height: 28px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: var(--r-pill);
+  background: rgba(255, 255, 255, 0.12);
+  color: inherit;
+  font-family: inherit;
+  font-size: 12px;
+  cursor: default;
+}
+
+.reader-sorry-do button.primary {
+  background: var(--accent);
+  color: #fff;
+}
+
+/* On a phone the bars are what a thumb lands on, and they have no hover to
+   tell you where the targets are. */
+@media (pointer: coarse) {
+  .reader-icon {
+    width: 40px;
+    height: 40px;
+  }
+
+  .reader-scrub {
+    height: 40px;
+  }
+
+  .reader-scrub::-webkit-slider-thumb {
+    width: 18px;
+    height: 18px;
+    margin-top: -7.5px;
+  }
+
+  .reader-scrub::-moz-range-thumb {
+    width: 18px;
+    height: 18px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reader-sheets[data-dir] {
+    animation: none;
+  }
+
+  .reader-sheet.holding {
+    animation: none;
+  }
 }
 
 /* ============================================================== narrow ==

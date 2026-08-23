@@ -42,6 +42,12 @@ when they live outside the repo tree, and `missing` when the folder is gone and
 - **Thumbnails that mean something.** `main.rs` is drawn as a page of code.
   `notes.md` is drawn as a page of prose. PDFs show page one, folders show what's
   inside them, photos reuse the preview already in the file.
+- **A reader for PDFs, not a hand-off.** Open one and it opens *here*: paper
+  centred in a dark room, a spread when the window is wide enough, page turns
+  by arrow key, swipe, scroll or tap, full screen on `f` — and it reopens on
+  the page you left it on. No second application, and nothing to apologise for
+  on a phone or in a browser, where there was never an application to hand it
+  to.
 - **Git without a git panel.** A dot for modified, staged, untracked, conflicted.
   The branch on the folder. Ignored files dimmed rather than hidden.
 - **Two views, both dense.** Big icons or a sortable list you can twist open.
@@ -89,6 +95,17 @@ when they live outside the repo tree, and `missing` when the folder is gone and
 | `⌘D` `⌘Z` | Duplicate, undo |
 | `⌘⌫` | Move to Trash |
 | `⇧⌘N` `⌘N` | New folder / new text file |
+
+In the PDF reader:
+
+| | |
+|---|---|
+| `←` `→` `space` `PageUp` `PageDown` | Turn the page |
+| `Home` `End` | Cover, last page |
+| `f` | Full screen |
+| `w` | Fit the width, or the page |
+| `d` | One page, or two |
+| `esc` | Leave full screen, then close |
 
 ## Run it
 
@@ -173,7 +190,7 @@ src-tauri/src/
 src/
   store/tree.ts     navigation, sorting, list flattening
   preview/          markdown parser + highlighter
-  components/       IconGrid, DetailList, PreviewPane, QuickLook, Sidebar, …
+  components/       IconGrid, DetailList, PreviewPane, QuickLook, PdfReader, …
 ```
 
 Tests: `cargo test` in `src-tauri/`, and `npm test` for the parser, highlighter

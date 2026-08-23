@@ -295,6 +295,51 @@ export const MoreIcon = stroked(
   </>
 );
 
+/* The reader's four toggles. Each pair draws the state you'd be going *to*,
+   which is what makes one button read as a switch rather than as a label. */
+
+export const ExpandIcon = stroked(
+  <path d="M6.25 2.25H2.25v4M9.75 2.25h4v4M6.25 13.75H2.25v-4M9.75 13.75h4v-4" />
+);
+
+export const ShrinkIcon = stroked(
+  <path d="M2.5 6.25h4v-4M13.5 6.25h-4v-4M2.5 9.75h4v4M13.5 9.75h-4v4" />
+);
+
+/** Two pages, opened out. */
+export const SpreadIcon = stroked(
+  <>
+    <path d="M1.75 3.25h5.5v9.5h-5.5zM8.75 3.25h5.5v9.5h-5.5z" />
+  </>
+);
+
+/** One page, centred. */
+export const SinglePageIcon = stroked(<path d="M4.5 2.75h7v10.5h-7z" />);
+
+/** Fill the width: a page with arrows pushing at its sides. */
+export const PageWidthIcon = stroked(
+  <>
+    <path d="M5.25 3.5h5.5v9h-5.5z" />
+    <path d="M3 6 1.25 8 3 10M13 6l1.75 2L13 10" />
+  </>
+);
+
+/** Fit the page: arrows pulling it back inside the frame. */
+export const PageFitIcon = stroked(
+  <>
+    <path d="M4.5 3.25h7v9.5h-7z" />
+    <path d="M1.5 8h1.75M12.75 8h1.75M8 1.25V3M8 13v1.75" />
+  </>
+);
+
+/** A book, for the verb that opens one. */
+export const BookIcon = stroked(
+  <>
+    <path d="M8 4.25C6.75 3.1 5.2 2.75 2.5 2.75v9c2.7 0 4.25.35 5.5 1.5 1.25-1.15 2.8-1.5 5.5-1.5v-9c-2.7 0-4.25.35-5.5 1.5Z" />
+    <path d="M8 4.25v9" />
+  </>
+);
+
 /** Empty-state artwork: an open, and pointedly empty, folder. */
 export const EmptyIcon = stroked(
   <>

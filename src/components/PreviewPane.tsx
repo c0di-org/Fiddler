@@ -7,6 +7,7 @@ import { isTextual, routeOf } from "../preview/route";
 import type { Entry, Inspect, TextHead, WorktreeInfo } from "../types";
 import { CodeView } from "./CodeView";
 import { FileGlyph, FolderGlyph } from "./FileGlyph";
+import { BookIcon } from "./icons";
 import { GitDot } from "./GitDot";
 import { MarkdownView } from "./MarkdownView";
 
@@ -30,9 +31,12 @@ interface Props {
   worktree?: WorktreeInfo;
   /** How many things are selected — the pane only previews a single item. */
   count: number;
+  /** Open this file in the full reader. Passed only for the routes that have
+   * one, which today means PDFs. */
+  onRead?: () => void;
 }
 
-export function PreviewPane({ entry, worktree, count }: Props) {
+export function PreviewPane({ entry, worktree, count, onRead }: Props) {
   const path = entry?.path ?? worktree?.path ?? null;
   const route = entry ? routeOf(entry.name) : "none";
   // Text reads better as text than as a picture of text, so files that have
@@ -122,6 +126,17 @@ export function PreviewPane({ entry, worktree, count }: Props) {
         </div>
       )}
 
+      {/* The pane shows page one, which is the right answer to "what is this?"
+          and no answer at all to "what's in it?". This is the door to the rest
+          of the document, in the one place someone looking at page one is
+          already looking. */}
+      {route === "pdf" && onRead && (
+        <button className="preview-read" onClick={onRead}>
+          <BookIcon size={13} />
+          Read
+        </button>
+      )}
+
       <div className="preview-name">{name}</div>
       <div className="preview-kind">
         {entry ? kindOf(entry) : "Worktree"}
@@ -153,8 +168,10 @@ export function PreviewPane({ entry, worktree, count }: Props) {
       </dl>
 
       {/* Files with no route of their own still show their opening lines, which
-          is how anything text-shaped but unrecognised stays readable. */}
-      {!asText && info?.text && <pre className="preview-text">{info.text}</pre>}
+          is how anything text-shaped but unrecognised stays readable. A PDF is
+          excluded by name: an uncompressed one has no NUL bytes to be caught by
+          the binary heuristic, and its object table is not its opening lines. */}
+      {!asText && route !== "pdf" && info?.text && <pre className="preview-text">{info.text}</pre>}
 
       {path && <div className="preview-path">{path}</div>}
     </aside>
