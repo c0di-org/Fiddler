@@ -18,8 +18,14 @@ export type Tint = "system" | string;
 
 const STORAGE_KEY = "fiddler.tint";
 
+/** The cool silver-grey Fiddler is meant to arrive in — quiet enough that the
+ * files are the only coloured thing on screen. It is what the app opens as
+ * everywhere the system has no accent to lend: Android, the web, and a Mac
+ * that answers "no colour". */
+const DEFAULT_TINT = "#AEB4C0";
+
 /** Used when the system accent can't be read (older WebKit, or "no colour"). */
-const FALLBACK = "#0a84ff";
+const FALLBACK = DEFAULT_TINT;
 
 /** Text on an accent fill must clear this; 4.5 is unreachable for mid tones. */
 const ON_ACCENT_MIN = 3.2;
