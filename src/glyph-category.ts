@@ -1,4 +1,4 @@
-import { routeOf } from "./preview/route";
+import { routeOf } from "./preview/route.ts";
 
 /**
  * The broad colour family a file wears wherever it is drawn. Keep this small:
