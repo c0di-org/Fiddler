@@ -145,17 +145,23 @@ impl ThumbPool {
         // another process, so a fixed handful of threads keeps that pipeline full
         // without competing for cores.
         let cores = num_cpus::get();
-        for _ in 0..cores.clamp(2, 4) {
-            spawn_worker(pool.clone(), Lane::Text);
-        }
         for _ in 0..cores.clamp(2, 8) {
             spawn_worker(pool.clone(), Lane::Raster);
         }
-        for _ in 0..cores.clamp(2, 4) {
-            spawn_worker(pool.clone(), Lane::Page);
-        }
-        for _ in 0..6 {
-            spawn_worker(pool.clone(), Lane::QuickLook);
+        // Text pages, PDF pages and Quick Look renders only exist on the
+        // desktop — `lane_of` on Android never routes to them, and a dozen
+        // parked threads on a phone is scheduler weight for nothing.
+        #[cfg(not(target_os = "android"))]
+        {
+            for _ in 0..cores.clamp(2, 4) {
+                spawn_worker(pool.clone(), Lane::Text);
+            }
+            for _ in 0..cores.clamp(2, 4) {
+                spawn_worker(pool.clone(), Lane::Page);
+            }
+            for _ in 0..6 {
+                spawn_worker(pool.clone(), Lane::QuickLook);
+            }
         }
         spawn_emitter(pool.clone());
 
@@ -211,6 +217,8 @@ impl ThumbPool {
     }
 }
 
+// The desktop-only variants go unspawned on Android; see `start`.
+#[cfg_attr(target_os = "android", allow(dead_code))]
 #[derive(Clone, Copy)]
 enum Lane {
     Text,

@@ -1,5 +1,7 @@
 pub mod discover;
 pub mod status;
+#[cfg(target_os = "android")]
+pub mod status_gix;
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -73,7 +75,7 @@ impl GitCache {
         if let Some(hit) = self.cached_status(work_root) {
             return Ok(hit);
         }
-        let fresh = Arc::new(status::compute(work_root)?);
+        let fresh = Arc::new(compute_status(work_root)?);
         self.statuses
             .lock()
             .unwrap()
@@ -83,7 +85,7 @@ impl GitCache {
 
     /// Recompute unconditionally, replacing whatever is cached.
     pub fn refresh_blocking(&self, work_root: &Path) -> Result<Arc<RepoStatus>, String> {
-        let fresh = Arc::new(status::compute(work_root)?);
+        let fresh = Arc::new(compute_status(work_root)?);
         self.statuses
             .lock()
             .unwrap()
@@ -113,6 +115,19 @@ impl GitCache {
     pub fn forget_discovery_under(&self, path: &Path) {
         let mut map = self.discovery.lock().unwrap();
         map.retain(|k, _| !k.starts_with(path));
+    }
+}
+
+/// One status pass, by whichever engine this platform has: the `git` binary
+/// where one exists, gitoxide where an app bundle cannot contain one.
+fn compute_status(work_root: &Path) -> Result<RepoStatus, String> {
+    #[cfg(target_os = "android")]
+    {
+        status_gix::compute(work_root)
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        status::compute(work_root)
     }
 }
 

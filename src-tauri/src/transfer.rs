@@ -110,10 +110,32 @@ fn walk(path: &Path, cancel: &AtomicBool, items: &mut u64, bytes: &mut u64) -> R
             let child = child.map_err(|e| e.to_string())?;
             walk(&child.path(), cancel, items, bytes)?;
         }
-    } else {
+    } else if !metadata.file_type().is_symlink() {
+        // A link contributes no bytes: the copy recreates it rather than
+        // moving what it points at, and counting the link text would leave
+        // the bar promising bytes the transfer never sends.
         *bytes += metadata.len();
     }
     Ok(())
+}
+
+/// Recreate `source`'s link at `target`, pointing at the same place — relative
+/// stays relative, absolute stays absolute, exactly as written.
+fn copy_link(source: &Path, target: &Path) -> Result<(), Stopped> {
+    let destination = std::fs::read_link(source).map_err(|e| e.to_string())?;
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(&destination, target).map_err(|e| e.to_string())?;
+        Ok(())
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = destination;
+        Err(Stopped::Failed(format!(
+            "can’t copy the link {}",
+            source.display()
+        )))
+    }
 }
 
 /// Whether any pair in `plan` has to cross volumes, which is what makes the
@@ -199,6 +221,18 @@ fn copy_tree(
         .map(|name| name.to_string_lossy().into_owned())
         .unwrap_or_default();
 
+    // A link is copied as a link, before anything asks what it points at.
+    // `std::fs::copy` would follow it: a link to a directory fails the whole
+    // transfer — after everything before it copied, so the rollback throws
+    // that work away — and a link to a file quietly materializes as a second
+    // copy of the bytes. `node_modules/.bin` alone makes both routine.
+    if metadata.file_type().is_symlink() {
+        copy_link(source, target)?;
+        progress.done_items += 1;
+        report(progress);
+        return Ok(());
+    }
+
     if metadata.is_dir() {
         std::fs::create_dir(target).map_err(|e| e.to_string())?;
         progress.done_items += 1;
@@ -260,7 +294,11 @@ fn copy_chunked(
         .metadata()
         .map_err(|e| e.to_string())?
         .permissions();
-    writer.set_permissions(permissions).map_err(|e| e.to_string())?;
+    // Best-effort, deliberately: FAT and exFAT — exactly where files this big
+    // land on Android, the SD card and the USB stick — refuse chmod, and
+    // failing here after every byte arrived would roll back a finished copy
+    // over a bit the filesystem cannot store.
+    let _ = writer.set_permissions(permissions);
     Ok(())
 }
 
@@ -430,6 +468,33 @@ mod tests {
         assert!(matches!(result, Err(Stopped::Failed(_))));
         assert!(!dst.join("good").exists(), "the item that succeeded was left behind");
         assert!(!dst.join("gone").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_link_is_copied_as_a_link_and_costs_no_bytes() {
+        let dir = scratch("links");
+        let src = dir.join("src");
+        tree(&src);
+        // One relative link to a folder, one absolute link to a file — the two
+        // shapes `node_modules/.bin` and friends actually contain.
+        std::os::unix::fs::symlink("inner", src.join("to-inner")).unwrap();
+        std::os::unix::fs::symlink(src.join("a.txt"), src.join("to-a")).unwrap();
+        let dst = dir.join("dst");
+
+        let cancel = AtomicBool::new(false);
+        let totals = survey(&[src.clone()], &cancel).unwrap();
+        // Folder, a.txt, inner, inner/b.txt, and the two links as items —
+        // but only the real files' bytes.
+        assert_eq!(totals.0, 6);
+        assert_eq!(totals.1, 6);
+
+        run(&[(src.clone(), dst.clone())], totals, &cancel, &mut |_| {}).unwrap();
+
+        assert_eq!(std::fs::read_link(dst.join("to-inner")).unwrap(), PathBuf::from("inner"));
+        assert_eq!(std::fs::read_link(dst.join("to-a")).unwrap(), src.join("a.txt"));
+        // The linked folder's contents were not duplicated through the link.
+        assert_eq!(std::fs::read_to_string(dst.join("to-inner/b.txt")).unwrap(), "bb");
     }
 
     #[test]

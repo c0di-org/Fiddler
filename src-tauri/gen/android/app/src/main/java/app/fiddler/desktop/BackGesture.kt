@@ -25,8 +25,12 @@ import androidx.activity.OnBackPressedCallback
 object BackGesture {
   private val main = Handler(Looper.getMainLooper())
 
-  /** Registered once, on the first call, and thereafter only toggled. */
+  /** Registered per Activity: the callback is lifecycle-bound and dies with
+   * its host, so a recreated Activity — Back out and reopen, a rotation —
+   * needs a fresh one. Keeping only the first would leave every later session
+   * with Back going straight to the launcher. */
   private var callback: OnBackPressedCallback? = null
+  private var host: ComponentActivity? = null
 
   /**
    * Called from Rust, on a worker thread. The dispatcher is main-thread-only,
@@ -35,12 +39,16 @@ object BackGesture {
   @JvmStatic
   fun setEnabled(activity: Activity, enabled: Boolean) {
     main.post {
-      val host = activity as? ComponentActivity ?: return@post
+      val current = activity as? ComponentActivity ?: return@post
       val existing = callback
-      if (existing != null) {
+      if (existing != null && host === current) {
         existing.isEnabled = enabled
         return@post
       }
+      // A previous Activity's callback was removed by its lifecycle when that
+      // Activity was destroyed; dropping our reference just agrees with it.
+      callback = null
+      host = null
       // Nothing is registered until the front end first asks for Back, which
       // means an app that never gets that far never installs a callback at all.
       if (!enabled) return@post
@@ -50,7 +58,8 @@ object BackGesture {
         }
       }
       callback = fresh
-      host.onBackPressedDispatcher.addCallback(host, fresh)
+      host = current
+      current.onBackPressedDispatcher.addCallback(current, fresh)
     }
   }
 }

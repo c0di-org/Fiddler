@@ -20,10 +20,26 @@ class MainActivity : TauriActivity() {
     // a misleading empty file browser on first launch.
     if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R && !Environment.isExternalStorageManager()) {
       startActivity(Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION, Uri.parse("package:$packageName")))
+    } else if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.R) {
+      // Android 7–10: All files access doesn't exist; the legacy runtime pair
+      // is the whole story, and without asking, every listing is EACCES.
+      val storage = android.Manifest.permission.WRITE_EXTERNAL_STORAGE
+      if (checkSelfPermission(storage) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+        requestPermissions(
+          arrayOf(android.Manifest.permission.READ_EXTERNAL_STORAGE, storage),
+          1,
+        )
+      }
     }
     // A file opened from another app while Fiddler wasn't running. After the
     // attach above, so the push it ends in has somewhere to land.
     OpenedFile.offer(this, intent)
+    // Thumbnails, PDF pages and copies of other apps' files all accumulate in
+    // the cache dir with nothing else evicting them; a long-lived install was
+    // gigabytes. Off the main thread — it's disk I/O over many small files.
+    Thread({ Thumbs.sweepCaches(applicationContext) }, "fiddler-cache-sweep")
+      .apply { isDaemon = true }
+      .start()
   }
 
   /**
