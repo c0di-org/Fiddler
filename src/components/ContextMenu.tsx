@@ -39,13 +39,22 @@ function Popover({ x, y, items, onClose }: { x: number; y: number; items: MenuIt
   const [pos, setPos] = useState({ x, y });
 
   // Flip the menu back inside the window if it would hang off an edge.
+  // `visualViewport` rather than the raw window size: with the layout drawn
+  // edge-to-edge (`viewport-fit=cover`) a fixed element clamped to
+  // `innerHeight` can still sit under a gesture bar or beside a cutout, and
+  // the visual viewport is also the honest answer while a keyboard is up.
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
     const r = el.getBoundingClientRect();
+    const vv = window.visualViewport;
+    const left = vv?.offsetLeft ?? 0;
+    const top = vv?.offsetTop ?? 0;
+    const width = vv?.width ?? window.innerWidth;
+    const height = vv?.height ?? window.innerHeight;
     setPos({
-      x: x + r.width > window.innerWidth ? Math.max(4, window.innerWidth - r.width - 4) : x,
-      y: y + r.height > window.innerHeight ? Math.max(4, window.innerHeight - r.height - 4) : y,
+      x: x + r.width > left + width ? Math.max(left + 4, left + width - r.width - 4) : x,
+      y: y + r.height > top + height ? Math.max(top + 4, top + height - r.height - 4) : y,
     });
   }, [x, y]);
 

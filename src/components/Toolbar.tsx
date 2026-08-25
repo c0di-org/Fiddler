@@ -1,4 +1,5 @@
 import { tildify } from "../format";
+import { keyHint } from "../platform";
 import { locationCaps, refusal } from "../location";
 import type { ViewMode } from "../store/tree";
 import {
@@ -66,18 +67,18 @@ export function Toolbar(p: Props) {
   return (
     <header className="toolbar" data-tauri-drag-region="deep">
       <div className="tb-nav">
-        <button className="tb-btn" disabled={!p.canBack} onClick={p.onBack} title="Back (⌘[)">
+        <button className="tb-btn" disabled={!p.canBack} onClick={p.onBack} title={`Back (${keyHint("⌘[")})`}>
           <ChevronLeft size={18} />
         </button>
         <button
           className="tb-btn tb-forward"
           disabled={!p.canForward}
           onClick={p.onForward}
-          title="Forward (⌘])"
+          title={`Forward (${keyHint("⌘]")})`}
         >
           <Chevron size={18} />
         </button>
-        <button className="tb-btn" onClick={p.onUp} title="Enclosing folder (⌘↑)">
+        <button className="tb-btn" onClick={p.onUp} title={`Enclosing folder (${keyHint("⌘↑")})`}>
           <UpIcon size={18} />
         </button>
       </div>
@@ -121,7 +122,7 @@ export function Toolbar(p: Props) {
           className="tb-btn tb-new-file"
           disabled={!here.create}
           onClick={p.onNewFile}
-          title={here.create ? "New text file (⌘N)" : refusal(here, "create files")}
+          title={here.create ? `New text file (${keyHint("⌘N")})` : refusal(here, "create files")}
         >
           <NewFileIcon size={17} />
         </button>
@@ -129,14 +130,14 @@ export function Toolbar(p: Props) {
           <button
             className={p.view === "icons" ? "on" : ""}
             onClick={() => p.onView("icons")}
-            title="Icons (⌘1)"
+            title={`Icons (${keyHint("⌘1")})`}
           >
             <GridIcon size={16} />
           </button>
           <button
             className={p.view === "list" ? "on" : ""}
             onClick={() => p.onView("list")}
-            title="List (⌘2)"
+            title={`List (${keyHint("⌘2")})`}
           >
             <ListIcon size={16} />
           </button>
@@ -145,15 +146,15 @@ export function Toolbar(p: Props) {
         <button
           className={`tb-btn tb-preview ${p.previewOpen ? "on" : ""}`}
           onClick={p.onTogglePreview}
-          title="Preview (⇧⌘P)"
+          title={`Preview (${keyHint("⇧⌘P")})`}
         >
           <PanelIcon size={17} />
         </button>
 
         <button
-          className={`tb-btn ${p.showHidden ? "on" : ""}`}
+          className={`tb-btn tb-hidden-toggle ${p.showHidden ? "on" : ""}`}
           onClick={p.onToggleHidden}
-          title="Show hidden files (⇧⌘.)"
+          title={`Show hidden files (${keyHint("⇧⌘.")})`}
         >
           <EyeIcon size={17} />
         </button>

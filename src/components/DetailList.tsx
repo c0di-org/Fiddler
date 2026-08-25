@@ -10,12 +10,19 @@ import { EmptyState } from "./EmptyState";
 import { Chevron, ForkIcon, GripIcon, LockIcon, WarnIcon } from "./icons";
 import { beginFolderDrag, endFolderDrag, FOLDER_DRAG_TYPE } from "../favorites";
 import { beginItemDrag, endItemDrag, ITEM_DRAG_TYPE, type DragItems } from "../drag.ts";
+import { lastPointerType } from "../pointer.ts";
+import { RenameInput } from "./RenameInput";
 import { type FolderTouchDragHandlers, useTouchPress } from "./touch-press";
 import { dropProps, useDropTarget, type DropItems } from "./use-drop-target.ts";
 
 /** Finder's list view: dense, sortable, with disclosure triangles. */
 
-export const ROW_H = 34;
+/** 34 is Finder's density; a fingertip needs the 44 Android and iOS both ask
+ * for, or multi-select taps land on neighbours. Decided at load, like the
+ * grid's `directTouch`: the row height feeds the virtualization math, and a
+ * height that changed mid-scroll would teleport the viewport. */
+export const ROW_H =
+  typeof matchMedia === "function" && matchMedia("(pointer: coarse)").matches ? 44 : 34;
 const OVERSCAN = 12;
 
 const COLUMNS: { key: SortKey; label: string; min: number; width: number }[] = [
@@ -393,7 +400,9 @@ export function DetailList(props: Props) {
         onContextMenu={(e) => {
           e.preventDefault();
           // See IconGrid: on touch the long press has already answered this.
-          if (pointerType.current === "touch") return;
+          // A synthetic event is the keyboard's (Menu key, Shift+F10) and goes
+          // through even when the last press on the panel was a finger.
+          if (pointerType.current === "touch" && e.nativeEvent.isTrusted) return;
           const row = rowFrom(e);
           // See IconGrid: a right-click inside a selection must not collapse it.
           if (row && !props.selection.has(row.id)) props.onSelect(row.id, e);
@@ -511,6 +520,12 @@ function RowView({
       draggable={!!path}
       onDragStart={(event) => {
         if (!path) return;
+        // Recent Chromium synthesizes an HTML5 drag from a touch long-press,
+        // which would fight the pointer-based touch drag mid-gesture.
+        if (lastPointerType() === "touch") {
+          event.preventDefault();
+          return;
+        }
         // A folder keeps its own drag type so Favorites, which is the one drop
         // target that wants a bookmark rather than the bytes, still works.
         if (isFolder) {
@@ -644,38 +659,3 @@ function RowView({
   );
 }
 
-function RenameInput({
-  initial,
-  onCommit,
-  onCancel,
-}: {
-  initial: string;
-  onCommit: (v: string) => void;
-  onCancel: () => void;
-}) {
-  const ref = useRef<HTMLInputElement>(null);
-
-  useLayoutEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    el.focus();
-    const dot = initial.lastIndexOf(".");
-    el.setSelectionRange(0, dot > 0 ? dot : initial.length);
-  }, [initial]);
-
-  return (
-    <input
-      ref={ref}
-      className="rename-input"
-      defaultValue={initial}
-      onClick={(e) => e.stopPropagation()}
-      onDoubleClick={(e) => e.stopPropagation()}
-      onBlur={(e) => onCommit(e.currentTarget.value)}
-      onKeyDown={(e) => {
-        e.stopPropagation();
-        if (e.key === "Enter") onCommit(e.currentTarget.value);
-        else if (e.key === "Escape") onCancel();
-      }}
-    />
-  );
-}

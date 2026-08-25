@@ -2,7 +2,9 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <!-- interactive-widget: Chrome on Android otherwise leaves the layout at full
+         height under the keyboard, which buries the editor's caret and footer. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content" />
     <!-- The .ico is the fallback for browsers that won't take an SVG favicon,
          and the answer to the bare /favicon.ico every crawler asks for. -->
     <link rel="icon" href="/favicon.ico" sizes="32x32" />

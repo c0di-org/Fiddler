@@ -81,6 +81,20 @@ export const caps: Capabilities = {
   incomingFiles: platform === "android",
 };
 
+/** A shortcut hint for a tooltip, written once in Mac notation and translated
+ * for keyboards that have no ⌘. On Android and the web the handlers already
+ * accept Ctrl (and Alt for ⌥); this makes the labels stop advertising a Mac
+ * chord to a keyboard that can't type one. */
+export function keyHint(mac: string): string {
+  if (platform === "macos") return mac;
+  const mods: string[] = [];
+  if (/[⌃⌘]/.test(mac)) mods.push("Ctrl");
+  if (mac.includes("⌥")) mods.push("Alt");
+  if (mac.includes("⇧")) mods.push("Shift");
+  const key = mac.replace(/[⌃⌥⇧⌘]/g, "") || mac;
+  return [...mods, key].join("+");
+}
+
 /** Where to send someone whose folder we were not allowed to read. The three
  * platforms fix this in three different places. */
 export function permissionHelp(): string {

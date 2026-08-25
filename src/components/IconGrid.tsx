@@ -8,6 +8,8 @@ import { GitDot } from "./GitDot";
 import { Thumb } from "./Thumb";
 import { beginFolderDrag, endFolderDrag, FOLDER_DRAG_TYPE } from "../favorites";
 import { beginItemDrag, endItemDrag, ITEM_DRAG_TYPE, type DragItems } from "../drag.ts";
+import { lastPointerType } from "../pointer.ts";
+import { RenameInput } from "./RenameInput";
 import { type FolderTouchDragHandlers, useTouchPress } from "./touch-press";
 import { dropProps, useDropTarget, type DropItems } from "./use-drop-target.ts";
 
@@ -63,6 +65,12 @@ interface Props {
   onSelect: (id: string, e: React.MouseEvent, touch?: boolean) => void;
   onOpen: (cell: GridCell) => void;
   onContextMenu: (cell: GridCell | null, x: number, y: number) => void;
+  /** The cell whose name is being edited in place, if any. Rename used to be
+   * list-view-only, which on touch — where the menu is the only route to it —
+   * made the default view one you couldn't rename in at all. */
+  renamingId: string | null;
+  onRenameCommit: (cell: GridCell, name: string) => void;
+  onRenameCancel: () => void;
   onBackgroundClick: () => void;
   /** Navigation and selection keys, handled here rather than on `window` so
    * they only fire when this view actually holds focus. */
@@ -251,8 +259,9 @@ export function IconGrid(props: Props) {
         // A mobile WebView fires this on long press too, which would put a
         // pointer-shaped popover under a fingertip on top of the press
         // gesture's own answer. Touch has its own route now; this is the
-        // pointer's.
-        if (pointerType.current === "touch") return;
+        // pointer's. A synthetic event is the keyboard's (Menu key,
+        // Shift+F10) and goes through even after a tap on the panel.
+        if (pointerType.current === "touch" && e.nativeEvent.isTrusted) return;
         const c = cellFrom(e);
         // Finder's rule, which was being broken here: right-clicking something
         // already selected keeps the whole selection. Selecting unconditionally
@@ -299,6 +308,9 @@ export function IconGrid(props: Props) {
                   width={cellW}
                   iconSize={iconSize}
                   selected={props.selection.has(cell.id)}
+                  renaming={cell.id === props.renamingId}
+                  onRenameCommit={props.onRenameCommit}
+                  onRenameCancel={props.onRenameCancel}
                   touchFolderDrag={props.touchFolderDrag}
                   onPress={props.onPress}
                   dragItems={props.dragItems}
@@ -320,6 +332,9 @@ function Cell({
   width,
   iconSize,
   selected,
+  renaming,
+  onRenameCommit,
+  onRenameCancel,
   touchFolderDrag,
   onPress,
   dragItems,
@@ -331,6 +346,9 @@ function Cell({
   width: number;
   iconSize: number;
   selected: boolean;
+  renaming: boolean;
+  onRenameCommit: (cell: GridCell, name: string) => void;
+  onRenameCancel: () => void;
   touchFolderDrag?: FolderTouchDragHandlers;
   onPress?: (id: string) => void;
   dragItems?: (id: string) => DragItems | null;
@@ -364,8 +382,14 @@ function Cell({
       style={{ width }}
       title={cell.path}
       {...dropHandlers}
-      draggable={isFolder || !!cell.entry}
+      draggable={!renaming && (isFolder || !!cell.entry)}
       onDragStart={(event) => {
+        // Recent Chromium synthesizes an HTML5 drag from a touch long-press,
+        // which would fight the pointer-based touch drag mid-gesture.
+        if (lastPointerType() === "touch") {
+          event.preventDefault();
+          return;
+        }
         // A folder keeps its own drag type so Favorites, which is the one drop
         // target that wants a bookmark rather than the bytes, still works.
         if (isFolder) {
@@ -400,7 +424,11 @@ function Cell({
         </span>
       </div>
       <div className="cell-label">
-        <span className="cell-name">{cell.name}</span>
+        {renaming ? (
+          <RenameInput initial={cell.name} onCommit={(v) => onRenameCommit(cell, v)} onCancel={onRenameCancel} />
+        ) : (
+          <span className="cell-name">{cell.name}</span>
+        )}
         {e?.searchLocation && (
           <span className="cell-sub" title={cell.path}>
             {e.searchLocation}
