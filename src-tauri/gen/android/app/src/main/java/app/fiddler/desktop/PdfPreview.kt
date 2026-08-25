@@ -18,18 +18,54 @@ import kotlin.math.roundToInt
  * requested rather than decoding a full document in JavaScript.
  */
 object PdfPreview {
-  @JvmStatic
-  fun meta(path: String): DoubleArray? = runCatching {
-    ParcelFileDescriptor.open(File(path), ParcelFileDescriptor.MODE_READ_ONLY).use { fd ->
-      PdfRenderer(fd).use { pdf ->
-        require(pdf.pageCount > 0)
-        pdf.openPage(0).use { page ->
-          require(page.height > 0)
-          doubleArrayOf(pdf.pageCount.toDouble(), page.width.toDouble() / page.height.toDouble())
-        }
-      }
+  /**
+   * The one document being read, kept open between page turns.
+   *
+   * Opening a `PdfRenderer` parses the whole cross-reference table, and a
+   * reader turns pages of the same document dozens of times in a row — paying
+   * that parse per page made every turn of a large book visibly late. The
+   * renderer is swapped when the path (or the file underneath it) changes, so
+   * at most one descriptor is ever held.
+   */
+  private var openKey: String? = null
+  private var openFd: ParcelFileDescriptor? = null
+  private var openPdf: PdfRenderer? = null
+
+  private fun renderer(source: File): PdfRenderer {
+    val key = "${source.absolutePath}\u0000${source.length()}\u0000${source.lastModified()}"
+    openPdf?.let { if (openKey == key) return it }
+    closeOpen()
+    val fd = ParcelFileDescriptor.open(source, ParcelFileDescriptor.MODE_READ_ONLY)
+    try {
+      val pdf = PdfRenderer(fd)
+      openFd = fd
+      openPdf = pdf
+      openKey = key
+      return pdf
+    } catch (failure: Throwable) {
+      fd.close()
+      throw failure
     }
-  }.getOrNull()
+  }
+
+  private fun closeOpen() {
+    runCatching { openPdf?.close() }
+    runCatching { openFd?.close() }
+    openPdf = null
+    openFd = null
+    openKey = null
+  }
+
+  @JvmStatic
+  @Synchronized
+  fun meta(path: String): DoubleArray? = runCatching {
+    val pdf = renderer(File(path))
+    require(pdf.pageCount > 0)
+    pdf.openPage(0).use { page ->
+      require(page.height > 0)
+      doubleArrayOf(pdf.pageCount.toDouble(), page.width.toDouble() / page.height.toDouble())
+    }
+  }.onFailure { closeOpen() }.getOrNull()
 
   /**
    * Serializing a render prevents the foreground request and its adjacent-page
@@ -48,34 +84,31 @@ object PdfPreview {
     val out = File(dir, "$key.png")
     if (out.isFile && out.length() > 0L) return@runCatching out.absolutePath
 
-    ParcelFileDescriptor.open(source, ParcelFileDescriptor.MODE_READ_ONLY).use { fd ->
-      PdfRenderer(fd).use { pdf ->
-        require(pageNumber <= pdf.pageCount)
-        pdf.openPage(pageNumber - 1).use { page ->
-          require(page.width > 0 && page.height > 0)
-          val scale = maxPx.toDouble() / max(page.width, page.height).toDouble()
-          val width = max(1, (page.width * scale).roundToInt())
-          val height = max(1, (page.height * scale).roundToInt())
-          val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-          try {
-            bitmap.eraseColor(Color.WHITE)
-            page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
-            val temp = File(dir, "$key.tmp")
-            FileOutputStream(temp).use { stream ->
-              check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, stream))
-            }
-            if (!temp.renameTo(out)) {
-              temp.delete()
-              check(out.isFile && out.length() > 0L)
-            }
-          } finally {
-            bitmap.recycle()
-          }
+    val pdf = renderer(source)
+    require(pageNumber <= pdf.pageCount)
+    pdf.openPage(pageNumber - 1).use { page ->
+      require(page.width > 0 && page.height > 0)
+      val scale = maxPx.toDouble() / max(page.width, page.height).toDouble()
+      val width = max(1, (page.width * scale).roundToInt())
+      val height = max(1, (page.height * scale).roundToInt())
+      val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+      try {
+        bitmap.eraseColor(Color.WHITE)
+        page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+        val temp = File(dir, "$key.tmp")
+        FileOutputStream(temp).use { stream ->
+          check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, stream))
         }
+        if (!temp.renameTo(out)) {
+          temp.delete()
+          check(out.isFile && out.length() > 0L)
+        }
+      } finally {
+        bitmap.recycle()
       }
     }
     out.absolutePath
-  }.getOrNull()
+  }.onFailure { closeOpen() }.getOrNull()
 
   private fun cacheKey(file: File, page: Int, maxPx: Int): String {
     val source = "${file.absolutePath}\u0000${file.length()}\u0000${file.lastModified()}\u0000$page\u0000$maxPx"

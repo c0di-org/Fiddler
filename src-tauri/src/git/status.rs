@@ -2,6 +2,10 @@
 //! plus per-directory rollups. Cached and invalidated by the fs watcher, so the
 //! cost is paid once per repo per change burst rather than once per navigation.
 
+// On Android the subprocess half of this module is unreachable — status runs
+// through `status_gix` there — but the model and `record` are shared.
+#![cfg_attr(target_os = "android", allow(dead_code))]
+
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::process::Command;
@@ -118,13 +122,18 @@ pub fn parse(bytes: &[u8]) -> RepoStatus {
         let tag = chars.next().unwrap_or(' ');
         match tag {
             '#' => parse_header(field, &mut st),
+            // `get` rather than a slice: a truncated field ("?" alone) would
+            // otherwise panic, and with `panic = "abort"` one malformed line
+            // of porcelain output is the whole process.
             '?' => {
-                let path = &field[2..];
-                record(&mut st, path, Code::UNTRACKED);
+                if let Some(path) = field.get(2..) {
+                    record(&mut st, path, Code::UNTRACKED);
+                }
             }
             '!' => {
-                let path = &field[2..];
-                record(&mut st, path, Code::IGNORED);
+                if let Some(path) = field.get(2..) {
+                    record(&mut st, path, Code::IGNORED);
+                }
             }
             '1' => {
                 if let Some((code, path)) = parse_ordinary(field) {
@@ -225,7 +234,9 @@ fn xy_to_code(xy: &str) -> Option<Code> {
     })
 }
 
-fn record(st: &mut RepoStatus, path: &str, code: Code) {
+/// Also used by the gix-based status on Android, which synthesizes the same
+/// `(path, code)` stream a porcelain parse produces.
+pub(crate) fn record(st: &mut RepoStatus, path: &str, code: Code) {
     let is_dir = path.ends_with('/');
     let rel = path.trim_end_matches('/').to_string();
     if rel.is_empty() {

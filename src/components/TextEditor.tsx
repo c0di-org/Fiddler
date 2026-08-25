@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 
+import { confirmDialog } from "../confirm";
 import * as ipc from "../ipc";
 import { locationCaps, refusal } from "../location";
 import type { Volume } from "../types";
 import { MarkdownView } from "./MarkdownView";
 import { NewFileIcon, PanelIcon } from "./icons";
+import { keyHint } from "../platform";
 
 const TYPES = [".txt", ".md", ".json", ".js", ".ts", ".csv"];
 
@@ -69,9 +71,26 @@ export function TextEditor({ path: initialPath, parent, initialText, volumes = [
     if (!path && inputRef.current) inputRef.current.select();
   }, [path]);
 
+  // One question at a time: Escape autorepeats, and Back can land while the
+  // dialog is already up.
+  const askingToClose = useRef(false);
   const close = () => {
-    if (dirty && !window.confirm("Discard unsaved changes?")) return;
-    onClose();
+    if (!dirty) {
+      onClose();
+      return;
+    }
+    if (askingToClose.current) return;
+    askingToClose.current = true;
+    void confirmDialog({
+      title: "Discard unsaved changes?",
+      detail: "The edits since the last save will be lost.",
+      confirmLabel: "Discard",
+      cancelLabel: "Keep Editing",
+      danger: true,
+    }).then((discard) => {
+      askingToClose.current = false;
+      if (discard) onClose();
+    });
   };
 
   // Skips the first render: the signal's opening value is not a request.
@@ -143,7 +162,7 @@ export function TextEditor({ path: initialPath, parent, initialText, volumes = [
             <button
               className={`editor-preview-toggle ${previewOpen ? "on" : ""}`}
               onClick={() => setPreviewOpen((open) => !open)}
-              title={`${previewOpen ? "Hide" : "Show"} Markdown preview (⇧⌘P)`}
+              title={`${previewOpen ? "Hide" : "Show"} Markdown preview (${keyHint("⇧⌘P")})`}
               aria-label={`${previewOpen ? "Hide" : "Show"} Markdown preview`}
               aria-pressed={previewOpen}
             >

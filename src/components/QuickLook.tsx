@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { formatSize } from "../format";
 import * as ipc from "../ipc";
@@ -66,6 +66,7 @@ export function QuickLook({ entry, index, total, onStep, onClose, onShare, onMor
   const isDir = entry.kind === "dir" || (entry.kind === "symlink" && entry.linkToDir);
   const [page, setPage] = useState(1);
   const [pages, setPages] = useState(1);
+  const swipe = useRef<{ id: number; x: number; y: number } | null>(null);
 
   useEffect(() => setPage(1), [entry.path]);
 
@@ -171,8 +172,59 @@ export function QuickLook({ entry, index, total, onStep, onClose, onShare, onMor
           )}
         </header>
 
-        <div className="ql-body">
+        <div
+          className="ql-body"
+          // Flipping through a folder of documents is the feature's stated
+          // purpose, and until now a finger had no way to do it: prev/next
+          // were arrow keys only. A horizontal flick steps files (and pages,
+          // inside a PDF — `step` already prefers the document).
+          onPointerDown={(e) => {
+            if (e.pointerType !== "touch" || !e.isPrimary) return;
+            swipe.current = { id: e.pointerId, x: e.clientX, y: e.clientY };
+          }}
+          onPointerUp={(e) => {
+            const start = swipe.current;
+            swipe.current = null;
+            if (!start || start.id !== e.pointerId) return;
+            const target = e.target as HTMLElement;
+            // A zoomed picture pans, a media scrubber scrubs, and a wide code
+            // or CSV preview scrolls sideways; none of those horizontal drags
+            // mean "next file".
+            if (target.closest('[data-zoomed="true"], video, audio')) return;
+            if (pansHorizontally(target)) return;
+            const dx = e.clientX - start.x;
+            const dy = e.clientY - start.y;
+            if (Math.abs(dx) < 64 || Math.abs(dx) < Math.abs(dy) * 1.5) return;
+            step(dx < 0 ? 1 : -1);
+          }}
+          onPointerCancel={() => {
+            swipe.current = null;
+          }}
+        >
           <Body entry={entry} route={route} isDir={isDir} page={page} onPages={setPages} />
+          {total > 1 && (
+            // The same steps, visible: on a tablet the swipe needs something
+            // that says it exists, and a mouse on DeX has no arrow keys under
+            // its hand. Hidden on fine pointers by CSS.
+            <>
+              <button
+                className="ql-step prev"
+                onClick={() => step(-1)}
+                disabled={index <= 0 && !(route === "pdf" && page > 1)}
+                aria-label="Previous file"
+              >
+                <ChevronLeft size={18} />
+              </button>
+              <button
+                className="ql-step next"
+                onClick={() => step(1)}
+                disabled={index >= total - 1 && !(route === "pdf" && page < pages)}
+                aria-label="Next file"
+              >
+                <Chevron size={18} />
+              </button>
+            </>
+          )}
           {route === "pdf" && pages > 1 && (
             // Paging used to be arrow keys and nothing else, which on a phone
             // is not a way through a document at all.
@@ -241,6 +293,15 @@ function Body({
   // in-house suffix (or none at all), so give any non-binary file the same
   // bounded reader as .txt rather than making Quick Look a dead end.
   return <Text entry={entry} route="text" />;
+}
+
+/** Whether anything between the touch and the viewer body scrolls sideways —
+ * in which case the drag was that scroll, not a step to the next file. */
+function pansHorizontally(from: HTMLElement | null): boolean {
+  for (let node = from; node && !node.classList.contains("ql-body"); node = node.parentElement) {
+    if (node.scrollWidth > node.clientWidth + 1) return true;
+  }
+  return false;
 }
 
 function isSpaceKey(e: KeyboardEvent) {
@@ -331,6 +392,7 @@ function Folder({ entry }: { entry: Entry }) {
 function Picture({ entry }: { entry: Entry }) {
   const [src, setSrc] = useState<string | null>(null);
   const [detailRequested, setDetailRequested] = useState(false);
+  const [zoomed, setZoomed] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -361,6 +423,8 @@ function Picture({ entry }: { entry: Entry }) {
 
   const requestDetail = useCallback((zoom: number) => {
     if (zoom > 1.05) setDetailRequested(true);
+    // Tells the swipe handler above that horizontal drags are pans now.
+    setZoomed(zoom > 1.02);
   }, []);
 
   if (!src) {
@@ -372,7 +436,7 @@ function Picture({ entry }: { entry: Entry }) {
     );
   }
   return (
-    <div className="ql-picture">
+    <div className="ql-picture" data-zoomed={zoomed ? "true" : undefined}>
       <ZoomableImage
         src={ipc.fileSrc(src)}
         resetKey={entry.path}

@@ -10,7 +10,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::{channel, Receiver, Sender};
+use std::sync::mpsc::{channel, Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -165,7 +165,16 @@ fn debounce_loop(
         // the quiet window.
         let first = match raw_rx.recv_timeout(Duration::from_millis(50)) {
             Ok(p) => Some(p),
-            Err(_) => dirty_rx.try_recv().ok(),
+            Err(RecvTimeoutError::Timeout) => dirty_rx.try_recv().ok(),
+            // The notify watcher never constructed (inotify exhaustion,
+            // SELinux) or died, so `raw_rx` answers Disconnected *instantly*
+            // forever — spinning on it would pin a core, on a phone. Explicit
+            // pokes are the only source left; park on those instead.
+            Err(RecvTimeoutError::Disconnected) => match dirty_rx.recv() {
+                Ok(p) => Some(p),
+                // Both senders gone: the process is shutting down.
+                Err(_) => return,
+            },
         };
         let Some(first) = first else { continue };
         pending.insert(first);

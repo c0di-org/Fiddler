@@ -64,10 +64,16 @@ interface Gesture {
  */
 function swallowNextClick() {
   const stop = (event: MouseEvent) => {
+    // In DeX both hands are live at once: a real mouse click can land inside
+    // the grace window, and it is not the click this press produced. Chromium
+    // stamps clicks with their pointer type; where it doesn't, swallowing is
+    // the safer default it always was.
+    if ((event as PointerEvent).pointerType === "mouse") return;
+    window.removeEventListener("click", stop, true);
     event.stopPropagation();
     event.preventDefault();
   };
-  window.addEventListener("click", stop, { capture: true, once: true });
+  window.addEventListener("click", stop, { capture: true });
   window.setTimeout(() => window.removeEventListener("click", stop, true), CLICK_GRACE_MS);
 }
 

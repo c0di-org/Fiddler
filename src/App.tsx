@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { flushSync } from "react-dom";
 
 import { ContextMenu, type MenuItem } from "./components/ContextMenu";
 import { DetailList } from "./components/DetailList";
@@ -19,6 +20,7 @@ import { EjectBusyBanner, VolumeBlocked } from "./components/VolumeRow";
 import { TransferNoteBanner } from "./components/Banner";
 import type { FolderTouchDragHandlers } from "./components/touch-press";
 import { GridIcon } from "./components/icons";
+import { confirmDialog } from "./confirm";
 import { describeItems, parentOf, type DragItems, type DropVerb } from "./drag";
 import { addFavorite, loadFavorites, moveFavorite, saveFavorites } from "./favorites";
 import { invalidate as peekChanged, setShowHidden as setPeekHidden } from "./folder-peek";
@@ -1219,6 +1221,9 @@ export default function App() {
     [targets, selection, revealCursor]
   );
 
+  // One delete question at a time: Ctrl+Backspace autorepeats, and each press
+  // would otherwise stack another dialog over the first.
+  const askingToDelete = useRef(false);
   const trashSelected = useCallback(async () => {
     const paths = selected.filter((t) => t.entry).map((t) => t.path);
     if (paths.length === 0) return;
@@ -1230,8 +1235,21 @@ export default function App() {
       return;
     }
     if (!caps.trash) {
+      if (askingToDelete.current) return;
+      askingToDelete.current = true;
       const noun = paths.length === 1 ? "this item" : `these ${paths.length} items`;
-      if (!window.confirm(`Permanently delete ${noun}? This cannot be undone.`)) return;
+      // Fiddler's own dialog rather than `window.confirm`, which some Android
+      // WebViews answer "no" to without ever asking — see `confirmDialog`.
+      // `paths` is already captured, so nothing that happens behind the modal
+      // can change what a Delete deletes.
+      const sure = await confirmDialog({
+        title: `Permanently delete ${noun}?`,
+        detail: "Android has no Trash for these files. This cannot be undone.",
+        confirmLabel: "Delete",
+        danger: true,
+      });
+      askingToDelete.current = false;
+      if (!sure) return;
     }
     try {
       // Where each item landed is the only thing that can put it back, and
@@ -1499,7 +1517,6 @@ export default function App() {
       const created = await ipc.createFolder(store.path, "untitled folder");
       setSelection(new Set([created]));
       setRenamingId(created);
-      if (store.view === "icons") flash("Folder created — switch to List view to rename inline");
     } catch (e) {
       flash(String(e));
     }
@@ -1518,10 +1535,8 @@ export default function App() {
   }, [flash, volumes]);
 
   const commitRename = useCallback(
-    async (row: Row, name: string) => {
+    async (path: string | null, current: string, name: string) => {
       setRenamingId(null);
-      const path = row.kind === "entry" ? row.entry.path : row.kind === "worktree" ? row.wt.path : null;
-      const current = row.kind === "entry" ? row.entry.name : row.kind === "worktree" ? row.wt.name : "";
       if (!path || name === current) return;
       const at = locationCaps(path, volumes);
       if (!at.modify) {
@@ -1709,6 +1724,13 @@ export default function App() {
           items.push({ label: "New Text File", separatorBefore: true, onPick: newTextFile });
           items.push({ label: "New Folder", onPick: () => void newFolder() });
         }
+        // The eye's other home: on a phone the toolbar hides that button so
+        // the folder name keeps its room, and this is where the verb lands.
+        items.push({
+          label: store.showHidden ? "Hide Hidden Files" : "Show Hidden Files",
+          separatorBefore: true,
+          onPick: () => void store.setShowHidden(!store.showHidden),
+        });
         // Keyboard-only until now, which on a phone means it did not exist.
         if (targets.length > 0) {
           items.push({
@@ -1805,13 +1827,30 @@ export default function App() {
         focusView();
       };
     if (accessOpen) return () => setAccessOpen(false);
+    // An open rename field is the innermost thing left, and Back while it is
+    // up means "never mind the rename" — not "drop the selection behind it".
+    // `flushSync` so the input is unmounted before focus moves: an unmount
+    // fires no blur, while focusing past a still-mounted input would fire the
+    // blur that commits, turning the cancel into the rename itself.
+    if (renamingId)
+      return () => {
+        flushSync(() => setRenamingId(null));
+        focusView();
+      };
     // A selection is a state you are *in*, so it is a state Back can leave.
     // On a phone it is also the only way out of one that doesn't involve
     // finding a patch of empty grid to tap.
     if (selection.size > 0) return () => setSelection(new Set());
+    // Search results are a place too, and on a phone the tiny × in the field
+    // was the only way to leave them.
+    if (filter)
+      return () => {
+        setFilter("");
+        focusView();
+      };
     if (store.canBack) return () => void store.back();
     return null;
-  }, [menu, reader, editor, quickLook, accessOpen, selection.size, store.canBack, focusView]);
+  }, [menu, reader, editor, quickLook, accessOpen, renamingId, selection.size, filter, store.canBack, focusView]);
 
   const wantsBack = backStep !== null;
   useEffect(() => {
@@ -1960,6 +1999,21 @@ export default function App() {
         if (store.view === "icons") s.moveCursor(-1, e.shiftKey);
         else twist(false);
         break;
+      case "Home":
+        e.preventDefault();
+        s.moveCursor(-s.targets.length, e.shiftKey);
+        break;
+      case "End":
+        e.preventDefault();
+        s.moveCursor(s.targets.length, e.shiftKey);
+        break;
+      case "PageUp":
+      case "PageDown": {
+        e.preventDefault();
+        const jump = visibleRows() * perRow * (e.key === "PageDown" ? 1 : -1);
+        s.moveCursor(jump, e.shiftKey);
+        break;
+      }
       case "Enter":
         // Don't open a rename field that has nowhere to commit to: on a
         // device the name is the one thing that can't be edited.
@@ -1985,6 +2039,20 @@ export default function App() {
    */
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      // Something closer to the press — the focused view, a menu, a dialog —
+      // has already spent it.
+      if (e.defaultPrevented) return;
+      // Eaten before the input early-return below, because it must be eaten
+      // *everywhere*: Ctrl+R with the caret in the search field would
+      // otherwise reload the WebView and drop the whole session.
+      if (((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "r") || e.key === "F5") {
+        e.preventDefault();
+        if (editorActive.current || readerActive.current || kb.current.quickLook) return;
+        if (store.path) void store.invalidateDirs([store.path]);
+        const root = store.listing?.repoRoot;
+        if (root) void ipc.refreshRepo(root);
+        return;
+      }
       const el = e.target as HTMLElement;
       if (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable) {
         // Handing focus to the view blurs the field and leaves the arrow keys
@@ -2004,17 +2072,46 @@ export default function App() {
       // And for the reader, which owns the arrows, space and Escape while a
       // book is open.
       if (readerActive.current) return;
-      if (modifier && e.key.toLowerCase() === "c") { e.preventDefault(); s.copySelected(); return; }
-      if (modifier && e.key.toLowerCase() === "x") { e.preventDefault(); s.cutSelected(); return; }
-      if (modifier && e.key.toLowerCase() === "v") { e.preventDefault(); void s.paste(); return; }
-      if (modifier && e.key.toLowerCase() === "d") { e.preventDefault(); void s.duplicateSelected(); return; }
+      // Chords are matched on the lowercased key: with Shift held, Chromium —
+      // and so every Android WebView — reports "N" where WKWebView reports
+      // "n", which is how ⇧⌘N could work on a Mac and be dead on DeX.
+      // Punctuation shifts to a different character entirely ("." → ">"), so
+      // those chords also accept the physical `code`.
+      const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+      if (modifier && key === "c") { e.preventDefault(); s.copySelected(); return; }
+      if (modifier && key === "x") { e.preventDefault(); s.cutSelected(); return; }
+      if (modifier && key === "v") { e.preventDefault(); void s.paste(); return; }
+      if (modifier && key === "d") { e.preventDefault(); void s.duplicateSelected(); return; }
       // Before the switch, and before type-to-jump: ⌘Z is the first thing a
       // hand reaches for, and it must not depend on where the selection is.
-      if (modifier && !e.shiftKey && e.key.toLowerCase() === "z") { e.preventDefault(); void s.undo(); return; }
+      if (modifier && !e.shiftKey && key === "z") { e.preventDefault(); void s.undo(); return; }
+      // Select All from anywhere in the window, like the other app-wide verbs.
+      // With the view focused its own handler answers first and this is skipped
+      // by the defaultPrevented guard above.
+      if (modifier && key === "a") {
+        e.preventDefault();
+        setSelection(new Set(s.targets.map((t) => t.id)));
+        return;
+      }
+      // ⌘F / Ctrl+F is search everywhere else files are searched.
+      if (modifier && key === "f") {
+        e.preventDefault();
+        focusSearch();
+        return;
+      }
+      // Alt+arrows: the history keys every Android and Windows file manager
+      // answers, and what a DeX keyboard's muscle memory expects.
+      if (e.altKey && !modifier && e.key === "ArrowLeft") { e.preventDefault(); void store.back(); return; }
+      if (e.altKey && !modifier && e.key === "ArrowRight") { e.preventDefault(); void store.forward(); return; }
+      if (modifier && e.shiftKey && (key === "." || e.code === "Period")) {
+        e.preventDefault();
+        void store.setShowHidden(!store.showHidden);
+        return;
+      }
       const lead = [...s.selection].pop();
       const target = lead ? s.targets.find((t) => t.id === lead) : undefined;
 
-      switch (e.key) {
+      switch (key) {
         case "ArrowUp":
           if (modifier) {
             e.preventDefault();
@@ -2088,13 +2185,10 @@ export default function App() {
             void store.forward();
           }
           break;
-        case ".":
-          if (modifier && e.shiftKey) {
-            e.preventDefault();
-            void store.setShowHidden(!store.showHidden);
-          }
-          break;
         case "Escape":
+          // A menu popover is closing itself on this same press; one Escape
+          // should mean one step, not also throw the selection away.
+          if (document.querySelector(".ctx-menu, .ctx-sheet")) break;
           setFilter("");
           setSelection(new Set());
           focusView();
@@ -2102,8 +2196,25 @@ export default function App() {
       }
     };
 
+    // The thumb buttons on a DeX mouse. `mouseup` rather than `auxclick`
+    // because some WebView generations never synthesize the latter.
+    const onMouse = (e: MouseEvent) => {
+      if (e.button !== 3 && e.button !== 4) return;
+      if (editorActive.current || readerActive.current || kb.current.quickLook) return;
+      // A press with a menu open spends itself on closing the menu; also
+      // navigating underneath it would be two answers to one click.
+      if (document.querySelector(".ctx-menu, .ctx-sheet")) return;
+      e.preventDefault();
+      if (e.button === 3) void store.back();
+      else void store.forward();
+    };
+
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    window.addEventListener("mouseup", onMouse);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("mouseup", onMouse);
+    };
   }, []);
 
   // ----------------------------------------------------------------- view
@@ -2203,6 +2314,7 @@ export default function App() {
   return (
     <div
       className="app"
+      data-platform={platform}
       onDragOver={allowExternalDrop}
       onDragLeave={endExternalDrop}
       onDrop={acceptExternalDrop}
@@ -2330,6 +2442,15 @@ export default function App() {
                 if (t) void openTarget(t);
               }}
               onContextMenu={(c, x, y) => buildMenu(c ? (byId.get(c.id) ?? null) : null, x, y)}
+              renamingId={renamingId}
+              onRenameCommit={(c, v) => {
+                void commitRename(c.entry?.path ?? c.wt?.path ?? null, c.name, v);
+                focusView();
+              }}
+              onRenameCancel={() => {
+                setRenamingId(null);
+                focusView();
+              }}
               onBackgroundClick={() => setSelection(new Set())}
               onKeyDown={onViewKeyDown}
               label={viewLabel}
@@ -2363,7 +2484,11 @@ export default function App() {
               }}
               onContextMenu={(r, x, y) => buildMenu(r ? (byId.get(r.id) ?? null) : null, x, y)}
               onRenameCommit={(r, v) => {
-                void commitRename(r, v);
+                void commitRename(
+                  r.kind === "entry" ? r.entry.path : r.kind === "worktree" ? r.wt.path : null,
+                  r.kind === "entry" ? r.entry.name : r.kind === "worktree" ? r.wt.name : "",
+                  v
+                );
                 focusView();
               }}
               onRenameCancel={() => {
@@ -2589,6 +2714,22 @@ function transferText(progress: TransferProgress): string {
  */
 function focusView() {
   document.querySelector<HTMLElement>("[data-view-focus]")?.focus({ preventScroll: true });
+}
+
+/** The search field, for ⌘F. Found in the DOM for the same reason `focusView`
+ * is: there is exactly one, and it lives in a component this file only renders. */
+function focusSearch() {
+  const field = document.querySelector<HTMLInputElement>(".tb-search input");
+  field?.focus();
+  field?.select();
+}
+
+/** How many rows fit in the viewport, for PageUp and PageDown. */
+function visibleRows(): number {
+  const scroller = document.querySelector(".grid-scroller, .list-scroller");
+  const row = document.querySelector<HTMLElement>(".grid-row, .lrow");
+  if (!scroller || !row || row.offsetHeight === 0) return 5;
+  return Math.max(1, Math.floor(scroller.clientHeight / row.offsetHeight));
 }
 
 /** Approximate the grid's column count for arrow-key navigation. */

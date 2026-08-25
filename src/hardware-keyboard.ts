@@ -19,7 +19,6 @@ const BLOCKING_OVERLAY = '.ql-scrim, .editor-shell, [role="dialog"][aria-modal="
 export function installHardwareKeyboardUX() {
   if (platform !== "android") return;
 
-  let confirmingDelete = false;
   let menuView: HTMLElement | null = null;
 
   const restoreView = () => {
@@ -92,7 +91,7 @@ export function installHardwareKeyboardUX() {
       if (handleOpenMenu(event, menu, view)) return;
     }
 
-    if (!view || confirmingDelete || document.querySelector(BLOCKING_OVERLAY)) return;
+    if (!view || document.querySelector(BLOCKING_OVERLAY)) return;
 
     const intent = androidHardwareIntent(event);
     if (!intent) return;
@@ -107,30 +106,17 @@ export function installHardwareKeyboardUX() {
     if (intent === "delete") {
       event.preventDefault();
       event.stopImmediatePropagation();
-      confirmingDelete = true;
-      void confirmPermanentDelete(view).then((confirmed) => {
-        confirmingDelete = false;
-        if (!confirmed) return;
-        // Android has no Trash, so App.trashSelected() asks with window.confirm.
-        // The person has just answered that question in the keyboard-native
-        // dialog above. Suppress only that one synchronous duplicate prompt,
-        // then run the exact existing delete command.
-        const nativeConfirm = window.confirm;
-        window.confirm = () => true;
-        try {
-          dispatchShortcut("Backspace", "Backspace", { ctrlKey: true });
-        } finally {
-          window.confirm = nativeConfirm;
-        }
-      });
+      // App.trashSelected() raises its own keyboard-native confirm dialog —
+      // `confirmDialog` in confirm.ts — so the delete command is dispatched
+      // straight through and the question is asked exactly once.
+      dispatchShortcut("Backspace", "Backspace", { ctrlKey: true });
       return;
     }
 
     if (intent === "rename") {
-      // Inline rename only exists in List view. There, Fiddler's existing plain
-      // Enter handler is the rename command; keeping F2 as an alias preserves a
-      // way to rename after Android's plain Enter is reassigned to Open.
-      if (!view.classList.contains("list-view")) return;
+      // Fiddler's existing plain Enter handler is the rename command in both
+      // views; F2 stays as the alias because Android's plain Enter is
+      // reassigned to Open.
       event.preventDefault();
       event.stopImmediatePropagation();
       view.dispatchEvent(
@@ -199,55 +185,3 @@ function openContextMenuForCursor(view: HTMLElement) {
   });
 }
 
-function confirmPermanentDelete(view: HTMLElement): Promise<boolean> {
-  return new Promise((resolve) => {
-    const dialog = document.createElement("dialog");
-    dialog.className = "hardware-confirm";
-    dialog.setAttribute("aria-labelledby", "hardware-confirm-title");
-    dialog.setAttribute("aria-describedby", "hardware-confirm-detail");
-    dialog.innerHTML = `
-      <div class="hardware-confirm-copy">
-        <h2 id="hardware-confirm-title">Permanently delete the selected items?</h2>
-        <p id="hardware-confirm-detail">Android has no Trash for these files. This cannot be undone.</p>
-      </div>
-      <div class="hardware-confirm-actions">
-        <button type="button" data-cancel>Cancel</button>
-        <button type="button" class="danger" data-confirm>Delete</button>
-      </div>
-    `;
-
-    const cancel = dialog.querySelector<HTMLButtonElement>("[data-cancel]")!;
-    const confirm = dialog.querySelector<HTMLButtonElement>("[data-confirm]")!;
-    let settled = false;
-
-    const finish = (answer: boolean) => {
-      if (settled) return;
-      settled = true;
-      dialog.close();
-      dialog.remove();
-      view.focus({ preventScroll: true });
-      resolve(answer);
-    };
-
-    cancel.addEventListener("click", () => finish(false));
-    confirm.addEventListener("click", () => finish(true));
-    dialog.addEventListener("cancel", (event) => {
-      event.preventDefault();
-      finish(false);
-    });
-    dialog.addEventListener("keydown", (event) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        event.stopPropagation();
-        finish(false);
-      }
-    });
-
-    document.body.append(dialog);
-    dialog.showModal();
-    // Delete is the explicit default once the user has pressed Delete. A
-    // physical Enter therefore confirms, while Tab can still move to Cancel and
-    // Enter there cancels like an ordinary focused button.
-    requestAnimationFrame(() => confirm.focus({ preventScroll: true }));
-  });
-}

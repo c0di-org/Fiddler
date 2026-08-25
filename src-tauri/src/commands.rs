@@ -202,7 +202,10 @@ pub async fn list_dir(
                 // `entries`, and emitting would make the client re-fetch the very
                 // listing it is building.
                 Ok(st) => apply_status(&mut entries, &repo.work_root, &st),
-                Err(_) => status_pending = true,
+                // A *failed* pass is not a pending one: `status_pending`
+                // promises "an event will follow", and after an error nothing
+                // will. The listing goes out honest — valid, unbadged.
+                Err(_) => status_pending = false,
             }
             watcher.watch(&repo.work_root, true);
 
@@ -783,33 +786,44 @@ pub fn sidebar_places() -> Vec<Place> {
         // place a DeX user keeps projects. Fiddler is a file browser, so begin
         // at shared storage once the user grants All files access in Android's
         // settings screen (opened by MainActivity on first launch).
-        let shared = PathBuf::from("/storage/emulated/0");
-        return vec![
-            Place {
-                name: "Internal storage".into(),
-                path: shared
-                    .clone()
-                    .into_os_string()
-                    .to_string_lossy()
-                    .into_owned(),
-                icon: "home".into(),
-            },
-            Place {
-                name: "Downloads".into(),
-                path: shared.join("Download").to_string_lossy().into_owned(),
-                icon: "download".into(),
-            },
-            Place {
-                name: "Documents".into(),
-                path: shared.join("Documents").to_string_lossy().into_owned(),
-                icon: "doc".into(),
-            },
-            Place {
-                name: "Projects".into(),
-                path: shared.join("Projects").to_string_lossy().into_owned(),
-                icon: "folder".into(),
-            },
-        ];
+        //
+        // `EXTERNAL_STORAGE` rather than a bare hardcode: a work profile or a
+        // secondary user mounts shared storage at `/storage/emulated/<userId>`,
+        // and 0 there is a folder that exists and is somebody else's.
+        let shared = PathBuf::from(
+            std::env::var("EXTERNAL_STORAGE").unwrap_or_else(|_| "/storage/emulated/0".into()),
+        );
+        let mut out = vec![Place {
+            name: "Internal storage".into(),
+            path: shared
+                .clone()
+                .into_os_string()
+                .to_string_lossy()
+                .into_owned(),
+            icon: "home".into(),
+        }];
+        // Only folders that are actually there, like the desktop branch below:
+        // a stock device has no `Projects`, and a sidebar entry whose tap is an
+        // error teaches distrust of the sidebar. Before storage access is
+        // granted, *everything* answers EACCES — that counts as present for
+        // the standard folders every device ships with, or the first launch
+        // would show a sidebar with one row and never repopulate.
+        let denied = |p: &Path| {
+            matches!(std::fs::metadata(p), Err(ref e) if e.kind() == std::io::ErrorKind::PermissionDenied)
+        };
+        let mut push = |name: &str, p: PathBuf, icon: &str, standard: bool| {
+            if p.is_dir() || (standard && denied(&p)) {
+                out.push(Place {
+                    name: name.to_string(),
+                    path: p.to_string_lossy().into_owned(),
+                    icon: icon.to_string(),
+                });
+            }
+        };
+        push("Downloads", shared.join("Download"), "download", true);
+        push("Documents", shared.join("Documents"), "doc", true);
+        push("Projects", shared.join("Projects"), "folder", false);
+        out
     }
 
     #[cfg(not(target_os = "android"))]
@@ -1011,47 +1025,55 @@ pub fn create_text_file(
 /// place. Both Android's shared storage and desktop filesystems see either the
 /// old complete document or the new complete document, never a partial save.
 #[tauri::command]
-pub fn write_text_file(
+pub async fn write_text_file(
     state: State<'_, AppState>,
     path: String,
     text: String,
 ) -> Result<(), String> {
-    use std::io::Write;
+    let cache = state.cache.clone();
+    let watcher = state.watcher.clone();
+    // `sync_all` on Android's FUSE storage — or any slow disk — is unbounded
+    // wall-clock, so none of this runs on the thread that draws the window.
+    tauri::async_runtime::spawn_blocking(move || {
+        use std::io::Write;
 
-    local_only(&path)?;
-    let target = PathBuf::from(&path);
-    let meta = std::fs::metadata(&target).map_err(|e| e.to_string())?;
-    if !meta.is_file() {
-        return Err("that is not a regular file".into());
-    }
-    let parent = target.parent().ok_or("cannot write the filesystem root")?;
-    let file_name = target
-        .file_name()
-        .and_then(|n| n.to_str())
-        .ok_or("invalid file name")?;
-    let temp = parent.join(format!(".{file_name}.fiddler-save-{}", std::process::id()));
-    if temp.exists() {
-        return Err("a previous save is still being finalized; please try again".into());
-    }
+        local_only(&path)?;
+        let target = PathBuf::from(&path);
+        let meta = std::fs::metadata(&target).map_err(|e| e.to_string())?;
+        if !meta.is_file() {
+            return Err("that is not a regular file".into());
+        }
+        let parent = target.parent().ok_or("cannot write the filesystem root")?;
+        let file_name = target
+            .file_name()
+            .and_then(|n| n.to_str())
+            .ok_or("invalid file name")?;
+        let temp = parent.join(format!(".{file_name}.fiddler-save-{}", std::process::id()));
+        if temp.exists() {
+            return Err("a previous save is still being finalized; please try again".into());
+        }
 
-    let result = (|| -> Result<(), String> {
-        let mut file = std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&temp)
-            .map_err(|e| e.to_string())?;
-        file.write_all(text.as_bytes()).map_err(|e| e.to_string())?;
-        file.sync_all().map_err(|e| e.to_string())?;
-        std::fs::rename(&temp, &target).map_err(|e| e.to_string())?;
+        let result = (|| -> Result<(), String> {
+            let mut file = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&temp)
+                .map_err(|e| e.to_string())?;
+            file.write_all(text.as_bytes()).map_err(|e| e.to_string())?;
+            file.sync_all().map_err(|e| e.to_string())?;
+            std::fs::rename(&temp, &target).map_err(|e| e.to_string())?;
+            Ok(())
+        })();
+        if result.is_err() {
+            let _ = std::fs::remove_file(&temp);
+        }
+        result?;
+        cache.forget_discovery_under(parent);
+        watcher.poke(parent);
         Ok(())
-    })();
-    if result.is_err() {
-        let _ = std::fs::remove_file(&temp);
-    }
-    result?;
-    state.cache.forget_discovery_under(parent);
-    state.watcher.poke(parent);
-    Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -1375,7 +1397,12 @@ fn contains(outer: &Path, inner: &Path) -> bool {
 
 fn copy_tree(source: &Path, target: &Path) -> Result<(), String> {
     let metadata = std::fs::symlink_metadata(source).map_err(|e| e.to_string())?;
-    if metadata.is_dir() {
+    // A link is recreated, never followed — `std::fs::copy` through a link to
+    // a directory errors, and through a link to a file duplicates the bytes.
+    if metadata.file_type().is_symlink() {
+        let destination = std::fs::read_link(source).map_err(|e| e.to_string())?;
+        std::os::unix::fs::symlink(&destination, target).map_err(|e| e.to_string())?;
+    } else if metadata.is_dir() {
         std::fs::create_dir(target).map_err(|e| e.to_string())?;
         for child in std::fs::read_dir(source).map_err(|e| e.to_string())? {
             let child = child.map_err(|e| e.to_string())?;
@@ -1429,20 +1456,27 @@ pub struct Trashed {
 
 #[tauri::command]
 #[cfg(not(target_os = "android"))]
-pub fn trash_paths(state: State<'_, AppState>, paths: Vec<String>) -> Result<Vec<Trashed>, String> {
-    for path in &paths {
-        local_only(path)?;
-    }
-    // Always the Trash, never `remove_file` — a file browser must not make deletions
-    // that the user cannot walk back.
-    let trashed = trash_reporting(&paths)?;
-    for p in &paths {
-        if let Some(parent) = Path::new(p).parent() {
-            state.cache.forget_discovery_under(parent);
-            state.watcher.poke(parent);
+pub async fn trash_paths(state: State<'_, AppState>, paths: Vec<String>) -> Result<Vec<Trashed>, String> {
+    let cache = state.cache.clone();
+    let watcher = state.watcher.clone();
+    // Trashing a big tree is unbounded work; keep it off the window's thread.
+    tauri::async_runtime::spawn_blocking(move || {
+        for path in &paths {
+            local_only(path)?;
         }
-    }
-    Ok(trashed)
+        // Always the Trash, never `remove_file` — a file browser must not make
+        // deletions that the user cannot walk back.
+        let trashed = trash_reporting(&paths)?;
+        for p in &paths {
+            if let Some(parent) = Path::new(p).parent() {
+                cache.forget_discovery_under(parent);
+                watcher.poke(parent);
+            }
+        }
+        Ok(trashed)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// macOS hands back where each item landed, so `restore_trashed` can put it
@@ -1484,43 +1518,51 @@ fn trash_reporting(paths: &[String]) -> Result<Vec<Trashed>, String> {
 /// one operation that cannot itself lose anything.
 #[tauri::command]
 #[cfg(not(target_os = "android"))]
-pub fn restore_trashed(
+pub async fn restore_trashed(
     state: State<'_, AppState>,
     items: Vec<Trashed>,
 ) -> Result<Vec<String>, String> {
-    let mut restored = Vec::new();
-    let mut touched: Vec<PathBuf> = Vec::new();
-    for Trashed { trashed, original } in items {
-        local_only(&original)?;
-        let from = PathBuf::from(&trashed);
-        let to = PathBuf::from(&original);
-        let name = to.file_name().and_then(|n| n.to_str()).unwrap_or(&original).to_owned();
-        if !from.exists() {
-            return Err(format!("“{name}” is no longer in the Trash"));
+    let cache = state.cache.clone();
+    let watcher = state.watcher.clone();
+    // A restore can be a full cross-device copy (see `move_one`), so it gets
+    // the same worker a transfer does.
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut restored = Vec::new();
+        let mut touched: Vec<PathBuf> = Vec::new();
+        for Trashed { trashed, original } in items {
+            local_only(&original)?;
+            let from = PathBuf::from(&trashed);
+            let to = PathBuf::from(&original);
+            let name = to.file_name().and_then(|n| n.to_str()).unwrap_or(&original).to_owned();
+            if !from.exists() {
+                return Err(format!("“{name}” is no longer in the Trash"));
+            }
+            if to.exists() {
+                return Err(format!("Something else is called “{name}” now"));
+            }
+            let parent = to.parent().ok_or("cannot restore to the filesystem root")?;
+            if !parent.is_dir() {
+                return Err(format!("The folder “{name}” came from is gone"));
+            }
+            move_one(&from, &to).map_err(|e| format!("Couldn’t put “{name}” back: {e}"))?;
+            if !touched.iter().any(|seen| seen == parent) {
+                touched.push(parent.to_path_buf());
+            }
+            restored.push(original);
         }
-        if to.exists() {
-            return Err(format!("Something else is called “{name}” now"));
+        for dir in touched {
+            cache.forget_discovery_under(&dir);
+            watcher.poke(&dir);
         }
-        let parent = to.parent().ok_or("cannot restore to the filesystem root")?;
-        if !parent.is_dir() {
-            return Err(format!("The folder “{name}” came from is gone"));
-        }
-        move_one(&from, &to).map_err(|e| format!("Couldn’t put “{name}” back: {e}"))?;
-        if !touched.iter().any(|seen| seen == parent) {
-            touched.push(parent.to_path_buf());
-        }
-        restored.push(original);
-    }
-    for dir in touched {
-        state.cache.forget_discovery_under(&dir);
-        state.watcher.poke(&dir);
-    }
-    Ok(restored)
+        Ok(restored)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
 #[cfg(target_os = "android")]
-pub fn trash_paths(state: State<'_, AppState>, paths: Vec<String>) -> Result<Vec<Trashed>, String> {
+pub async fn trash_paths(state: State<'_, AppState>, paths: Vec<String>) -> Result<Vec<Trashed>, String> {
     // Android does not expose a general-purpose Trash API for arbitrary paths.
     // The UI calls this only after an explicit permanent-delete confirmation.
     // Use `symlink_metadata` so deleting a symlink removes the link itself,
@@ -1529,36 +1571,45 @@ pub fn trash_paths(state: State<'_, AppState>, paths: Vec<String>) -> Result<Vec
     // Nothing comes back, and nothing can: there is no Trash for the deleted
     // item to be sitting in. `caps.trash` is already false here, so the UI has
     // asked before getting this far.
+    //
+    // On a worker, always: `remove_dir_all` over a `node_modules` on FUSE
+    // storage is seconds-to-minutes, and on the main thread that is an ANR —
+    // the system killing the app halfway through a permanent delete.
     if paths.is_empty() {
         return Ok(Vec::new());
     }
-
-    let mut parents = Vec::with_capacity(paths.len());
-    for path in &paths {
-        local_only(path)?;
-        let target = Path::new(path);
-        let parent = target.parent().ok_or("cannot delete the filesystem root")?;
-        // Check every target before making any change. This avoids a stale
-        // multi-selection partly succeeding just because one entry vanished.
-        std::fs::symlink_metadata(target).map_err(|e| e.to_string())?;
-        parents.push(parent.to_path_buf());
-    }
-
-    for path in &paths {
-        let target = Path::new(path);
-        let meta = std::fs::symlink_metadata(target).map_err(|e| e.to_string())?;
-        if meta.file_type().is_dir() {
-            std::fs::remove_dir_all(target).map_err(|e| e.to_string())?;
-        } else {
-            std::fs::remove_file(target).map_err(|e| e.to_string())?;
+    let cache = state.cache.clone();
+    let watcher = state.watcher.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut parents = Vec::with_capacity(paths.len());
+        for path in &paths {
+            local_only(path)?;
+            let target = Path::new(path);
+            let parent = target.parent().ok_or("cannot delete the filesystem root")?;
+            // Check every target before making any change. This avoids a stale
+            // multi-selection partly succeeding just because one entry vanished.
+            std::fs::symlink_metadata(target).map_err(|e| e.to_string())?;
+            parents.push(parent.to_path_buf());
         }
-    }
 
-    for parent in parents {
-        state.cache.forget_discovery_under(&parent);
-        state.watcher.poke(&parent);
-    }
-    Ok(Vec::new())
+        for path in &paths {
+            let target = Path::new(path);
+            let meta = std::fs::symlink_metadata(target).map_err(|e| e.to_string())?;
+            if meta.file_type().is_dir() {
+                std::fs::remove_dir_all(target).map_err(|e| e.to_string())?;
+            } else {
+                std::fs::remove_file(target).map_err(|e| e.to_string())?;
+            }
+        }
+
+        for parent in parents {
+            cache.forget_discovery_under(&parent);
+            watcher.poke(&parent);
+        }
+        Ok(Vec::new())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Nothing here ever reported a trashed location, so nothing can ask to have

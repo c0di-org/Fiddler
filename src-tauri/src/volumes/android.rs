@@ -155,7 +155,12 @@ fn space(path: &str) -> Option<Space> {
     }
     // `f_frsize` is the fragment size the block counts are in; `f_bsize` is a
     // hint about efficient I/O and is the wrong multiplier here.
+    //
+    // The casts are redundant on aarch64 (clippy notices) but load-bearing on
+    // 32-bit Android, where these `statvfs` fields are u32.
+    #[allow(clippy::unnecessary_cast)]
     let block = stat.f_frsize as u64;
+    #[allow(clippy::unnecessary_cast)]
     Some(Space {
         // `f_bavail` rather than `f_bfree`, for the reason given in `mac.rs`:
         // the difference is reserved space this app cannot write into.

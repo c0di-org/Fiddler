@@ -158,8 +158,10 @@ pub fn read_head(git_dir: &Path) -> (Option<String>, Option<String>, bool) {
         let full = r.trim();
         let short = full.strip_prefix("refs/heads/").unwrap_or(full).to_string();
         (None, Some(short), false)
-    } else if raw.len() >= 7 {
-        (Some(raw[..7].to_string()), None, true)
+    } else if let Some(short) = raw.get(..7) {
+        // `get`, not a slice: a garbage HEAD whose seventh byte falls inside
+        // a multi-byte character must not abort the process.
+        (Some(short.to_string()), None, true)
     } else {
         (None, None, true)
     }

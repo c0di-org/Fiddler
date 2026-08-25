@@ -69,7 +69,10 @@ when they live outside the repo tree, and `missing` when the folder is gone and
 - **One git pass per repo, not per folder.** `git status --porcelain=v2 -z` runs
   once, is parsed into a path→code map with per-directory rollups, and is cached
   until an fsevents watcher says otherwise. `--ignored=traditional` collapses
-  `node_modules/` to one entry instead of listing everything inside it.
+  `node_modules/` to one entry instead of listing everything inside it. On
+  Android — where an app bundle has no `git` to run — the same pass is computed
+  in-process with gitoxide, oracle-tested against the subprocess's output so
+  the dots mean the same thing on every platform.
 - **Highlighting that tracks the viewport, not the file.** One linear scan stores
   a byte per line; only the sixty lines on screen are ever tokenised. A lockfile
   opens like a text file, because to Fiddler it is one.
@@ -96,6 +99,15 @@ when they live outside the repo tree, and `missing` when the folder is gone and
 | `⌘D` `⌘Z` | Duplicate, undo |
 | `⌘⌫` | Move to Trash |
 | `⇧⌘N` `⌘N` | New folder / new text file |
+| `⌘F` | Search |
+| `Home` `End` `PgUp` `PgDn` | Jump and page through the folder |
+| `F5` `⌘R` | Refresh — for devices and folders nothing watches |
+
+On Android and the web, `⌘` is `Ctrl` — the tooltips say so themselves. A DeX
+keyboard also gets its own dialect: `↵` opens (so `F2` renames), `Delete`
+deletes after its own keyboard-native confirmation, `Alt+←`/`Alt+→` and the
+mouse's thumb buttons walk history, and the `Menu` key or `⇧F10` opens the
+context menu on whatever the cursor is on.
 
 In the PDF reader:
 
@@ -144,9 +156,11 @@ npm run deploy       # build, then wrangler deploy
 ```
 
 **Android / Samsung DeX** — the wide keyboard-and-pointer layout, and the
-narrow one held in a hand. Browsing, git status, previews, and a full-screen
-text editor. Deletions are permanent, with a confirmation, because Android
-gives Fiddler no system Trash.
+narrow one held in a hand. Browsing, git status — computed in-process, since
+there is no `git` on a phone — real downscaled thumbnails (HEIF included,
+which is what a Samsung camera actually shoots), previews, and a full-screen
+text editor. Deletions are permanent, with a confirmation dialog of Fiddler's
+own, because Android gives Fiddler no system Trash.
 
 A finger gets the same three verbs a pointer has, spelled its own way. **Long
 press** takes an item — a haptic tick and a selection while the finger is still
@@ -155,10 +169,14 @@ of multi-select: press once, then tap the rest. The status bar becomes the
 action bar, with the overflow opening the very same menu a right-click opens.
 A press on something already selected goes straight to that menu.
 
+In Quick Look, a **horizontal flick** steps to the next file — pages first,
+inside a PDF — with visible chevrons saying the gesture exists; renaming is
+inline in both views, under the icon or in the row.
+
 **Back** walks the ladder Escape walks on the desktop — menu, editor, Quick
-Look, selection — and then the folder you came from, rather than closing the
-app. **Share** hands the selection to Android's chooser, from the menu, the
-action bar, or Quick Look.
+Look, a rename in progress, selection, search results — and then the folder
+you came from, rather than closing the app. **Share** hands the selection to
+Android's chooser, from the menu, the action bar, or Quick Look.
 
 Which hand is holding it is worked out from the last pointer down rather than
 at build time, so DeX with a mouse on a monitor behaves like a desktop and the

@@ -1,6 +1,6 @@
 [package]
 name = "fiddler"
-version = "0.1.7"
+version = "0.2.0"
 description = "A git-native file browser"
 edition = "2021"
 # 1.85 is mtp-rs's floor; everything else here still builds on 1.77.
@@ -76,6 +76,10 @@ bytes = "1"
 [target.'cfg(target_os = "android")'.dependencies]
 jni = "0.21"
 ndk-context = "0.1"
+# There is no `git` binary inside an Android app, so status is computed
+# in-process there — see git/status_gix.rs, which is oracle-tested against the
+# real subprocess's porcelain output. Desktop keeps shelling out to git.
+gix = { version = "0.87", default-features = false, features = ["sha1", "status", "index"] }
 
 # How full a disk is, on both platforms that have removable ones: `getmntinfo`
 # and `statfs` on macOS, `statvfs` on Android. There is no framework answer to
