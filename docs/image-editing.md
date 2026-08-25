@@ -229,7 +229,7 @@ computer can re-encode faster than a person can read the number off the last
 attempt.
 
 `src/edit/budget.ts` is the search, with the encoder injected so it has no
-opinion about canvases and its tests run in a second instead of an hour. Seven
+opinion about canvases and its tests run in a second instead of an hour. Nine
 tests, all passing.
 
 **What it trades away, in order.** Between a full-size photo at good quality and
