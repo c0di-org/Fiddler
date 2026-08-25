@@ -1,6 +1,6 @@
 [package]
 name = "fiddler"
-version = "0.2.0"
+version = "0.2.1"
 description = "A git-native file browser"
 edition = "2021"
 # 1.85 is mtp-rs's floor; everything else here still builds on 1.77.
