@@ -1,0 +1,10 @@
+<!-- Android 13's themed icon: one flat shape the launcher recolours to the
+     user's wallpaper palette. It cannot be derived from the master artwork,
+     which is a gradient render with no silhouette to extract — so this is the
+     same folder stated as a single filled path, tab and all, sized to the
+     adaptive safe zone (the middle 720 of 1080). -->
+<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1080" viewBox="0 0 1080 1080">
+  <g transform="translate(540 540) scale(0.85) translate(-540 -540)">
+    <path fill="#fff" d="M232 356h268c14 0 27 6 35 18l42 58h252c40 0 72 32 72 72v320c0 40-32 72-72 72H232c-40 0-72-32-72-72V428c0-40 32-72 72-72z"/>
+  </g>
+</svg>

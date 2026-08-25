@@ -4,19 +4,22 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$repo_root"
 
-# Tauri owns the platform matrix; the manifest keeps Android adaptive layers
-# separate so the desktop tile is not merely shrunk into the launcher mask.
+# Tauri owns the platform matrix. The master is assets/app-icon.png — the
+# artwork exactly as it was supplied — and the manifest names the two layers
+# Android needs beside it, because an adaptive icon is composited from a
+# foreground and a background rather than being one picture.
 npm run tauri icon src-tauri/icons/icon-manifest.json
 
 # Keep Fiddler's one extra 64px desktop asset in sync without suppressing the
 # default Tauri outputs.
 rm -rf /tmp/fiddler-icon-64
-npm run tauri icon -- -p 64 -o /tmp/fiddler-icon-64 src-tauri/icons/icon.svg
+npm run tauri icon -- -p 64 -o /tmp/fiddler-icon-64 assets/app-icon.png
 cp /tmp/fiddler-icon-64/64x64.png src-tauri/icons/64x64.png
 
 cp src-tauri/icons/ios/AppIcon-60x60@3x.png public/apple-touch-icon.png
 cp src-tauri/icons/icon.ico public/favicon.ico
-cp src-tauri/icons/icon.svg public/favicon.svg
+# No favicon.svg: the master is a raster render with no vector behind it, so
+# the tab icon is the .ico and the apple-touch PNG. index.html says the same.
 
 # Nothing to mirror for Android: because the generated project is checked in,
 # `tauri icon` writes the launcher resources straight into

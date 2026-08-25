@@ -5,10 +5,11 @@
     <!-- interactive-widget: Chrome on Android otherwise leaves the layout at full
          height under the keyboard, which buries the editor's caret and footer. -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content" />
-    <!-- The .ico is the fallback for browsers that won't take an SVG favicon,
-         and the answer to the bare /favicon.ico every crawler asks for. -->
-    <link rel="icon" href="/favicon.ico" sizes="32x32" />
-    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <!-- The .ico carries the 16/32/48px tab icon and answers the bare
+         /favicon.ico every crawler asks for; the apple-touch PNG is the one a
+         phone puts on a home screen. There is no SVG favicon: the app icon is
+         a raster master with no vector behind it. -->
+    <link rel="icon" href="/favicon.ico" sizes="any" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <title>Fiddler</title>
   </head>
