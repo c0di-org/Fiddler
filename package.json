@@ -12,7 +12,7 @@
     "preview:web": "vite preview --mode web --outDir dist-web",
     "deploy": "npm run build:web && wrangler deploy",
     "tauri": "tauri",
-    "test": "node --test --experimental-strip-types src/*.test.ts src/preview/*.test.ts src/backend/web/*.test.ts"
+    "test": "node --test --experimental-strip-types src/*.test.ts src/edit/*.test.ts src/preview/*.test.ts src/backend/web/*.test.ts"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",
