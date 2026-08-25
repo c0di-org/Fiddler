@@ -328,6 +328,22 @@ const backend: Backend = {
     invalidate(path);
   },
 
+  async createFile(parent, name, bytes) {
+    const path = vfs.childPath(parent, vfs.validName(name));
+    if (await vfs.stat(path)) throw new Error(`“${name}” already exists`);
+    await vfs.writeBlob(path, new Blob([bytes as BlobPart]));
+    return path;
+  },
+
+  async writeFile(path, bytes) {
+    await vfs.writeBlob(path, new Blob([bytes as BlobPart]));
+    invalidate(path);
+  },
+
+  async freeName(parent, name) {
+    return vfs.basename(await vfs.freshPath(parent, vfs.validName(name)));
+  },
+
   async renamePath(path, newName) {
     const moved = await vfs.rename(path, newName);
     invalidate(path);

@@ -1021,6 +1021,166 @@ pub fn create_text_file(
     Ok(target.to_string_lossy().into_owned())
 }
 
+/// Read a header the front end sent alongside a raw body, undoing the
+/// percent-encoding it was wrapped in.
+///
+/// Headers are ASCII, and filenames are not: "café.jpg" or a Korean folder name
+/// cannot travel in a `HeaderMap` as itself. The JS side sends every one of
+/// these through `encodeURIComponent`, so this is the other half of that.
+fn text_header(request: &tauri::ipc::Request<'_>, key: &str) -> Result<String, String> {
+    let raw = request
+        .headers()
+        .get(key)
+        .ok_or_else(|| format!("missing {key}"))?
+        .to_str()
+        .map_err(|_| format!("{key} is not valid ASCII"))?;
+    percent_decode(raw).ok_or_else(|| format!("{key} is not valid percent-encoded UTF-8"))
+}
+
+/// Percent-decoding, which is small enough to own rather than take a crate for.
+fn percent_decode(input: &str) -> Option<String> {
+    let bytes = input.as_bytes();
+    let mut out: Vec<u8> = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' {
+            let hex = input.get(i + 1..i + 3)?;
+            out.push(u8::from_str_radix(hex, 16).ok()?);
+            i += 3;
+        } else {
+            out.push(bytes[i]);
+            i += 1;
+        }
+    }
+    String::from_utf8(out).ok()
+}
+
+/// The bytes of a raw-body request, refusing a JSON one.
+fn raw_body(request: &tauri::ipc::Request<'_>) -> Result<Vec<u8>, String> {
+    match request.body() {
+        tauri::ipc::InvokeBody::Raw(bytes) => Ok(bytes.clone()),
+        tauri::ipc::InvokeBody::Json(_) => {
+            Err("expected the file's bytes as the request body, not as JSON".into())
+        }
+    }
+}
+
+/// Create a file from raw bytes without ever overwriting an existing item.
+///
+/// The bytes arrive as the request body rather than inside the JSON payload,
+/// which is not a micro-optimisation: the only caller is the image editor and
+/// its payloads are megabytes. Base64 through the JSON bridge inflates them by
+/// a third and copies the buffer three times — once to encode, once to parse,
+/// once to decode — on a phone whose WebView is killed for less.
+///
+/// The counterpart of `create_text_file`, and conservative for the same reason:
+/// a typo in a new filename must not be able to erase a neighbouring photograph.
+#[tauri::command]
+pub async fn create_file(
+    state: State<'_, AppState>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<String, String> {
+    let parent = text_header(&request, "x-parent")?;
+    let name = text_header(&request, "x-name")?;
+    let bytes = raw_body(&request)?;
+
+    let cache = state.cache.clone();
+    let watcher = state.watcher.clone();
+    // Same reasoning as `write_text_file`: `sync_all` on Android's shared
+    // storage is unbounded wall-clock and does not belong on the UI thread.
+    tauri::async_runtime::spawn_blocking(move || {
+        use std::io::Write;
+
+        local_only(&parent)?;
+        let target = safe_child(&parent, &name)?;
+        match std::fs::OpenOptions::new().write(true).create_new(true).open(&target) {
+            Ok(mut file) => {
+                file.write_all(&bytes).map_err(|e| e.to_string())?;
+                file.sync_all().map_err(|e| e.to_string())?;
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                return Err(format!("\u{201c}{name}\u{201d} already exists here"));
+            }
+            Err(e) => return Err(e.to_string()),
+        }
+        cache.forget_discovery_under(Path::new(&parent));
+        watcher.poke(Path::new(&parent));
+        Ok(target.to_string_lossy().into_owned())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Replace a file's bytes through a sibling temporary file, then rename it into
+/// place. The binary counterpart of `write_text_file`, and identical in shape:
+/// either the old whole file or the new whole file is on disk, never a half of
+/// one. What a second save from the image editor goes through, once the first
+/// has decided where the picture lives.
+#[tauri::command]
+pub async fn write_file(
+    state: State<'_, AppState>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<(), String> {
+    let path = text_header(&request, "x-path")?;
+    let bytes = raw_body(&request)?;
+
+    let cache = state.cache.clone();
+    let watcher = state.watcher.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        use std::io::Write;
+
+        local_only(&path)?;
+        let target = PathBuf::from(&path);
+        let meta = std::fs::metadata(&target).map_err(|e| e.to_string())?;
+        if !meta.is_file() {
+            return Err("that is not a regular file".into());
+        }
+        let parent = target.parent().ok_or("cannot write the filesystem root")?;
+        let file_name = target
+            .file_name()
+            .and_then(|n| n.to_str())
+            .ok_or("invalid file name")?;
+        let temp = parent.join(format!(".{file_name}.fiddler-save-{}", std::process::id()));
+        if temp.exists() {
+            return Err("a previous save is still being finalized; please try again".into());
+        }
+
+        let result = (|| -> Result<(), String> {
+            let mut file = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&temp)
+                .map_err(|e| e.to_string())?;
+            file.write_all(&bytes).map_err(|e| e.to_string())?;
+            file.sync_all().map_err(|e| e.to_string())?;
+            std::fs::rename(&temp, &target).map_err(|e| e.to_string())?;
+            Ok(())
+        })();
+        if result.is_err() {
+            let _ = std::fs::remove_file(&temp);
+        }
+        result?;
+        cache.forget_discovery_under(parent);
+        watcher.poke(parent);
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// A free name for a new file in `parent`, following the same "copy" convention
+/// a paste does. What makes Save a Copy land beside the original as
+/// "photo copy.jpg" rather than asking the person to invent a filename.
+#[tauri::command]
+pub fn free_name(parent: String, name: String) -> Result<String, String> {
+    local_only(&parent)?;
+    let chosen = copy_name(Path::new(&parent), &name, &HashSet::new());
+    Ok(chosen
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or(name))
+}
+
 /// Replace a text file through a sibling temporary file, then rename it into
 /// place. Both Android's shared storage and desktop filesystems see either the
 /// old complete document or the new complete document, never a partial save.

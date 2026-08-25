@@ -122,6 +122,17 @@ export interface Backend {
   createTextFile(parent: string, name: string, text: string): Promise<string>;
   /** Writes a text file atomically, so a save never leaves a half-written file. */
   writeTextFile(path: string, text: string): Promise<void>;
+  /** Creates a file from bytes, refusing a name already in use. The binary
+   * counterpart of `createTextFile`, and where a picture leaving the image
+   * editor for the first time lands. */
+  createFile(parent: string, name: string, bytes: Uint8Array): Promise<string>;
+  /** Replaces a file's bytes atomically. The binary `writeTextFile`, and what a
+   * second save from the editor goes through once the first has chosen a home. */
+  writeFile(path: string, bytes: Uint8Array): Promise<void>;
+  /** A name not yet taken in `parent`, following the "copy" convention a paste
+   * uses. Asked for rather than invented locally because only the backend can
+   * see what is already there. */
+  freeName(parent: string, name: string): Promise<string>;
   renamePath(path: string, newName: string): Promise<string>;
   /** `job` is chosen by the caller, not returned by this call — the call does
    * not resolve until the copy is over, which is exactly the span in which

@@ -3,7 +3,7 @@ import { platform } from "./platform";
 
 const VIEW = "[data-view-focus]";
 const MENU = ".ctx-menu, .ctx-sheet";
-const BLOCKING_OVERLAY = '.ql-scrim, .editor-shell, [role="dialog"][aria-modal="true"], [role="alertdialog"][aria-modal="true"]';
+const BLOCKING_OVERLAY = '.ql-scrim, .editor-shell, .image-editor, [role="dialog"][aria-modal="true"], [role="alertdialog"][aria-modal="true"]';
 
 /**
  * Make the Android build behave like a desktop file manager when it is being

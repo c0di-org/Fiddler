@@ -4610,6 +4610,508 @@ li.md-task {
 .access-revoke:disabled { color: var(--fg-faint); cursor: default; }
 .access-revoke:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
+/* ========================================================= image editor ==
+ *
+ * The second screen in Fiddler that isn't a file browser, and it borrows the
+ * reader's premise: the room is dark and neutral so that the only thing being
+ * judged for colour is the picture. Everything else here follows from three
+ * rules.
+ *
+ * One strip of tools, and only one. An editor whose chrome grows as you pick
+ * things up is one that is mostly chrome by the time you have picked up three.
+ *
+ * The contextual line is a single line, always present, never two. It is the
+ * one place options live, so there is never a question about where a setting
+ * went — and the picture never moves when a tool changes, because the line was
+ * already there.
+ *
+ * The tools are at the bottom. On a phone that is where a thumb is; on a
+ * desktop it is where the eye already is after looking at the picture. Putting
+ * them down one side would have been more familiar and worse on both.
+ */
+
+.image-editor {
+  position: fixed;
+  inset: 0;
+  z-index: 72;
+  display: grid;
+  grid-template-rows: auto auto 1fr auto;
+  overflow: hidden;
+  background: #151517;
+  color: rgba(255, 255, 255, 0.92);
+  animation: reader-in var(--med) var(--ease);
+  user-select: none;
+  -webkit-user-select: none;
+  /* Every gesture inside belongs to a tool. Letting the browser keep any of
+     them means a stroke that scrolls the page instead of drawing. */
+  touch-action: none;
+  overscroll-behavior: contain;
+}
+
+/* ------------------------------------------------------------------ bar -- */
+
+.ed-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.ed-title {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  line-height: 1.25;
+}
+
+.ed-name {
+  font-size: 13px;
+  font-weight: 590;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ed-sub {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.5);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ed-icon {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  flex: none;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.ed-icon:hover:not(:disabled) { background: rgba(255, 255, 255, 0.1); }
+.ed-icon:disabled { opacity: 0.3; cursor: default; }
+.ed-icon[aria-pressed="true"] { background: rgba(255, 255, 255, 0.16); }
+
+.ed-save {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  height: 32px;
+  padding: 0 13px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--accent);
+  color: #fff;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 590;
+  cursor: pointer;
+}
+
+.ed-save:disabled { opacity: 0.4; cursor: default; }
+
+/* -------------------------------------------------------------- context -- */
+
+.ed-context {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 40px;
+  padding: 4px 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  /* The line holds whatever the tool needs and the turn buttons always. On a
+     narrow screen that can be more than fits, and a wrapped second row would
+     move the picture every time a tool changed — so it scrolls instead. */
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+
+.ed-context::-webkit-scrollbar { display: none; }
+
+.ed-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+}
+
+/* The turns sit at the far end, away from the tool's own options, because they
+   are the two things on this line that are never about the current tool. */
+.ed-turns { margin-left: auto; }
+
+.ed-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 28px;
+  padding: 0 10px;
+  flex: none;
+  border: 0;
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.09);
+  color: rgba(255, 255, 255, 0.85);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.ed-chip:hover { background: rgba(255, 255, 255, 0.16); }
+.ed-chip[aria-pressed="true"] { background: rgba(255, 255, 255, 0.24); color: #fff; }
+.ed-chip.strong { background: var(--accent); color: #fff; }
+.ed-chip.strong:hover { filter: brightness(1.1); }
+
+.ed-hint {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.42);
+  white-space: nowrap;
+  flex: none;
+}
+
+.ed-slider {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.6);
+  flex: none;
+}
+
+.ed-slider input { width: 110px; accent-color: var(--accent); }
+.ed-slider.wide input { width: 100%; }
+.ed-slider b {
+  font-variant-numeric: tabular-nums;
+  color: rgba(255, 255, 255, 0.9);
+  min-width: 2ch;
+}
+
+.ed-swatches, .ed-widths { display: flex; gap: 4px; flex: none; }
+
+.ed-swatch {
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: 50%;
+  cursor: pointer;
+  /* The ring rather than a border, so a white swatch on a dark bar is still
+     visibly a circle and selecting it does not change its size. */
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.35);
+}
+
+.ed-swatch[aria-pressed="true"] {
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.35), 0 0 0 2px #151517, 0 0 0 4px rgba(255, 255, 255, 0.9);
+}
+
+.ed-width {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 24px;
+  border: 0;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.09);
+  cursor: pointer;
+}
+
+.ed-width i {
+  display: block;
+  width: 15px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.85);
+}
+
+.ed-width[aria-pressed="true"] { background: rgba(255, 255, 255, 0.26); }
+
+/* ---------------------------------------------------------------- stage -- */
+
+.ed-stage {
+  position: relative;
+  display: grid;
+  place-items: center;
+  min-height: 0;
+  padding: 16px;
+  overflow: hidden;
+}
+
+.ed-paper {
+  position: relative;
+  /* The chequerboard is what says "this part is not there" — without it a hole
+     punched in a picture on a dark background reads as a black hole, which is
+     exactly what it will become if it is saved as a JPEG. */
+  background-color: #2a2a2e;
+  background-image:
+    linear-gradient(45deg, #37373c 25%, transparent 25%, transparent 75%, #37373c 75%),
+    linear-gradient(45deg, #37373c 25%, transparent 25%, transparent 75%, #37373c 75%);
+  background-size: 16px 16px;
+  background-position: 0 0, 8px 8px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+}
+
+.ed-pic, .ed-overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.ed-overlay { pointer-events: none; }
+
+/* The pointer says what the tool will do before it does it. */
+.image-editor[data-tool="marquee"] .ed-stage { cursor: crosshair; }
+.image-editor[data-tool="wand"] .ed-stage { cursor: cell; }
+.image-editor[data-tool="shape"] .ed-stage,
+.image-editor[data-tool="pen"] .ed-stage,
+.image-editor[data-tool="highlighter"] .ed-stage { cursor: crosshair; }
+.image-editor[data-tool="text"] .ed-stage { cursor: text; }
+.image-editor[data-tool="pointer"] .ed-stage { cursor: default; }
+
+.ed-text-entry {
+  position: absolute;
+  transform: translate(0, -2px);
+  min-width: 140px;
+  min-height: 2.4em;
+  padding: 4px 6px;
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.65);
+  color: #fff;
+  font: inherit;
+  font-size: 14px;
+  resize: none;
+}
+
+/* ---------------------------------------------------------------- tools -- */
+
+.ed-tools {
+  display: flex;
+  justify-content: center;
+  gap: 4px;
+  padding: 8px 10px calc(8px + env(safe-area-inset-bottom));
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.ed-tool {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 36px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.72);
+  cursor: pointer;
+}
+
+.ed-tool:hover { background: rgba(255, 255, 255, 0.1); color: #fff; }
+
+.ed-tool[aria-pressed="true"] {
+  background: var(--accent);
+  color: #fff;
+}
+
+/* --------------------------------------------------------------- panels -- */
+
+.ed-panel {
+  position: absolute;
+  right: 12px;
+  top: 92px;
+  z-index: 3;
+  width: min(340px, calc(100vw - 24px));
+  padding: 14px 16px 12px;
+  border-radius: 14px;
+  background: #232327;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.55), inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+  font-size: 12px;
+}
+
+.ed-panel h3 {
+  margin: 0 0 10px;
+  font-size: 13px;
+  font-weight: 620;
+}
+
+.ed-panel footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.ed-fields {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.ed-fields label {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 11px;
+}
+
+.ed-panel input[type="number"] {
+  width: 84px;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 7px;
+  background: rgba(0, 0, 0, 0.3);
+  color: #fff;
+  font: inherit;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.ed-panel .ed-group { flex-wrap: wrap; margin-bottom: 10px; }
+
+.ed-note {
+  margin: 8px 0 0;
+  font-size: 11px;
+  line-height: 1.45;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.ed-check {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 12px 0 10px;
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.ed-check input { accent-color: var(--accent); }
+
+.ed-warn {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+  padding: 9px 10px;
+  border-radius: 9px;
+  background: rgba(255, 159, 10, 0.14);
+  color: rgba(255, 214, 150, 0.95);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.ed-warn input[type="color"] {
+  width: 26px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: none;
+  cursor: pointer;
+}
+
+/* --------------------------------------------------------------- status -- */
+
+.ed-status {
+  position: absolute;
+  left: 50%;
+  bottom: 66px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: min(560px, calc(100vw - 24px));
+  padding: 9px 14px;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.82);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1);
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.92);
+}
+
+.ed-fail {
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 14px;
+  height: 100%;
+  padding: 24px;
+  text-align: center;
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 13px;
+}
+
+.ed-fail button {
+  padding: 8px 18px;
+  border: 0;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
+  font: inherit;
+  cursor: pointer;
+}
+
+/* Loading is a held breath rather than a spinner: the decode is usually two
+   frames, and a spinner that flashes for two frames is worse than nothing. */
+.ed-loading::after {
+  content: "";
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.18);
+  border-top-color: rgba(255, 255, 255, 0.7);
+  animation: ed-spin 0.8s linear infinite;
+  animation-delay: 0.35s;
+  opacity: 0;
+  animation-fill-mode: forwards;
+}
+
+@keyframes ed-spin {
+  from { opacity: 1; transform: rotate(0deg); }
+  to { opacity: 1; transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .image-editor { animation: none; }
+  .ed-loading::after { animation: none; opacity: 1; }
+}
+
+/* A phone: the tools get finger-sized, and the panels stop being popovers and
+   become sheets, because a 340px card floating over a 390px screen is a modal
+   pretending not to be one. */
+@media (pointer: coarse) {
+  .ed-tool { width: 46px; height: 44px; }
+  .ed-icon { width: 40px; height: 40px; }
+  .ed-chip { height: 34px; padding: 0 12px; }
+  .ed-swatch { width: 28px; height: 28px; }
+  .ed-width { width: 32px; height: 30px; }
+  .ed-context { min-height: 48px; }
+}
+
+@media (max-width: 560px) {
+  .ed-panel {
+    right: 8px;
+    left: 8px;
+    top: auto;
+    bottom: calc(8px + env(safe-area-inset-bottom));
+    width: auto;
+  }
+  .ed-status { bottom: 80px; }
+  .ed-name { font-size: 12px; }
+  .ed-save { padding: 0 10px; }
+}
+
 /* ======================================================= touch chrome ==
  *
  * The coarse-pointer pass for the main chrome. The viewers (Quick Look, the

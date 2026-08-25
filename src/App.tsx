@@ -5,6 +5,7 @@ import { ContextMenu, type MenuItem } from "./components/ContextMenu";
 import { DetailList } from "./components/DetailList";
 import { GlyphDefs } from "./components/FileGlyph";
 import { IconGrid, type GridCell } from "./components/IconGrid";
+import { ImageEditor } from "./components/ImageEditor";
 import { PdfReader } from "./components/PdfReader";
 import { PreviewPane } from "./components/PreviewPane";
 import { QuickLook } from "./components/QuickLook";
@@ -153,6 +154,14 @@ export default function App() {
    * "open this" being another application's launch animation was never much of
    * an answer either. */
   const [reader, setReader] = useState<{ path: string; name: string } | null>(null);
+  /** The picture being edited, if one is. Its own surface rather than a mode of
+   * Quick Look: editing owns the keyboard, the pointer and the Back gesture,
+   * and a viewer that sometimes owns those is a viewer nobody can predict. */
+  const [picture, setPicture] = useState<{ path: string; name: string } | null>(null);
+  /** Bumped to ask the picture editor to close itself, for the same reason
+   * `editorClose` exists: the discard question belongs to the surface that
+   * knows whether anything has been drawn. */
+  const [pictureClose, setPictureClose] = useState(0);
   /** Bumped to ask the editor to close itself. Routed through the editor rather
    * than closing it from here because the unsaved-changes question belongs to
    * the component that knows whether there are any. */
@@ -175,6 +184,8 @@ export default function App() {
   editorActive.current = !!editor;
   const readerActive = useRef(false);
   readerActive.current = !!reader;
+  const pictureActive = useRef(false);
+  pictureActive.current = !!picture;
 
   const home = places.find((p) => p.icon === "home")?.path ?? "";
 
@@ -1621,6 +1632,14 @@ export default function App() {
         // twelve windows, and "Rename…" for twelve has nothing to rename.
         if (many === 1) {
           items.push({ label: "Open", onPick: () => void openTarget(t) });
+          // A picture gets its own verb, above the text one: for a photograph
+          // "Edit Text File" is not a near miss, it is a different application.
+          if (!t.isDir && routeOf(t.name) === "image") {
+            items.push({
+              label: "Edit Picture…",
+              onPick: () => setPicture({ path: t.path, name: t.name }),
+            });
+          }
           // The way *into* the editor now that ↵ goes to the OS. It used to
           // call openTarget, which made it a second Open under a different name.
           if (!t.isDir) {
@@ -1819,6 +1838,7 @@ export default function App() {
    */
   const backStep = useMemo<(() => void) | null>(() => {
     if (menu) return () => setMenu(null);
+    if (picture) return () => setPictureClose((n) => n + 1);
     if (reader) return () => setReader(null);
     if (editor) return () => setEditorClose((n) => n + 1);
     if (quickLook)
@@ -1850,7 +1870,7 @@ export default function App() {
       };
     if (store.canBack) return () => void store.back();
     return null;
-  }, [menu, reader, editor, quickLook, accessOpen, renamingId, selection.size, filter, store.canBack, focusView]);
+  }, [menu, picture, reader, editor, quickLook, accessOpen, renamingId, selection.size, filter, store.canBack, focusView]);
 
   const wantsBack = backStep !== null;
   useEffect(() => {
@@ -1955,7 +1975,7 @@ export default function App() {
     const s = kb.current;
     // The overlays own the keyboard while they're up, and the view they're
     // covering keeps focus underneath them.
-    if (s.quickLook || editorActive.current || readerActive.current) return;
+    if (s.quickLook || editorActive.current || readerActive.current || pictureActive.current) return;
 
     const modifier = e.metaKey || e.ctrlKey;
     if (modifier) {
@@ -2047,7 +2067,7 @@ export default function App() {
       // otherwise reload the WebView and drop the whole session.
       if (((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "r") || e.key === "F5") {
         e.preventDefault();
-        if (editorActive.current || readerActive.current || kb.current.quickLook) return;
+        if (editorActive.current || readerActive.current || pictureActive.current || kb.current.quickLook) return;
         if (store.path) void store.invalidateDirs([store.path]);
         const root = store.listing?.repoRoot;
         if (root) void ipc.refreshRepo(root);
@@ -2072,6 +2092,9 @@ export default function App() {
       // And for the reader, which owns the arrows, space and Escape while a
       // book is open.
       if (readerActive.current) return;
+      // And for the picture editor, which owns ⌘Z, ⌘A, Delete and every bare
+      // letter that names a tool.
+      if (pictureActive.current) return;
       // Chords are matched on the lowercased key: with Shift held, Chromium —
       // and so every Android WebView — reports "N" where WKWebView reports
       // "n", which is how ⇧⌘N could work on a Mac and be dead on DeX.
@@ -2200,7 +2223,7 @@ export default function App() {
     // because some WebView generations never synthesize the latter.
     const onMouse = (e: MouseEvent) => {
       if (e.button !== 3 && e.button !== 4) return;
-      if (editorActive.current || readerActive.current || kb.current.quickLook) return;
+      if (editorActive.current || readerActive.current || pictureActive.current || kb.current.quickLook) return;
       // A press with a menu open spends itself on closing the menu; also
       // navigating underneath it would be two answers to one click.
       if (document.querySelector(".ctx-menu, .ctx-sheet")) return;
@@ -2595,9 +2618,35 @@ export default function App() {
                 }
               : undefined
           }
+          onEdit={
+            routeOf(lead.target.entry.name) === "image"
+              ? () => {
+                  setQuickLook(false);
+                  setPicture({ path: lead.target.path, name: lead.target.name });
+                }
+              : undefined
+          }
           onClose={() => {
             setQuickLook(false);
             focusView();
+          }}
+        />
+      )}
+      {picture && (
+        <ImageEditor
+          key={picture.path}
+          path={picture.path}
+          name={picture.name}
+          volumes={volumes}
+          closeSignal={pictureClose}
+          onClose={() => {
+            setPicture(null);
+            focusView();
+          }}
+          onSaved={(path, name) => {
+            flash(`${name} saved`);
+            setSelection(new Set([path]));
+            void store.navigate(store.path, false);
           }}
         />
       )}

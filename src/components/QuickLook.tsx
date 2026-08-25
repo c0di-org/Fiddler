@@ -9,7 +9,7 @@ import { isTextual, routeOf } from "../preview/route";
 import type { Entry, TextHead } from "../types";
 import { CodeView } from "./CodeView";
 import { FileGlyph, FolderGlyph } from "./FileGlyph";
-import { BookIcon, Chevron, ChevronLeft, LinkMark, MoreIcon, ShareIcon } from "./icons";
+import { BookIcon, Chevron, ChevronLeft, LinkMark, MoreIcon, ShareIcon, WandIcon } from "./icons";
 import { MarkdownView } from "./MarkdownView";
 import { PdfView } from "./PdfView";
 import { ZoomableImage } from "./ZoomableImage";
@@ -59,9 +59,14 @@ interface Props {
   /** Promote this file to the full-screen reader. Only ever passed for the
    * routes that have one, which today means PDFs. */
   onRead?: () => void;
+  /** Take this picture into the editor. Passed only for the image route, and
+   * the reason Quick Look now has two promotions rather than one: a document is
+   * something you go on to read, and a photograph is something you go on to
+   * change, and neither is the other. */
+  onEdit?: () => void;
 }
 
-export function QuickLook({ entry, index, total, onStep, onClose, onShare, onMore, onRead }: Props) {
+export function QuickLook({ entry, index, total, onStep, onClose, onShare, onMore, onRead, onEdit }: Props) {
   const route = routeOf(entry.name);
   const isDir = entry.kind === "dir" || (entry.kind === "symlink" && entry.linkToDir);
   const [page, setPage] = useState(1);
@@ -100,6 +105,12 @@ export function QuickLook({ entry, index, total, onStep, onClose, onShare, onMor
         e.preventDefault();
         e.stopPropagation();
         step(-1);
+      } else if (e.key === "Enter" && onEdit) {
+        // A picture's better destination is the editor, on every platform —
+        // including the two that have nowhere else to send it.
+        e.preventDefault();
+        e.stopPropagation();
+        onEdit();
       } else if (e.key === "Enter" && onRead) {
         // A PDF has somewhere better to go than the desktop: its own reader,
         // on every platform including the two with no desktop to go to.
@@ -118,7 +129,7 @@ export function QuickLook({ entry, index, total, onStep, onClose, onShare, onMor
     // Capture, so the browser's own shortcuts see these last.
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [onClose, step, entry.path, onRead]);
+  }, [onClose, step, entry.path, onRead, onEdit]);
 
   return (
     <div className="ql-scrim" onClick={onClose}>
@@ -158,7 +169,12 @@ export function QuickLook({ entry, index, total, onStep, onClose, onShare, onMor
               <MoreIcon size={17} />
             </button>
           )}
-          {onRead ? (
+          {onEdit ? (
+            <button className="ql-open ql-read" onClick={onEdit}>
+              <WandIcon size={13} />
+              Edit
+            </button>
+          ) : onRead ? (
             <button className="ql-open ql-read" onClick={onRead}>
               <BookIcon size={13} />
               Read

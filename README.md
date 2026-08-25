@@ -49,6 +49,15 @@ when they live outside the repo tree, and `missing` when the folder is gone and
   thirds to turn it. No second application, and nothing to apologise for
   on a phone or in a browser, where there was never an application to hand it
   to.
+- **An editor for photographs, not a hand-off.** The same argument as the
+  reader, one file type along. Select with a rectangle or with the wand — tap a
+  pixel and keep dragging to widen what comes with it — then crop, delete to
+  transparency, or fill. Turn, mirror, resize. Draw boxes, arrows, freehand and
+  a highlighter over it, or drop in a line of text. And the one nobody else
+  does: **name a file size and it finds the settings**, spending quality first
+  and dimensions only when it has to, so "under 2 MB" stops being a guessing
+  game. Saves a copy beside the original, at the original's resolution rather
+  than the window's.
 - **Git without a git panel.** A dot for modified, staged, untracked, conflicted.
   The branch on the folder. Ignored files dimmed rather than hidden.
 - **Two views, both dense.** Big icons or a sortable list you can twist open.

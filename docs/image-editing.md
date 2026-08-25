@@ -1,17 +1,55 @@
 # Editing a picture in Fiddler
 
-An investigation, not a promise. It covers what Preview's editing actually is,
-which parts of it belong in a file browser, what the three targets can and can't
-do, and what it would cost to build. Where a number appears it was measured on
-this branch rather than estimated — the two spikes under `src/edit/` are real,
-tested code, and the benchmarks below came out of them.
+This started as an investigation into how much of macOS Preview's editing
+belongs in a file browser, and became the editor. It is both documents: the
+reasoning, and what got built from it. Where a number appears it was measured
+rather than estimated.
 
-The short version: the pixel work is entirely feasible as plain TypeScript on a
-canvas, which means one implementation serves macOS, Android and the web the
-same way the markdown parser and the highlighter already do. The backend owes it
-exactly one thing it doesn't have — a way to write bytes. And the overlap with
-the PDF reader is real but much narrower than it looks: it is the markup layer
-and nothing else.
+The short version: the pixel work is plain TypeScript on a canvas, so one
+implementation serves macOS, Android and the web the same way the markdown
+parser and the highlighter already do. The backend owed it exactly one thing it
+did not have — a way to write bytes — and now has it. The overlap with the PDF
+reader is real but much narrower than it looks: it is the markup layer, and
+nothing else.
+
+## What is there now
+
+A full-screen surface, `ImageEditor`, reached from Quick Look's **Edit** button
+or **Edit Picture…** in the context menu, for anything on the `image` route.
+
+- **Select** — a rectangle you drag out, or the wand: tap a pixel and keep
+  dragging sideways to widen or narrow what comes with it. Shift adds to a
+  selection, ⌥ takes away, and the wand can take either only what it touches or
+  every matching pixel in the frame.
+- **Crop** to the selection, **Delete** it to transparency, or **Fill** it.
+- **Turn** and **mirror**, in quarters.
+- **Size** — width and height with the ratio locked, or a percentage.
+- **Save a copy**, at a chosen format and quality, or **fitted into a file
+  size you name**.
+- **Markup** — box, oval, line, arrow, freehand, highlighter and text, in any of
+  eight colours and four thicknesses, movable afterwards with the pointer.
+- ⌘Z, ⌘S, ⌘A, ⌫, ↵ to crop, Escape to leave, and a letter for each tool.
+
+Everything the editor knows how to do is in one strip of tools and one
+contextual line. That was a constraint rather than an outcome: an editor whose
+chrome grows as you pick things up is mostly chrome by the third tool, and on a
+phone there is no room for that at all.
+
+### The part that is not obvious
+
+**Nothing in the document is pixels.** `edit/doc.ts` holds a quarter-turn count,
+two mirror flags, a crop rectangle, a list of masks and a list of shapes — and
+every pixel is produced from that plus the original file, on demand. The preview
+is drawn at whatever size the window has; the file that gets saved is drawn from
+the source at its own resolution. An editor that mutates a buffer instead can
+only ever save you what it was showing you, and that is why "resize to 2 MB"
+here comes back at 1600 × 1000 rather than at whatever the window happened to
+be.
+
+The one exception is the wand's mask, which really is pixels. It is kept at
+about 1.6 megapixels and scaled up when used, which softens its edge — for a
+cut-out that is not a defect, it is the feathering a hard mask would want
+anyway.
 
 ---
 
@@ -75,26 +113,33 @@ as the memory budget below shows, it probably shouldn't be.
 And `ipc.pdfPage(path, n, px)` already rasterises any page of any PDF at any
 size, which makes "edit this page as a picture" free.
 
-### Getting bytes out — the one real gap
+### Getting bytes out — the one real gap, now closed
 
-`Backend` has `writeTextFile` and `createTextFile` and nothing that takes bytes.
-That is the only missing capability in the whole investigation.
+`Backend` had `writeTextFile` and `createTextFile` and nothing that took bytes.
+That was the only missing capability in the whole investigation, and it is now
+three calls: `createFile`, `writeFile` and `freeName`.
 
-The web half is already built and just isn't exposed: `backend/web/vfs.ts`
-has `writeBlob(path, data: Blob)` and `freshPath(parent, name)`, so the browser
-build needs a line of wiring rather than an implementation.
+The web half was already built and merely unexposed — `backend/web/vfs.ts` has
+`writeBlob(path, data: Blob)` and `freshPath(parent, name)` — so the browser
+build needed wiring rather than an implementation.
 
 The Tauri half is a near-copy of `write_text_file` in `commands.rs`, which
-already does the thing that matters — write to a sibling temp file, `sync_all`,
+already did the thing that matters: write to a sibling temp file, `sync_all`,
 then rename into place, all on `spawn_blocking` because Android's FUSE storage
-makes `sync_all` unbounded wall-clock. Swap `text: String` for bytes and it is
-done.
+makes `sync_all` unbounded wall-clock. Either the old whole file or the new
+whole file is on disk, never half of one.
 
-One thing not to get wrong: **do not send the bytes as JSON.** A 5 MB PNG
-base64s to 6.7 MB of string, which on Android is a copy through the WebView
-bridge, a copy in the JSON parser and a copy in the decoder, on a device that
-will kill the process for less. Tauri 2 takes a raw request body
-(`tauri::ipc::Request` / `InvokeBody::Raw`) and that is what this should use.
+The bytes do **not** go as JSON. A 5 MB PNG base64s to 6.7 MB of string, which
+on Android is a copy through the WebView bridge, a copy in the JSON parser and a
+copy in the decoder, on a device that will kill the process for less. They go as
+the request body instead — `tauri::ipc::Request` and `InvokeBody::Raw`, which
+the pinned Tauri 2.11.5 has, with `@tauri-apps/api`'s `invoke` accepting a
+`Uint8Array` as its whole payload.
+
+That leaves the path, and headers are ASCII while filenames are not. Every name
+travels percent-encoded, and `commands.rs` owns a fifteen-line decoder rather
+than a crate for it. A folder named in Korean is not an edge case, it is
+Tuesday.
 
 ### What saving means
 
@@ -102,9 +147,10 @@ Preview saves in place and leans on macOS Versions to make that safe. Fiddler
 has no Versions, and its undo stack is twenty operations in memory that die with
 the app — `undo.ts` doesn't record file creation at all today.
 
-So **Save a Copy is the default and Replace is the deliberate one.** `freshPath`
-already produces the `photo 2.jpg` name for exactly this. Replacing stays
-available, behind the same `confirmDialog` that deletion uses.
+So **Save a Copy is what the button does**, and `freeName` produces the
+`photo copy.jpg` name beside the original, using the same convention a paste
+does. Replace is not offered yet, and should not be until there is something to
+take it back with.
 
 `locationCaps(path, volumes)` in `location.ts` already answers "can this be
 written to" for read-only volumes, MTP devices and nearby machines, and
@@ -374,50 +420,52 @@ which is a decision better made once someone has used (1) for a fortnight.
 
 ## What Android makes hard
 
-**Memory is the binding constraint, not speed.** Editing a 12 MP photo means the
-decoded bitmap (48 MB as RGBA), the working `ImageData` (another 48 MB), the
-1 MP proxy (4 MB), a mask (12 MB), a preview mask (12 MB), and whatever the
-encoder allocates during a probe. That is comfortably past what an Android
-WebView will tolerate before the system kills the process — and it gets killed,
-it does not throw.
+**Memory is the binding constraint, not speed.** The first plan here was to
+hold the picture as a full-resolution `ImageData` and edit that. For a 12 MP
+photo that is 48 MB for the decode, another 48 for the working buffer, and 12
+more for each mask — comfortably past what an Android WebView tolerates before
+the system kills the process. And it gets killed; it does not throw.
 
-It is worth being precise about which ceiling actually binds, because the
+What got built avoids the problem rather than budgeting for it. The source stays
+an image element — one copy, drawable, never read back — and the only
+`ImageData` in the editor is the wand's working buffer at about 1.6 megapixels,
+with a smaller proxy beside it for live drags. Everything else is a transform on
+a canvas.
+
+That turned out to be better than the compromise it replaced, not just cheaper.
+The plan said "full resolution unless a mask is involved", because a mask
+upscaled 2× has a soft edge. But a mask is applied with `drawImage` and
+`destination-out`, and `drawImage` scales it on the way in — so the export is at
+full resolution *including* the masks, and the softness at the edge of a cut-out
+is feathering, which is what a hard mask would have needed adding anyway. There
+is no compromise left to state in the title bar, because there is no compromise.
+
+It is still worth being precise about which canvas ceiling binds, because the
 obvious one doesn't. Desktop Chrome took a canvas 32,767 pixels wide without
 complaint in the spike — the per-dimension limit is nowhere near where a
 photograph lives. What the spike did *not* measure, because it needs a device to
 mean anything, is the **area** limit, and that is the one that matters: Chrome
 caps total canvas area, the cap is lower on Android than on the desktop, and
-past it a canvas silently comes back blank rather than throwing. Anything built
-here has to check `getImageData` returned real pixels rather than assume it.
+past it a canvas silently comes back blank rather than throwing. The export path
+is the place that would meet it first, on a phone, saving a very large picture —
+and it does not check yet. That is the first thing to test on real hardware.
 
-So the working resolution has to be capped and the cap has to be stated. The
-proposal: work at full resolution when the source fits a pixel budget, otherwise
-downscale to it and **say so in the title bar** — "editing at 4000×3000 of
-8000×6000" — rather than silently producing a smaller file than the person
-thought they were editing.
+Undo is snapshots rather than a replayed step list, which the no-pixels document
+makes affordable: a document is a handful of numbers and some shared references,
+and twenty of them hold one copy of each mask between them rather than twenty.
 
-There is a way to have both, and it is worth taking because it is nearly free:
-crop, resize, rotate and markup are all resolution-independent. If the edit
-contains none of the mask-based steps, the step list can be replayed against the
-full-resolution source at export time and the working buffer is only ever a
-preview. Only delete-and-fill force the compromise, because a mask upscaled 2×
-has a soft edge. So: **full resolution unless a mask is involved.** Cropping a
-48 MP photograph stays lossless, which is the common case.
+**One finger draws, two fingers pan — when there is panning to do.** There
+isn't yet: the picture is fitted to the window and the stage takes
+`touch-action: none` so every gesture belongs to a tool. When zoom arrives this
+is the rule it has to follow, and `ZoomableImage` and `QuickLook` between them
+already hold the precedent for telling a pan from a swipe.
 
-That step list is also the undo story. Keeping previous buffers is 48 MB each and
-obviously impossible; re-running a list of steps from the decoded source is cheap
-for everything except the masks, and a background mask run-length-encodes to a
-few tens of kilobytes because it is, by construction, enormous flat regions.
-
-**One finger draws, two fingers pan.** The wand's tap-and-drag and the pan
-gesture want the same finger. `ZoomableImage` already handles pinch-zoom and
-`QuickLook` already has to distinguish a swipe from a pan on a zoomed picture, so
-the precedent exists — but with a tool active the rule has to be explicit, and it
-is the rule every touch editor uses.
-
-**The toolbar goes at the bottom on a phone.** `styles.css` already has the
-coarse-pointer touch-target pass and the rail-at-840 / shed-at-700 rungs from the
-tablet work; this follows them rather than inventing a new breakpoint.
+**The toolbar is at the bottom, on every screen.** On a phone that is where a
+thumb is; on a desktop it is where the eye already is after looking at the
+picture. It grows to 46 × 44 under `(pointer: coarse)`, following the touch pass
+`styles.css` already had rather than inventing a new breakpoint, and under 560px
+the panels stop being popovers and become sheets — a 340px card floating over a
+390px screen is a modal pretending not to be one.
 
 **DeX gets the keyboard.** Two pieces already exist and both apply. `App.tsx`
 matches chords on a lowercased key because Chromium — and so every Android
@@ -429,51 +477,89 @@ reach the file grid behind it.
 
 ---
 
-## What this would look like, in order
+## What shipped, and what did not
 
-Each stage is usable on its own, which is the test of whether the order is right.
+Everything in stages one to three of the original plan is in: the surface,
+select, crop, delete, fill, turn, mirror, size, fit-into-a-size, save, and the
+whole markup layer. The two that did not are both deliberate.
 
-**1 — The spine.** The editor surface (a full-screen sibling of `PdfReader`,
-reached from Quick Look and the context menu), decode, rectangle select, crop,
-rotate and flip, resize with a locked aspect ratio, **fit into N MB**, and save.
-Needs the one new backend call. This alone covers most of a normal week: crop a
-screenshot, straighten a photo, get it under the limit, save a copy.
+**Markup in the PDF reader.** The layer is built and is already independent of
+what it sits on — `edit/markup.ts` takes a canvas context and a box, and
+`renderShapesOnly` exists for exactly this. What is missing is the reader's half
+and, more importantly, a decision about where the marks live, which is the
+question below.
 
-**2 — The wand.** Already written and tested; needs the proxy-during-drag
-plumbing, marching ants, and the delete and fill verbs. Delete goes to
-transparency where the format has an alpha channel and offers to convert where it
-doesn't, which is what Preview does and is the correct answer.
+**Zoom.** The picture is fitted to the window and that is all. Pinch-to-zoom
+with one-finger-draws / two-fingers-pan is the right answer and is not a small
+one: every tool's coordinates go through the transform, and getting it half
+right is worse than not having it. The wand is the tool that will want it first,
+because tapping the exact pixel you meant on a phone is the whole game.
 
-**3 — Markup on images.** Shapes, text, freehand, highlighter. The vector layer.
+## Four bugs worth writing down
 
-**4 — Markup in the reader.** The same layer over a PDF page, sidecar-stored.
+All three were found by driving the built thing rather than by reading it, which
+is the argument for doing that.
 
-**5 — Marks that travel.** `pdf-lib`, write-back, and image-to-PDF, if and only
-if (4) proves people want their annotations to leave the device.
+**A gesture is one step, not two hundred.** Every pointer event during a drag
+was recording a history entry, so a single freehand stroke filled a twenty-deep
+undo stack and ⌘Z walked backwards through the middle of one line. The fix is
+the distinction between `commit` and `revise` in `doc.ts`: the step is recorded
+on the press, and everything after it revises. There is a test.
+
+**The text tool did nothing, silently.** Pressing on the picture opened the
+field, which auto-focused, and then the press's own default action moved focus
+onto the canvas — which blurred the field, which closed it. Every individual
+part worked exactly once and the whole did nothing, with no error anywhere. One
+`preventDefault`, and the pointer capture moved below the text branch.
+
+**A save could hang forever.** The file-size search yields between probes so
+the progress line repaints, and it yielded to `requestAnimationFrame`. A browser
+that is not painting — an occluded window, a backgrounded app — stops firing rAF
+altogether, and the search then never takes its second probe. It sits on "Trying
+settings… (1)" with no error and no timeout. It is a plain timer now, which
+fires whether anything is on screen or not.
+
+**The stage was measured before it existed.** The `ResizeObserver` was attached
+in an effect with an empty dependency list, which ran while the picture was
+still decoding and the stage was a spinner. It found nothing, never looked
+again, and the picture drew at a canvas's default 300 × 150 forever. It is a
+callback ref now. The same rule caught a second one immediately after:
+`clientHeight` includes padding, so the first working version drew the picture's
+bottom edge underneath the tool strip.
 
 ## Open questions
 
-- **Does Replace ever get to be the default?** It is the thing people expect from
-  every other editor, and it is the thing Fiddler currently has no safety net
-  for. Recording file creation in `undo.ts` — noted as a deliberate omission in
+- **Where do PDF marks live?** The markup layer is done and is already
+  independent of what it sits on. What is undecided is whether annotations stay
+  in `localStorage` beside `reading.ts`'s page memory — instant, no dependency,
+  never leaves the device — or whether `pdf-lib` comes in so they travel with
+  the file. Better answered after a fortnight of the cheap one than by guessing
+  now.
+- **Does Replace ever get to be the default?** It is what people expect from
+  every other editor and the thing Fiddler has no safety net for. Recording file
+  creation in `undo.ts` — noted as a deliberate omission in
   `what-needs-love.md` — would change the answer.
-- **Does the editor own rotation, or does the file browser?** Rotating a JPEG
-  losslessly is a metadata edit, not a re-encode, and it is a verb you want on a
-  selection of forty photos from the context menu without opening anything. Those
-  are two different features that look like one.
-- **Should the wand's tolerance be remembered between pictures?** It is a per-photo
+- **Should the wand's reach be remembered between pictures?** It is a per-photo
   property in principle and a per-person habit in practice.
-
----
+- **Does the editor own rotation, or does the file browser?** Rotating a JPEG
+  losslessly is a metadata edit, not a re-encode, and it is a verb you want on
+  forty photos from the context menu without opening anything. The editor owns
+  it today, which is right for one picture and no help at all for forty.
 
 ## How the numbers here were got
 
 Everything measured lives on this branch and can be re-run.
 
 ```
-npm test                                    # the wand and the budget search, 23 tests
+npm test          # 224, of which 71 are the editor's
 npx tsc --noEmit
+cd src-tauri && cargo clippy --target aarch64-linux-android
 ```
+
+The editor itself was exercised in a real browser rather than only reasoned
+about — the browser build under `vite preview`, driven over CDP, opening a
+picture and using each tool in turn. All three bugs above came out of that and
+none of them would have come out of reading the code.
 
 The wand benchmark is the loop in the table above: build a noisy gradient photo
 at each size and run five contiguous fills at the tolerances a drag sweeps
