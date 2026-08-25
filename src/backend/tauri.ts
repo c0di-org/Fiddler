@@ -98,6 +98,23 @@ const backend: Backend = {
 
   writeTextFile: (path, text) => invoke<void>("write_text_file", { path, text }),
 
+  // The bytes go as the request body rather than inside the JSON payload: a
+  // photograph is megabytes, and base64 through the bridge would inflate it by
+  // a third and copy it three times on the platform least able to afford that.
+  // Headers are ASCII, so every name travels percent-encoded; `text_header` in
+  // `commands.rs` is the other half.
+  createFile: (parent, name, bytes) =>
+    invoke<string>("create_file", bytes, {
+      headers: { "x-parent": encodeURIComponent(parent), "x-name": encodeURIComponent(name) },
+    }),
+
+  writeFile: (path, bytes) =>
+    invoke<void>("write_file", bytes, {
+      headers: { "x-path": encodeURIComponent(path) },
+    }),
+
+  freeName: (parent, name) => invoke<string>("free_name", { parent, name }),
+
   renamePath: (path, newName) => invoke<string>("rename_path", { path, newName }),
 
   copyPaths: (paths, destination, job) =>

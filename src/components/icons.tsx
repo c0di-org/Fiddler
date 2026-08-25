@@ -340,6 +340,144 @@ export const BookIcon = stroked(
   </>
 );
 
+// ------------------------------------------------------- the image editor
+//
+// One tool, one glyph, all drawn on the same 16-unit grid as everything above
+// so the strip reads as a set rather than as a collection.
+
+/** The pointer that picks things up rather than drawing them. */
+export const PointerIcon = stroked(<path d="M3.75 2.25 12 7.5l-3.4.9L10 12.4l-1.6.7-1.4-4.1-2.6 2.2z" />);
+
+/** Marquee: the dashed rectangle of a selection you drag out yourself. */
+export const MarqueeIcon = function MarqueeIcon({ size = 14, className }: P) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor"
+      strokeWidth="1.5" strokeLinecap="round" className={className} aria-hidden="true">
+      <path d="M2.75 2.75h3M10.25 2.75h3M13.25 2.75v3M13.25 10.25v3M13.25 13.25h-3M5.75 13.25h-3M2.75 13.25v-3M2.75 5.75v-3" />
+    </svg>
+  );
+};
+
+/** The wand, with the sparkle that says it decides for itself what to take. */
+export const WandIcon = stroked(
+  <>
+    <path d="m3 13 7-7" />
+    <path d="M9.25 6.75 11.5 9" />
+    <path d="M11.75 2.25v2.5M13 3.5h-2.5M12.75 7.25v1.5M13.5 8h-1.5" />
+  </>
+);
+
+/** Crop marks. */
+export const CropIcon = stroked(
+  <>
+    <path d="M4.75 1.5v9.75h9.75" />
+    <path d="M1.5 4.75h9.75V14.5" />
+  </>
+);
+
+/** A nib, for freehand. */
+export const PenIcon = stroked(
+  <>
+    <path d="M11.5 1.75 14.25 4.5 5.5 13.25 2 14l.75-3.5z" />
+    <path d="m9.75 3.5 2.75 2.75" />
+  </>
+);
+
+/** A chisel tip: the highlighter is a different pen and looks like one. */
+export const HighlightIcon = stroked(
+  <>
+    <path d="M9.5 2.25 13.75 6.5l-5.5 5.5H4.5L3 10.5z" />
+    <path d="M2 14.25h12" />
+  </>
+);
+
+/** Shapes, overlapping, for the tool that draws them. */
+export const ShapesIcon = stroked(
+  <>
+    <path d="M2.25 6.25h6.5v7.5h-6.5z" />
+    <circle cx="10.25" cy="5.75" r="3.5" />
+  </>
+);
+
+/** A letter, for the text box. */
+export const TextIcon = stroked(<path d="M3.25 3.25h9.5M8 3.25v9.5M5.75 12.75h4.5" />);
+
+/** A quarter turn, each way. */
+export const RotateRightIcon = stroked(
+  <>
+    <path d="M13 7.5a5 5 0 1 1-1.6-3.65" />
+    <path d="M13.5 1.5v3.25h-3.25" />
+  </>
+);
+export const RotateLeftIcon = stroked(
+  <>
+    <path d="M3 7.5a5 5 0 1 0 1.6-3.65" />
+    <path d="M2.5 1.5v3.25h3.25" />
+  </>
+);
+
+/** Mirrors: a shape and its reflection across a dashed axis. */
+export const FlipHIcon = function FlipHIcon({ size = 14, className }: P) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor"
+      strokeWidth="1.5" strokeLinejoin="round" className={className} aria-hidden="true">
+      <path d="M8 1.75v12.5" strokeDasharray="2 2" />
+      <path d="M6.25 3.75 2 8l4.25 4.25zM9.75 3.75 14 8l-4.25 4.25z" />
+    </svg>
+  );
+};
+export const FlipVIcon = function FlipVIcon({ size = 14, className }: P) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor"
+      strokeWidth="1.5" strokeLinejoin="round" className={className} aria-hidden="true">
+      <path d="M1.75 8h12.5" strokeDasharray="2 2" />
+      <path d="M3.75 6.25 8 2l4.25 4.25zM3.75 9.75 8 14l4.25-4.25z" />
+    </svg>
+  );
+};
+
+/** Arrows meeting a boundary: the resize dialogue. */
+export const ResizeIcon = stroked(
+  <>
+    <path d="M2.25 2.25h5.5v5.5h-5.5z" />
+    <path d="M9.5 9.5h4.25v4.25H9.5z" />
+    <path d="m8.5 8.5 1.75-1.75M8.5 8.5 6.75 10.25" />
+  </>
+);
+
+/** A step back. */
+export const UndoIcon = stroked(
+  <>
+    <path d="M2.5 7.25h7.25a3.75 3.75 0 0 1 0 7.5H6" />
+    <path d="M5.5 4 2.25 7.25 5.5 10.5" />
+  </>
+);
+
+/** A downward arrow into a tray: Save. */
+export const SaveIcon = stroked(
+  <>
+    <path d="M8 1.75v8.5" />
+    <path d="M4.75 7 8 10.25 11.25 7" />
+    <path d="M2.5 12.25v1.5a.5.5 0 0 0 .5.5h10a.5.5 0 0 0 .5-.5v-1.5" />
+  </>
+);
+
+/** An eraser, for the verb that takes the selection away. */
+export const EraseIcon = stroked(
+  <>
+    <path d="M6.5 13.25 2.25 9l6-6L12.5 7.25l-6 6z" />
+    <path d="M13.75 13.25h-7.5M4.5 6.75 8.75 11" />
+  </>
+);
+
+/** A paint bucket, for the verb that puts colour there instead. */
+export const FillIcon = stroked(
+  <>
+    <path d="M7 1.75 12.75 7.5 7.25 13 1.5 7.25z" />
+    <path d="M13.75 10.25c.75 1 1.25 1.7 1.25 2.35a1.25 1.25 0 0 1-2.5 0c0-.65.5-1.35 1.25-2.35Z" />
+  </>
+);
+
 /** Empty-state artwork: an open, and pointedly empty, folder. */
 export const EmptyIcon = stroked(
   <>
