@@ -34,7 +34,30 @@ import type {
   UsbDevice,
   Volume,
 } from "../types";
+import { platform } from "../platform";
 import type { Backend } from "./types";
+import { base64, pieces } from "./staged";
+
+/** Whether an `invoke` payload can be a request body on this platform.
+ *
+ * Not a preference and not a capability anyone chose, which is why it is not in
+ * `caps`: Android's WebView cannot read a request body, so Tauri's IPC script
+ * sends every message through `postMessage` as JSON there. `staged.ts` says
+ * what that costs a photograph, and what happens instead.
+ */
+const rawBody = platform !== "android";
+
+/** What to hand `invoke` as the payload for a file's bytes: the bytes
+ * themselves where they can travel, otherwise the name of the staging file they
+ * were appended to a piece at a time. */
+async function body(bytes: Uint8Array): Promise<Uint8Array | { staged: string }> {
+  if (rawBody) return bytes;
+  let staged: string | null = null;
+  for (const piece of pieces(bytes)) {
+    staged = await invoke<string>("stage_bytes", { token: staged, chunk: base64(piece) });
+  }
+  return { staged: staged as string };
+}
 
 const backend: Backend = {
   listDir: (path, showHidden) => invoke<DirListing>("list_dir", { path, showHidden }),
@@ -102,14 +125,15 @@ const backend: Backend = {
   // photograph is megabytes, and base64 through the bridge would inflate it by
   // a third and copy it three times on the platform least able to afford that.
   // Headers are ASCII, so every name travels percent-encoded; `text_header` in
-  // `commands.rs` is the other half.
-  createFile: (parent, name, bytes) =>
-    invoke<string>("create_file", bytes, {
+  // `commands.rs` is the other half. Headers survive whichever route the
+  // platform takes; the bytes do not, which is what `body` above is for.
+  createFile: async (parent, name, bytes) =>
+    invoke<string>("create_file", await body(bytes), {
       headers: { "x-parent": encodeURIComponent(parent), "x-name": encodeURIComponent(name) },
     }),
 
-  writeFile: (path, bytes) =>
-    invoke<void>("write_file", bytes, {
+  writeFile: async (path, bytes) =>
+    invoke<void>("write_file", await body(bytes), {
       headers: { "x-path": encodeURIComponent(path) },
     }),
 

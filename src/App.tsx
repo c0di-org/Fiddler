@@ -31,7 +31,7 @@ import { locationCaps, refusal } from "./location";
 import { caps, permissionHelp, platform } from "./platform";
 import { loadSession, restorable, saveSession } from "./session";
 import { parseShortcut } from "./preview/link";
-import { routeOf } from "./preview/route";
+import { isTextual, routeOf } from "./preview/route";
 import { contentTerms, prepareSearch, search, type SearchKind, type SearchRecord } from "./search";
 import { TreeStore, type Row } from "./store/tree";
 import { invert, remember, take as takeUndo, undoStore } from "./undo";
@@ -1139,8 +1139,17 @@ export default function App() {
           await ipc.openExternal(shortcut.url);
           return;
         }
-        if (caps.handOff && (await ipc.hasOpenHandler(t.path))) {
+        const system = caps.handOff && (await ipc.hasOpenHandler(t.path));
+        if (system) {
           await ipc.openExternal(t.path);
+          return;
+        }
+        // Nothing out there will take it. A picture has somewhere to go all the
+        // same — the same somewhere the PDF does, and for the same reason. This
+        // is what a double-tap on a photograph used to spend on a hand-off that
+        // Android was never going to accept, and answer with "could not open".
+        if (routeOf(t.name) === "image") {
+          setPicture({ path: t.path, name: t.name });
           return;
         }
         if (await openInEditor(t)) return;
@@ -1632,9 +1641,10 @@ export default function App() {
         // twelve windows, and "Rename…" for twelve has nothing to rename.
         if (many === 1) {
           items.push({ label: "Open", onPick: () => void openTarget(t) });
+          const route = t.isDir ? null : routeOf(t.name);
           // A picture gets its own verb, above the text one: for a photograph
           // "Edit Text File" is not a near miss, it is a different application.
-          if (!t.isDir && routeOf(t.name) === "image") {
+          if (route === "image") {
             items.push({
               label: "Edit Picture…",
               onPick: () => setPicture({ path: t.path, name: t.name }),
@@ -1642,7 +1652,13 @@ export default function App() {
           }
           // The way *into* the editor now that ↵ goes to the OS. It used to
           // call openTarget, which made it a second Open under a different name.
-          if (!t.isDir) {
+          //
+          // Only where the file could actually be text. A photograph and a PDF
+          // were both being offered "Edit Text File" beside the verb that does
+          // work on them, and the only thing picking it ever produced was a
+          // toast. "none" stays: a `LICENSE`, a `Makefile`, a `.env` have no
+          // extension to route on and are exactly what this item is for.
+          if (route !== null && (isTextual(route) || route === "none")) {
             items.push({
               label: "Edit Text File",
               onPick: () => {
