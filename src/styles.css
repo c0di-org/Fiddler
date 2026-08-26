@@ -437,7 +437,16 @@ button {
   .usb-pulse { animation: none; opacity: 0.8; }
 }
 
-.usb-storage { height: auto; padding-top: 5px; padding-bottom: 5px; }
+/* `.place` sets a fixed 38px height and basis further down the sheet, which
+   out-orders a bare `.usb-storage` and squashed the meter and the free-space
+   line under the row below it. Match `.place`'s specificity so the taller row
+   wins, and release the basis as well as the height. */
+.place.usb-storage {
+  height: auto;
+  flex-basis: auto;
+  padding-top: 5px;
+  padding-bottom: 5px;
+}
 .usb-storage-body { display: flex; flex-direction: column; gap: 3px; min-width: 0; flex: 1; }
 .usb-storage-free { font-size: 10.5px; color: var(--fg-faint); }
 
@@ -466,7 +475,13 @@ button {
  */
 .volume { position: relative; margin-bottom: 2px; }
 
-.volume-row { height: auto; padding-top: 5px; padding-bottom: 5px; }
+/* Same specificity story as `.place.usb-storage` above. */
+.place.volume-row {
+  height: auto;
+  flex-basis: auto;
+  padding-top: 5px;
+  padding-bottom: 5px;
+}
 
 .volume-body { display: flex; flex-direction: column; gap: 3px; min-width: 0; flex: 1; }
 

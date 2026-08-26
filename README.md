@@ -31,6 +31,59 @@ Cross-platform file management for macOS, Android/DeX, and the web.
 - **Session restore** for the last local folder and view preferences.
 - **Keyboard and touch support** across desktop, DeX, phone, and browser layouts.
 
+## A look around
+
+The shots below are the web build running its demo filesystem, so everything in
+them is the app doing the actual work — the same React front end the Mac and
+Android builds ship. The device rows in the sidebar are the browser build's
+labelled demonstration; on macOS and Android they are a real cable and a real
+network.
+
+<div align="center">
+<img src="docs/shots/icon-view.png" width="860" alt="Icon view of a Pictures folder with thumbnails and the preview pane open">
+<p><em>Icon view, with real thumbnails and the preview pane.</em></p>
+</div>
+
+<table>
+<tr>
+<td width="50%"><img src="docs/shots/list-view.png" alt="List view with folders expanded in place"></td>
+<td width="50%"><img src="docs/shots/quick-look.png" alt="Quick Look rendering a Markdown file"></td>
+</tr>
+<tr>
+<td><em>List view sorts, resizes columns, and expands folders in place.</em></td>
+<td><em>Quick Look renders Markdown, highlights source, and pages PDFs.</em></td>
+</tr>
+<tr>
+<td><img src="docs/shots/pdf-reader.png" alt="PDF reader showing a two-page spread"></td>
+<td><img src="docs/shots/search.png" alt="Search results showing which line of each file matched"></td>
+</tr>
+<tr>
+<td><em>The PDF reader lays out a spread when there is room, and remembers where you stopped.</em></td>
+<td><em>Search reaches into text files and tells you which line matched.</em></td>
+</tr>
+<tr>
+<td><img src="docs/shots/editor.png" alt="Picture editor with an arrow and a text label drawn over a diagram"></td>
+<td><img src="docs/shots/editor-save.png" alt="Save panel with a target file size and format options"></td>
+</tr>
+<tr>
+<td><em>Markup adds shapes, arrows, ink, highlighter, and text over the picture.</em></td>
+<td><em>Name a file size and Fiddler finds the quality and dimensions that meet it.</em></td>
+</tr>
+<tr>
+<td><img src="docs/shots/usb.png" alt="Camera roll on an Android phone browsed over USB, with thumbnails"></td>
+<td><img src="docs/shots/nearby.png" alt="Browsing a paired nearby device over Wi-Fi"></td>
+</tr>
+<tr>
+<td><em>An Android phone over the cable, thumbnails and all.</em></td>
+<td><em>A nearby device, once it has said yes.</em></td>
+</tr>
+</table>
+
+<div align="center">
+<img src="docs/shots/phone.png" width="300" alt="Fiddler at phone width, with the sidebar collapsed to an icon rail">
+<p><em>At phone width the sidebar becomes a rail and the targets grow for touch.</em></p>
+</div>
+
 ## Git worktrees
 
 Fiddler discovers linked worktrees and shows them with the repository they belong to, even when the worktree lives outside the main repository folder.
