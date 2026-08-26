@@ -45,6 +45,8 @@ export const {
   renamePath,
   copyPaths,
   movePaths,
+  compressPaths,
+  extractArchive,
   cancelTransfer,
   onTransfer,
   trashPaths,

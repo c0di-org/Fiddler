@@ -152,6 +152,53 @@ twice and that is the price of a bar that means anything.
 What's left: an upload to a device over USB is still one toast and a wait. It
 runs through the MTP worker and its own cancel token rather than this engine.
 
+### Zip, in both directions
+
+Compress puts a selection into a zip beside it and Extract takes one apart in
+place, both on the two native targets. `archive.rs` is the engine and borrows
+`transfer.rs`'s vocabulary — the same `Progress`, the same `Stopped`, the same
+flag read between chunks — because from the status bar's side an archive and a
+copy are the same event. What it does not borrow is the question of what the bar
+counts: a copy has to decide, because a same-volume clone costs nothing per
+byte, and an archive never does. Every byte is read and deflated, so both
+directions report `by_bytes` and mean it.
+
+Four decisions worth knowing about.
+
+**Only zip.** `.tar.gz` reads on a Mac and is a mystery on a phone, `.7z` and
+`.rar` are neither, and every one of them would be a C library behind a `-sys`
+crate and an NDK build. The `zip` crate is pure Rust with only deflate enabled,
+so it cross-compiles with everything else. The other formats deliberately keep
+their archive icons: being able to see what something is and being able to open
+it are different questions.
+
+**Already-compressed bytes are stored, not deflated.** A JPEG through deflate is
+the whole file's worth of CPU to save a fraction of a percent, on the platform
+least able to spend it — and photographs are exactly what people zip.
+
+**Coming out of an archive assumes the archive is hostile.** Every entry name
+goes through `enclosed_name`, so `../../.ssh/authorized_keys` is refused rather
+than followed, and a symlink is only recreated when what it points at stays
+inside the folder being extracted into. Both refuse the *whole* extraction
+rather than skipping the entry: an archive containing either is broken or
+malicious, and quietly unpacking the other ninety-nine files is how someone ends
+up trusting the result.
+
+**Where it lands is Archive Utility's rule.** Everything under a single
+top-level name is unpacked as that item; a spray of loose files gets a folder
+named after the archive. The alternative is `foo/foo/…` half the time and forty
+loose files in Downloads the other half. `__MACOSX` is skipped before the roots
+are counted, or every zip Finder ever made would look like it had two.
+
+What's left. Nothing reads *into* an archive: Quick Look shows a zip as a file
+rather than as a list of what's in it, which is the next obvious thing and needs
+no new engine — `contents` already walks the central directory. Encrypted zips
+are refused with a message rather than prompting for a password; on macOS Open
+still hands those to the system, which does prompt. Nothing streams an archive
+onto a device or a nearby machine — both are copies of a finished file. And
+there is no "compress to N MB", though `edit/budget.ts` shows the shape that
+would take.
+
 ## Accessibility
 
 ### The grid and the list can be heard now

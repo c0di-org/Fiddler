@@ -1,6 +1,6 @@
 [package]
 name = "fiddler"
-version = "0.3.2"
+version = "0.4.0"
 description = "A git-native file browser"
 edition = "2021"
 # 1.85 is mtp-rs's floor; everything else here still builds on 1.77.
@@ -22,6 +22,25 @@ uuid = { version = "1", features = ["v4", "serde"] }
 notify = "8"
 dirs = "6"
 num_cpus = "1"
+
+# Zip is the one archive format all three of the places Fiddler's files come
+# from can already make and read: Finder's Compress, Android's share sheet, and
+# every download that isn't a single file. This crate is pure Rust, so it
+# cross-compiles to Android with everything else and adds no toolchain of its
+# own — which rules out shelling out to `zip`/`ditto` (absent inside an APK) and
+# rules out libarchive (a `-sys` crate and an NDK build).
+#
+# Only deflate is enabled. The rest of the default set — bzip2, zstd, lzma, ppmd
+# — are C libraries behind `-sys` crates, and none of them is what a zip in the
+# wild is made of. `deflate-flate2-zlib-rs` picks the pure-Rust zlib rewrite,
+# which is already in this tree and is roughly twice miniz_oxide's speed on the
+# slower of the two platforms that has to run it.
+zip = { version = "4", default-features = false, features = ["deflate-flate2-zlib-rs", "time"] }
+
+# Only to move a timestamp across the seam: a zip stores an MS-DOS date and
+# `std` has no calendar to turn one into a `SystemTime` or back. Without it
+# every file in every archive Fiddler writes would be dated 1980.
+time = { version = "0.3", default-features = false, features = ["std"] }
 
 # Thumbnails go through the same macOS frameworks Finder uses: ImageIO for raster
 # formats and QuickLookThumbnailing for everything else. Both are dramatically
