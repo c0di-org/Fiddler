@@ -8,6 +8,7 @@ use std::time::{Duration, Instant};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
 
+use crate::archive;
 use crate::content_search::{self, ContentSearch};
 use crate::fs_scan::{self, ScanOpts};
 use crate::git::status::RepoStatus;
@@ -76,6 +77,25 @@ impl TransferOutcome {
     }
 }
 
+/// One line of narration to the status bar. Shared by every long operation
+/// rather than written out at each of them, because they are the same event
+/// from the bar's side: a verb, a name, two pairs of numbers and a Cancel.
+fn announce(app: &AppHandle, job: u64, verb: &str, progress: &transfer::Progress) {
+    let _ = app.emit(
+        "fiddler:transfer",
+        TransferProgress {
+            job,
+            verb: verb.to_string(),
+            done_items: progress.done_items,
+            total_items: progress.total_items,
+            done_bytes: progress.done_bytes,
+            total_bytes: progress.total_bytes,
+            name: progress.name.clone(),
+            by_bytes: progress.by_bytes,
+        },
+    );
+}
+
 /// Survey a plan, carry it out, and narrate it — the part a copy and a
 /// cross-volume move do identically. Both arrive here having already settled
 /// every target name, which is what the rollback needs and what lets this stay
@@ -87,21 +107,7 @@ fn carry(
     plan: &[(PathBuf, PathBuf)],
     cancel: &AtomicBool,
 ) -> Result<TransferOutcome, String> {
-    let say = |progress: &transfer::Progress| {
-        let _ = app.emit(
-            "fiddler:transfer",
-            TransferProgress {
-                job,
-                verb: verb.to_string(),
-                done_items: progress.done_items,
-                total_items: progress.total_items,
-                done_bytes: progress.done_bytes,
-                total_bytes: progress.total_bytes,
-                name: progress.name.clone(),
-                by_bytes: progress.by_bytes,
-            },
-        );
-    };
+    let say = |progress: &transfer::Progress| announce(app, job, verb, progress);
 
     // Said before the survey as well as during the transfer: a folder with a
     // hundred thousand files in it takes a moment just to count, and silence
@@ -1644,6 +1650,201 @@ pub async fn move_paths(
             cache.forget_discovery_under(&dir);
             watcher.poke(&dir);
         }
+        result
+    })
+    .await
+    .map_err(|e| e.to_string());
+
+    state.transfers.lock().unwrap().remove(&job);
+    outcome?
+}
+
+/// Put a selection into a zip.
+///
+/// The name is this end's business, exactly as it is for a Duplicate: one item
+/// gives its own name to the archive, several get `Archive.zip`, and
+/// `copy_name` walks around anything already called that. Asking the person to
+/// name it first would put a dialog in front of the one operation whose result
+/// is a single file they can rename in place afterwards.
+///
+/// `destination` is where the archive goes, which the caller decides — normally
+/// the folder the items are in, which is where Finder puts it too.
+#[tauri::command]
+pub async fn compress_paths(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    paths: Vec<String>,
+    destination: String,
+    job: u64,
+) -> Result<TransferOutcome, String> {
+    let cache = state.cache.clone();
+    let watcher = state.watcher.clone();
+
+    let cancel = Arc::new(AtomicBool::new(false));
+    state.transfers.lock().unwrap().insert(job, cancel.clone());
+
+    // Deflating a folder of photographs is minutes of CPU, and none of it runs
+    // on the thread that draws the window.
+    let outcome = tauri::async_runtime::spawn_blocking(move || {
+        local_only(&destination)?;
+        for path in &paths {
+            local_only(path)?;
+        }
+        if paths.is_empty() {
+            return Err("There is nothing to compress".into());
+        }
+        let destination = PathBuf::from(&destination);
+        if !destination.is_dir() {
+            return Err("There is nowhere to put the archive".into());
+        }
+
+        let sources: Vec<PathBuf> = paths.iter().map(PathBuf::from).collect();
+        let mut names = Vec::with_capacity(sources.len());
+        for source in &sources {
+            let name = source
+                .file_name()
+                .and_then(|name| name.to_str())
+                .ok_or("Invalid file name")?;
+            names.push(name.to_owned());
+        }
+        let target = copy_name(&destination, &archive::suggested_name(&names), &HashSet::new());
+
+        let result = squeeze(&app, job, &sources, &target, &cancel);
+
+        // Either way the folder changed: a cancelled archive is removed after
+        // a listing may already have picked it up, so the refresh is owed in
+        // both directions.
+        cache.forget_discovery_under(&destination);
+        watcher.poke(&destination);
+        result
+    })
+    .await
+    .map_err(|e| e.to_string());
+
+    state.transfers.lock().unwrap().remove(&job);
+    outcome?
+}
+
+/// Survey a selection, zip it, and narrate it — `carry`'s opposite number, and
+/// the same shape for the same reason.
+fn squeeze(
+    app: &AppHandle,
+    job: u64,
+    sources: &[PathBuf],
+    target: &Path,
+    cancel: &AtomicBool,
+) -> Result<TransferOutcome, String> {
+    // Said before the survey, which on a large folder is itself a wait. An
+    // archive has no free bytes in it, so this one never has to wonder which
+    // pair of numbers the bar should follow.
+    announce(
+        app,
+        job,
+        "Compressing",
+        &transfer::Progress { by_bytes: true, ..transfer::Progress::default() },
+    );
+
+    let totals = match transfer::survey(sources, cancel) {
+        Ok(totals) => totals,
+        Err(Stopped::Cancelled) => return Ok(TransferOutcome::cancelled()),
+        Err(Stopped::Failed(message)) => return Err(message),
+    };
+
+    let mut last = Instant::now();
+    match archive::compress(sources, target, totals, cancel, &mut |progress| {
+        if last.elapsed() >= TRANSFER_REPORT {
+            last = Instant::now();
+            announce(app, job, "Compressing", progress);
+        }
+    }) {
+        Ok(()) => Ok(TransferOutcome::done(vec![target.to_string_lossy().into_owned()])),
+        Err(Stopped::Cancelled) => Ok(TransferOutcome::cancelled()),
+        Err(Stopped::Failed(message)) => Err(message),
+    }
+}
+
+/// Unpack an archive into `destination`, and say where it landed.
+///
+/// Where that is depends on what is inside, which is why the archive is read
+/// before anything is created: everything under one top-level name is unpacked
+/// as that item, and a spray of loose files gets a folder named after the
+/// archive to sit in. See `archive::Contents`.
+#[tauri::command]
+pub async fn extract_archive(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    path: String,
+    destination: String,
+    job: u64,
+) -> Result<TransferOutcome, String> {
+    let cache = state.cache.clone();
+    let watcher = state.watcher.clone();
+
+    let cancel = Arc::new(AtomicBool::new(false));
+    state.transfers.lock().unwrap().insert(job, cancel.clone());
+
+    let outcome = tauri::async_runtime::spawn_blocking(move || {
+        local_only(&destination)?;
+        local_only(&path)?;
+        let source = PathBuf::from(&path);
+        let destination = PathBuf::from(&destination);
+        if !destination.is_dir() {
+            return Err("There is nowhere to put what's inside".into());
+        }
+
+        let held = archive::contents(&source)?;
+        if held.items == 0 {
+            let name = source.file_name().unwrap_or(source.as_os_str()).to_string_lossy();
+            return Err(format!("“{name}” is empty"));
+        }
+
+        // The name is settled before a byte is written, because that one path
+        // is the whole of what a cancelled extraction has to take back.
+        let wrapper = source
+            .file_stem()
+            .and_then(|stem| stem.to_str())
+            .filter(|stem| !stem.is_empty())
+            .unwrap_or("Archive")
+            .to_owned();
+        let landing = copy_name(
+            &destination,
+            held.root.as_deref().unwrap_or(&wrapper),
+            &HashSet::new(),
+        );
+
+        announce(
+            &app,
+            job,
+            "Extracting",
+            &transfer::Progress {
+                total_items: held.items,
+                total_bytes: held.bytes,
+                by_bytes: true,
+                ..transfer::Progress::default()
+            },
+        );
+
+        let mut last = Instant::now();
+        let result = match archive::extract(
+            &source,
+            &landing,
+            held.root.is_some(),
+            (held.items, held.bytes),
+            &cancel,
+            &mut |progress| {
+                if last.elapsed() >= TRANSFER_REPORT {
+                    last = Instant::now();
+                    announce(&app, job, "Extracting", progress);
+                }
+            },
+        ) {
+            Ok(()) => Ok(TransferOutcome::done(vec![landing.to_string_lossy().into_owned()])),
+            Err(Stopped::Cancelled) => Ok(TransferOutcome::cancelled()),
+            Err(Stopped::Failed(message)) => Err(message),
+        };
+
+        cache.forget_discovery_under(&destination);
+        watcher.poke(&destination);
         result
     })
     .await

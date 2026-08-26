@@ -147,6 +147,12 @@ const backend: Backend = {
   movePaths: (paths, destination, job) =>
     invoke<TransferOutcome>("move_paths", { paths, destination, job }),
 
+  compressPaths: (paths, destination, job) =>
+    invoke<TransferOutcome>("compress_paths", { paths, destination, job }),
+
+  extractArchive: (path, destination, job) =>
+    invoke<TransferOutcome>("extract_archive", { path, destination, job }),
+
   cancelTransfer: (job) => invoke<void>("cancel_transfer", { job }),
 
   onTransfer: (fn) => listen<TransferProgress>("fiddler:transfer", (e) => fn(e.payload)),

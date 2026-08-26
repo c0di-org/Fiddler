@@ -145,6 +145,25 @@ export interface Backend {
    * move that has to cross volumes reports progress or can be stopped; the
    * rest are over before there is anything to say. */
   movePaths(paths: string[], destination: string, job: number): Promise<TransferOutcome>;
+  /** Put items into a zip in `destination`, and resolve with where it landed.
+   *
+   * The name is the backend's, the same way a Duplicate's is: one item names
+   * the archive, several get `Archive.zip`, and a collision is walked around.
+   * `job` is the caller's, for the same reason `copyPaths`'s is — this does not
+   * resolve until the archive is written, which is exactly the span in which
+   * Cancel needs something to name. */
+  compressPaths?(paths: string[], destination: string, job: number): Promise<TransferOutcome>;
+  /** Unpack an archive into `destination`, and resolve with the one path it
+   * created. Where that is depends on what is inside: everything under a single
+   * top-level name is unpacked as that item, and a spray of loose files gets a
+   * folder named after the archive to sit in — Archive Utility's rule, and the
+   * only one that avoids both `foo/foo/…` and forty files loose in Downloads.
+   *
+   * Optional, along with `compressPaths`, for the reason spelled out at the
+   * bottom of this file: their presence *is* the capability. There is no zip
+   * engine in the browser build, so both are `undefined` there and the menu
+   * items that would call them never render. */
+  extractArchive?(path: string, destination: string, job: number): Promise<TransferOutcome>;
   /** Stop a running transfer, which then removes everything it had written —
    * and in a move, leaves the originals untouched. Doing nothing is the right
    * answer for a job that has already finished. */

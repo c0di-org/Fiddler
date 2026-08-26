@@ -1,6 +1,7 @@
 #[cfg(target_os = "android")]
 mod android_jni;
 mod apk;
+mod archive;
 mod back;
 mod commands;
 mod content_search;
@@ -116,6 +117,8 @@ pub fn run() {
             commands::free_name,
             commands::rename_path,
             commands::copy_paths,
+            commands::compress_paths,
+            commands::extract_archive,
             commands::cancel_transfer,
             commands::move_paths,
             commands::trash_paths,

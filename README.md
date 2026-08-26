@@ -18,6 +18,7 @@ Cross-platform file management for macOS, Android/DeX, and the web.
 - **File operations** including new folders and text files, rename, copy, cut, paste, duplicate, internal drag and drop, delete/trash, and multi-select.
 - **Undo** for rename, paste, drag/move, and recoverable trash operations.
 - **Transfer progress and cancel** for longer copies and cross-volume moves, with rollback on cancel or failure.
+- **Zip archives** on macOS and Android: compress a selection into a zip beside it, and extract one in place. Both report progress, can be cancelled, and can be undone.
 - **Quick Look** for folders, images, audio, video, Markdown, source/text files, links, and PDFs.
 - **PDF reader** with single-page or spread layout, fit-to-page/width, keyboard/touch navigation, full screen, and remembered reading position.
 - **Image editing** with rectangle and magic-wand selection, crop, delete to transparency, fill, rotate, mirror, and resize. Markup adds boxes, ovals, lines, arrows, freehand, highlighter, and text. Save a copy as JPEG, PNG, or WebP — or give a target file size and let Fiddler find the settings that meet it.
@@ -201,6 +202,7 @@ npm run deploy
 
 ## Current limitations
 
+- Archives are zip only. `.tar.gz`, `.7z` and `.rar` keep their icons and their previews, but Fiddler will not unpack them; password-protected zips are left to the system. The web build has no archive support at all.
 - No tabs or column view yet.
 - Drag and drop works inside Fiddler, but native drag in/out of Finder is not implemented yet.
 - The browser build cannot provide native Git, USB/MTP, volume, or real nearby-device features.

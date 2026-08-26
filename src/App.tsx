@@ -21,6 +21,7 @@ import { EjectBusyBanner, VolumeBlocked } from "./components/VolumeRow";
 import { TransferNoteBanner } from "./components/Banner";
 import type { FolderTouchDragHandlers } from "./components/touch-press";
 import { GridIcon } from "./components/icons";
+import { isZip } from "./archive";
 import { confirmDialog } from "./confirm";
 import { describeItems, parentOf, type DragItems, type DropVerb } from "./drag";
 import { addFavorite, loadFavorites, moveFavorite, saveFavorites } from "./favorites";
@@ -36,7 +37,7 @@ import { contentTerms, prepareSearch, search, type SearchKind, type SearchRecord
 import { TreeStore, type Row } from "./store/tree";
 import { invert, remember, take as takeUndo, undoStore } from "./undo";
 import { applyTint, hasSystemAccent, loadTint, saveTint, watchTint, type Tint } from "./tint";
-import type { ContentSearch, DeviceAccess, EjectOutcome, Entry, Favorite, NearbyAccess, NearbyEntry, NearbySearch, PairRequest, PairingInfo, PeerDevice, Place, TransferProgress, UsbDevice, Volume, WorktreeInfo } from "./types";
+import type { ContentSearch, DeviceAccess, EjectOutcome, Entry, Favorite, NearbyAccess, NearbyEntry, NearbySearch, PairRequest, PairingInfo, PeerDevice, Place, TransferOutcome, TransferProgress, UsbDevice, Volume, WorktreeInfo } from "./types";
 import { volumeFor } from "./volumes";
 
 /** Read once, at module load, because the store is built from it. */
@@ -1076,6 +1077,66 @@ export default function App() {
   }, [selection, targets]);
 
   /**
+   * Run something long enough to watch, with the status bar watching it.
+   *
+   * The job number is invented here rather than handed back by the call,
+   * because none of these calls resolves until the work is over — which is
+   * exactly the span in which Cancel needs a name. Only the job that is
+   * actually running is shown: a second one started while the first is going
+   * would otherwise fight it for the one status bar.
+   *
+   * A copy, a move, an archive and an extraction all come through here, which
+   * is why it takes the work rather than a verb. They are the same event from
+   * the bar's side, and the backend narrates all four the same way.
+   */
+  const runJob = useCallback(async (work: (job: number) => Promise<TransferOutcome>) => {
+    const job = nextTransferJob.current++;
+    activeTransferJob.current = job;
+    try {
+      return await work(job);
+    } finally {
+      if (activeTransferJob.current === job) {
+        activeTransferJob.current = null;
+        setTransfer(null);
+      }
+    }
+  }, []);
+
+  /**
+   * Take an archive apart, next to itself.
+   *
+   * Where the contents land is the backend's decision, because only it can see
+   * inside: an archive that already holds one folder is unpacked as that
+   * folder, and one holding forty loose files is given a folder of its own. It
+   * comes back with the single path it made, which is what makes this
+   * undoable and what leaves the result selected.
+   */
+  const unpack = useCallback(
+    async (t: Target) => {
+      const extract = ipc.extractArchive;
+      // Nothing renders the verb where this is missing, but the menu is not the
+      // only way in — ↵ on a zip arrives here too.
+      if (!extract) return;
+      const destination = parentOf(t.path);
+      const here = locationCaps(destination, volumes);
+      if (!here.create) {
+        flash(refusal(here, "unpack archives"));
+        return;
+      }
+      try {
+        const outcome = await runJob((job) => extract(t.path, destination, job));
+        if (outcome.cancelled) return;
+        setSelection(new Set(outcome.paths));
+        remember({ label: "Extract", action: { kind: "create", paths: outcome.paths } });
+        flash(`Extracted “${t.name}”`);
+      } catch (error) {
+        flash(String(error).replace(/^Error:\s*/, ""));
+      }
+    },
+    [flash, runJob, volumes]
+  );
+
+  /**
    * Put a file in Fiddler's own editor, if it's the sort of file that can be.
    *
    * Two reads rather than one: text-or-binary is answered by the first block —
@@ -1152,6 +1213,19 @@ export default function App() {
           setPicture({ path: t.path, name: t.name });
           return;
         }
+        // Nor will it take a zip — which on Android is every zip, since
+        // nothing there is registered for one, and where opening an archive
+        // used to end in the editor refusing it. Opening one means taking it
+        // apart; the menu's Extract is the same verb said out loud.
+        //
+        // After the hand-off rather than before it, deliberately: where macOS
+        // has Archive Utility it also has the password prompt and the formats
+        // this end can't read, and the established rule is that the system
+        // gets first refusal on anything it knows.
+        if (isZip(t.name) && ipc.extractArchive) {
+          await unpack(t);
+          return;
+        }
         if (await openInEditor(t)) return;
         // Neither the OS nor the editor will have it. Hand it over anyway and
         // let the system say its piece — silence would be worse.
@@ -1160,7 +1234,7 @@ export default function App() {
         flash(`Could not open “${t.name}”`);
       }
     },
-    [go, flash, openInEditor]
+    [go, flash, openInEditor, unpack]
   );
 
   useEffect(() => {
@@ -1285,31 +1359,15 @@ export default function App() {
     }
   }, [selected, flash, volumes]);
 
-  /**
-   * Run a copy or a move with the status bar watching it. The job number is
-   * invented here rather than handed back by the call, because the call doesn't
-   * resolve until the transfer is over — which is exactly the span in which
-   * Cancel needs a name.
-   *
-   * Only the job that is actually running is shown: a second transfer started
-   * while the first is going would otherwise fight it for the one status bar.
-   */
+  /** A copy or a move, through the one runner that shows them. */
   const runTransfer = useCallback(
-    async (verb: "copy" | "move", paths: string[], destination: string) => {
-      const job = nextTransferJob.current++;
-      activeTransferJob.current = job;
-      try {
-        return verb === "copy"
-          ? await ipc.copyPaths(paths, destination, job)
-          : await ipc.movePaths(paths, destination, job);
-      } finally {
-        if (activeTransferJob.current === job) {
-          activeTransferJob.current = null;
-          setTransfer(null);
-        }
-      }
-    },
-    []
+    (verb: "copy" | "move", paths: string[], destination: string) =>
+      runJob((job) =>
+        verb === "copy"
+          ? ipc.copyPaths(paths, destination, job)
+          : ipc.movePaths(paths, destination, job)
+      ),
+    [runJob]
   );
 
   useEffect(() => {
@@ -1380,6 +1438,40 @@ export default function App() {
       flash(String(error).replace(/^Error:\s*/, ""));
     }
   }, [selected, flash, runTransfer, volumes]);
+
+  /**
+   * Put the selection into a zip beside it.
+   *
+   * The name is the backend's business, exactly as a Duplicate's is: one item
+   * gives the archive its name, several get `Archive.zip`, and anything already
+   * called that is walked around. A dialog asking for a name first would be one
+   * more step in front of the one result that can be renamed in place.
+   *
+   * The archive lands in the folder the first item is in, which is where Finder
+   * puts it and the only answer that means anything for a selection gathered
+   * from a search across several folders.
+   */
+  const compressSelected = useCallback(async () => {
+    const compress = ipc.compressPaths;
+    if (!compress) return;
+    const paths = selected.filter((target) => target.entry).map((target) => target.path);
+    if (paths.length === 0) return;
+    const destination = parentOf(paths[0]);
+    const here = locationCaps(destination, volumes);
+    if (!here.create) {
+      flash(refusal(here, "make an archive"));
+      return;
+    }
+    try {
+      const outcome = await runJob((job) => compress(paths, destination, job));
+      if (outcome.cancelled) return;
+      setSelection(new Set(outcome.paths));
+      remember({ label: "Compress", action: { kind: "create", paths: outcome.paths } });
+      flash(`Compressed ${paths.length} item${paths.length === 1 ? "" : "s"}`);
+    } catch (error) {
+      flash(String(error).replace(/^Error:\s*/, ""));
+    }
+  }, [selected, flash, runJob, volumes]);
 
   /** Everything in the selection the system's share sheet could actually take.
    *
@@ -1641,6 +1733,12 @@ export default function App() {
         // twelve windows, and "Rename…" for twelve has nothing to rename.
         if (many === 1) {
           items.push({ label: "Open", onPick: () => void openTarget(t) });
+          // Beside Open, because for an archive it is what Open is for. Where
+          // the system takes the zip instead — Archive Utility on a Mac — this
+          // is the same result done here, with a bar, a Cancel and a ⌘Z.
+          if (!t.isDir && isZip(t.name) && ipc.extractArchive && at.create) {
+            items.push({ label: "Extract", onPick: () => void unpack(t) });
+          }
           const route = t.isDir ? null : routeOf(t.name);
           // A picture gets its own verb, above the text one: for a photograph
           // "Edit Text File" is not a near miss, it is a different application.
@@ -1689,6 +1787,12 @@ export default function App() {
         if (t.entry && at.modify) items.push({ label: count("Cut"), onPick: cutSelected });
         if (t.entry && at.create) {
           items.push({ label: count("Duplicate"), onPick: () => void duplicateSelected() });
+          // Asked of the item's own location because that is where the archive
+          // goes: beside what went into it. A phone on a cable and a read-only
+          // disk both answer no, which is the honest answer for both.
+          if (ipc.compressPaths) {
+            items.push({ label: count("Compress"), onPick: () => void compressSelected() });
+          }
         }
         // Paste *into* the folder under the pointer, which is the shape most
         // filing takes: the thing to put away is in front of you and its home
@@ -1796,7 +1900,7 @@ export default function App() {
       const title = t ? (many > 1 ? `${many} items` : t.name) : undefined;
       if (items.length > 0) setMenu({ x, y, items, sheet, title });
     },
-    [openTarget, openInEditor, flash, go, selection, selected.length, targets, favorites, favorite, unfavorite, copySelected, cutSelected, duplicateSelected, shareable.length, shareSelected, trashSelected, clipboard, paste, newFolder, newTextFile, mountFolder, undoNext, undo, volumes]
+    [openTarget, openInEditor, flash, go, selection, selected.length, targets, favorites, favorite, unfavorite, copySelected, cutSelected, duplicateSelected, compressSelected, unpack, shareable.length, shareSelected, trashSelected, clipboard, paste, newFolder, newTextFile, mountFolder, undoNext, undo, volumes]
   );
 
   /**
