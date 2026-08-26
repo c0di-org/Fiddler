@@ -2,7 +2,7 @@ use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use serde::Serialize;
@@ -1055,57 +1055,245 @@ fn percent_decode(input: &str) -> Option<String> {
     String::from_utf8(out).ok()
 }
 
-/// The bytes of a raw-body request, refusing a JSON one.
-fn raw_body(request: &tauri::ipc::Request<'_>) -> Result<Vec<u8>, String> {
-    match request.body() {
-        tauri::ipc::InvokeBody::Raw(bytes) => Ok(bytes.clone()),
-        tauri::ipc::InvokeBody::Json(_) => {
-            Err("expected the file's bytes as the request body, not as JSON".into())
+/// Where a save's bytes are: in the request body, or in a file they were
+/// staged into a piece at a time.
+///
+/// Android needs the second door. Tauri's own IPC script says why, in a comment
+/// above the line that closes the first one: "on Android we never use it
+/// because Android does not have support to reading the request body". Every
+/// invoke there goes through `postMessage` instead, where the whole message is
+/// one JSON string — and a `Uint8Array` in it becomes an array of four million
+/// numbers, 16 MB of text to build in the WebView and parse back into a 4 MB
+/// JPEG. That is exactly the copying the raw body exists to avoid, on the one
+/// platform least able to afford it.
+///
+/// So on Android the picture arrives through `stage_bytes` in half-megabyte
+/// pieces and this is a path to what they appended to. The whole file is never
+/// in memory at either end: the save is a copy between two files.
+enum Payload {
+    Body(Vec<u8>),
+    Staged(PathBuf),
+}
+
+impl Payload {
+    /// Write the bytes into an opened file. Takes `&self` so the caller can
+    /// still `discard` afterwards, whether this succeeded or not.
+    fn write_into(&self, file: &mut std::fs::File) -> Result<(), String> {
+        use std::io::Write;
+        match self {
+            Payload::Body(bytes) => file.write_all(bytes).map_err(|e| e.to_string()),
+            Payload::Staged(staged) => {
+                let mut source = std::fs::File::open(staged).map_err(|e| e.to_string())?;
+                std::io::copy(&mut source, file).map(|_| ()).map_err(|e| e.to_string())
+            }
         }
     }
+
+    /// Forget the staged file. Called on every path out of a save, because a
+    /// megabytes-large piece of cache that no one will ever ask for again is
+    /// worse than the failure that left it.
+    fn discard(self) {
+        if let Payload::Staged(staged) = self {
+            let _ = std::fs::remove_file(staged);
+        }
+    }
+}
+
+/// Read a save's bytes out of the request: the body where the platform can
+/// carry one, otherwise the staging file named in the JSON payload.
+fn payload_of(app: &AppHandle, request: &tauri::ipc::Request<'_>) -> Result<Payload, String> {
+    match request.body() {
+        tauri::ipc::InvokeBody::Raw(bytes) => Ok(Payload::Body(bytes.clone())),
+        tauri::ipc::InvokeBody::Json(value) => {
+            let token = value
+                .get("staged")
+                .and_then(|v| v.as_str())
+                .ok_or("expected the file's bytes as the request body or a staged token")?;
+            Ok(Payload::Staged(staged_path(app, token)?))
+        }
+    }
+}
+
+/// The folder half-arrived files are assembled in: inside the app's own cache,
+/// which is where the system already knows it may reclaim space, and which on
+/// Android is private to Fiddler.
+///
+/// Resolved once. On Android `app_cache_dir` is a call across JNI, and a save
+/// asks for this once per half megabyte.
+///
+/// The first resolve empties it. A save that was interrupted — the window went
+/// away, the phone reclaimed the app — leaves a piece of a photograph behind
+/// that nothing will ever ask for again, and the first save of the next run is
+/// the one moment we know for certain that no piece in there is still wanted.
+fn staging_dir(app: &AppHandle) -> Result<&'static Path, String> {
+    use tauri::Manager;
+
+    static DIR: OnceLock<PathBuf> = OnceLock::new();
+    if let Some(dir) = DIR.get() {
+        return Ok(dir);
+    }
+    let dir = app
+        .path()
+        .app_cache_dir()
+        .map_err(|e| e.to_string())?
+        .join("staged");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    Ok(DIR.get_or_init(|| dir))
+}
+
+/// Where a staging file lives, given the token that names it.
+///
+/// The token is a UUID this process made up, and the check that it still looks
+/// like one is the whole of the security here: it is joined onto a directory
+/// path, and "../../" is a filename too.
+fn staged_path(app: &AppHandle, token: &str) -> Result<PathBuf, String> {
+    if token.is_empty()
+        || token.len() > 36
+        || !token.bytes().all(|b| b.is_ascii_hexdigit() || b == b'-')
+    {
+        return Err("that is not a staging token".into());
+    }
+    Ok(staging_dir(app)?.join(token))
+}
+
+/// Append a piece of a file to a staging file, and say which one it is.
+///
+/// The way in for a platform whose IPC cannot carry a request body — see
+/// `Payload`. Called with no token to begin, then with the token it returns for
+/// every piece after that, so nothing larger than one piece is ever a string.
+#[tauri::command]
+pub async fn stage_bytes(
+    app: AppHandle,
+    token: Option<String>,
+    chunk: String,
+) -> Result<String, String> {
+    let token = match token {
+        Some(existing) => existing,
+        None => uuid::Uuid::new_v4().to_string(),
+    };
+    let path = staged_path(&app, &token)?;
+    let bytes = base64_decode(&chunk).ok_or("that piece is not base64")?;
+
+    tauri::async_runtime::spawn_blocking(move || {
+        use std::io::Write;
+
+        let mut file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)
+            .map_err(|e| e.to_string())?;
+        file.write_all(&bytes).map_err(|e| e.to_string())?;
+        // No `sync_all`: this file exists to be read back by this same process
+        // in a moment and deleted. Durability across a power cut is not what it
+        // is for, and paying for it once per half megabyte would be felt.
+        Ok(token)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Base64 decoding, the other half of `btoa` in the front end. Hand-rolled for
+/// the same reason `percent_decode` above is: it is thirty lines, and the
+/// alternative is a dependency in every build to serve one platform's bridge.
+fn base64_decode(input: &str) -> Option<Vec<u8>> {
+    fn sextet(byte: u8) -> Option<u32> {
+        Some(match byte {
+            b'A'..=b'Z' => u32::from(byte - b'A'),
+            b'a'..=b'z' => u32::from(byte - b'a') + 26,
+            b'0'..=b'9' => u32::from(byte - b'0') + 52,
+            b'+' => 62,
+            b'/' => 63,
+            _ => return None,
+        })
+    }
+
+    let bytes = input.as_bytes();
+    if bytes.len() % 4 != 0 {
+        return None;
+    }
+    let mut out = Vec::with_capacity(bytes.len() / 4 * 3);
+    let quads = bytes.len() / 4;
+    for (index, quad) in bytes.chunks(4).enumerate() {
+        let pad = quad.iter().rev().take_while(|&&b| b == b'=').count();
+        // Padding closes the last quad and only the last one; anywhere else it
+        // is a corrupted message pretending to be a shorter one.
+        if pad > 2 || (pad > 0 && index + 1 != quads) {
+            return None;
+        }
+        let mut acc = 0u32;
+        for (place, &byte) in quad.iter().enumerate() {
+            // Only the counted tail may be padding: an `=` anywhere before it
+            // is not a shorter quad, it is a damaged one.
+            let value = if place >= 4 - pad { 0 } else { sextet(byte)? };
+            acc = (acc << 6) | value;
+        }
+        let [_, first, second, third] = acc.to_be_bytes();
+        out.push(first);
+        if pad < 2 {
+            out.push(second);
+        }
+        if pad < 1 {
+            out.push(third);
+        }
+    }
+    Some(out)
 }
 
 /// Create a file from raw bytes without ever overwriting an existing item.
 ///
 /// The bytes arrive as the request body rather than inside the JSON payload,
 /// which is not a micro-optimisation: the only caller is the image editor and
-/// its payloads are megabytes. Base64 through the JSON bridge inflates them by
-/// a third and copies the buffer three times — once to encode, once to parse,
-/// once to decode — on a phone whose WebView is killed for less.
+/// its payloads are megabytes, and putting one of those inside a JSON message
+/// means building and parsing a string several times its size. Where the
+/// platform cannot carry a body at all, `Payload` says what happens instead —
+/// pieces small enough that the same arithmetic stops mattering.
 ///
 /// The counterpart of `create_text_file`, and conservative for the same reason:
 /// a typo in a new filename must not be able to erase a neighbouring photograph.
 #[tauri::command]
 pub async fn create_file(
+    app: AppHandle,
     state: State<'_, AppState>,
     request: tauri::ipc::Request<'_>,
 ) -> Result<String, String> {
     let parent = text_header(&request, "x-parent")?;
     let name = text_header(&request, "x-name")?;
-    let bytes = raw_body(&request)?;
+    let payload = payload_of(&app, &request)?;
 
     let cache = state.cache.clone();
     let watcher = state.watcher.clone();
     // Same reasoning as `write_text_file`: `sync_all` on Android's shared
     // storage is unbounded wall-clock and does not belong on the UI thread.
     tauri::async_runtime::spawn_blocking(move || {
-        use std::io::Write;
-
-        local_only(&parent)?;
-        let target = safe_child(&parent, &name)?;
-        match std::fs::OpenOptions::new().write(true).create_new(true).open(&target) {
-            Ok(mut file) => {
-                file.write_all(&bytes).map_err(|e| e.to_string())?;
-                file.sync_all().map_err(|e| e.to_string())?;
+        let written = (|| -> Result<String, String> {
+            local_only(&parent)?;
+            let target = safe_child(&parent, &name)?;
+            match std::fs::OpenOptions::new().write(true).create_new(true).open(&target) {
+                Ok(mut file) => {
+                    // A half-written picture with the right name is worse than
+                    // no picture at all — it looks like the save worked. If the
+                    // write or the flush fails, the file goes with it.
+                    let done = payload
+                        .write_into(&mut file)
+                        .and_then(|()| file.sync_all().map_err(|e| e.to_string()));
+                    if done.is_err() {
+                        drop(file);
+                        let _ = std::fs::remove_file(&target);
+                    }
+                    done?;
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                    return Err(format!("\u{201c}{name}\u{201d} already exists here"));
+                }
+                Err(e) => return Err(e.to_string()),
             }
-            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
-                return Err(format!("\u{201c}{name}\u{201d} already exists here"));
-            }
-            Err(e) => return Err(e.to_string()),
-        }
-        cache.forget_discovery_under(Path::new(&parent));
-        watcher.poke(Path::new(&parent));
-        Ok(target.to_string_lossy().into_owned())
+            cache.forget_discovery_under(Path::new(&parent));
+            watcher.poke(Path::new(&parent));
+            Ok(target.to_string_lossy().into_owned())
+        })();
+        payload.discard();
+        written
     })
     .await
     .map_err(|e| e.to_string())?
@@ -1118,51 +1306,54 @@ pub async fn create_file(
 /// has decided where the picture lives.
 #[tauri::command]
 pub async fn write_file(
+    app: AppHandle,
     state: State<'_, AppState>,
     request: tauri::ipc::Request<'_>,
 ) -> Result<(), String> {
     let path = text_header(&request, "x-path")?;
-    let bytes = raw_body(&request)?;
+    let payload = payload_of(&app, &request)?;
 
     let cache = state.cache.clone();
     let watcher = state.watcher.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        use std::io::Write;
+        let written = (|| -> Result<(), String> {
+            local_only(&path)?;
+            let target = PathBuf::from(&path);
+            let meta = std::fs::metadata(&target).map_err(|e| e.to_string())?;
+            if !meta.is_file() {
+                return Err("that is not a regular file".into());
+            }
+            let parent = target.parent().ok_or("cannot write the filesystem root")?;
+            let file_name = target
+                .file_name()
+                .and_then(|n| n.to_str())
+                .ok_or("invalid file name")?;
+            let temp = parent.join(format!(".{file_name}.fiddler-save-{}", std::process::id()));
+            if temp.exists() {
+                return Err("a previous save is still being finalized; please try again".into());
+            }
 
-        local_only(&path)?;
-        let target = PathBuf::from(&path);
-        let meta = std::fs::metadata(&target).map_err(|e| e.to_string())?;
-        if !meta.is_file() {
-            return Err("that is not a regular file".into());
-        }
-        let parent = target.parent().ok_or("cannot write the filesystem root")?;
-        let file_name = target
-            .file_name()
-            .and_then(|n| n.to_str())
-            .ok_or("invalid file name")?;
-        let temp = parent.join(format!(".{file_name}.fiddler-save-{}", std::process::id()));
-        if temp.exists() {
-            return Err("a previous save is still being finalized; please try again".into());
-        }
-
-        let result = (|| -> Result<(), String> {
-            let mut file = std::fs::OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(&temp)
-                .map_err(|e| e.to_string())?;
-            file.write_all(&bytes).map_err(|e| e.to_string())?;
-            file.sync_all().map_err(|e| e.to_string())?;
-            std::fs::rename(&temp, &target).map_err(|e| e.to_string())?;
+            let result = (|| -> Result<(), String> {
+                let mut file = std::fs::OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .open(&temp)
+                    .map_err(|e| e.to_string())?;
+                payload.write_into(&mut file)?;
+                file.sync_all().map_err(|e| e.to_string())?;
+                std::fs::rename(&temp, &target).map_err(|e| e.to_string())?;
+                Ok(())
+            })();
+            if result.is_err() {
+                let _ = std::fs::remove_file(&temp);
+            }
+            result?;
+            cache.forget_discovery_under(parent);
+            watcher.poke(parent);
             Ok(())
         })();
-        if result.is_err() {
-            let _ = std::fs::remove_file(&temp);
-        }
-        result?;
-        cache.forget_discovery_under(parent);
-        watcher.poke(parent);
-        Ok(())
+        payload.discard();
+        written
     })
     .await
     .map_err(|e| e.to_string())?
@@ -2101,6 +2292,32 @@ mod tests {
         assert!(move_one(&missing, &dir.join("target")).is_err());
 
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// Every length class of `btoa` output, because the padded ones are where a
+    /// hand-rolled decoder gets a picture's last one or two bytes wrong — and a
+    /// JPEG missing its final byte is a JPEG that decodes to a grey band.
+    #[test]
+    fn base64_round_trips_every_tail() {
+        assert_eq!(base64_decode("").unwrap(), b"");
+        assert_eq!(base64_decode("TWFu").unwrap(), b"Man");
+        assert_eq!(base64_decode("TWE=").unwrap(), b"Ma");
+        assert_eq!(base64_decode("TQ==").unwrap(), b"M");
+        // The two characters a photograph's bytes reach that text never does.
+        assert_eq!(base64_decode("+/8=").unwrap(), [0xfb, 0xff]);
+        // 0..=255 as `btoa(String.fromCharCode(...))` produces it.
+        let all: Vec<u8> = (0..=255).collect();
+        let encoded = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8gISIjJCUmJygpKissLS4vMDEyMzQ1Njc4OTo7PD0+P0BBQkNERUZHSElKS0xNTk9QUVJTVFVWV1hZWltcXV5fYGFiY2RlZmdoaWprbG1ub3BxcnN0dXZ3eHl6e3x9fn+AgYKDhIWGh4iJiouMjY6PkJGSk5SVlpeYmZqbnJ2en6ChoqOkpaanqKmqq6ytrq+wsbKztLW2t7i5uru8vb6/wMHCw8TFxsfIycrLzM3Oz9DR0tPU1dbX2Nna29zd3t/g4eLj5OXm5+jp6uvs7e7v8PHy8/T19vf4+fr7/P3+/w==";
+        assert_eq!(base64_decode(encoded).unwrap(), all);
+    }
+
+    #[test]
+    fn base64_refuses_what_is_not_base64() {
+        assert!(base64_decode("TWF").is_none(), "a length that cannot be base64");
+        assert!(base64_decode("TW*n").is_none(), "a character outside the alphabet");
+        assert!(base64_decode("TQ==TWFu").is_none(), "padding before the end");
+        assert!(base64_decode("T===").is_none(), "more padding than a quad can hold");
+        assert!(base64_decode("T=Fu").is_none(), "padding inside a quad");
     }
 
     #[test]

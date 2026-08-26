@@ -110,6 +110,7 @@ pub fn run() {
             commands::create_folder,
             commands::create_text_file,
             commands::write_text_file,
+            commands::stage_bytes,
             commands::create_file,
             commands::write_file,
             commands::free_name,

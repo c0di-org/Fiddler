@@ -141,6 +141,30 @@ travels percent-encoded, and `commands.rs` owns a fifteen-line decoder rather
 than a crate for it. A folder named in Korean is not an edge case, it is
 Tuesday.
 
+#### Except on Android, where there is no request body
+
+The one platform this was written for is the one that cannot do it. Tauri's IPC
+script closes that door itself:
+
+```js
+// on Android we never use it because Android does not have support to reading the request body
+const canUseCustomProtocol = osName !== 'android'
+```
+
+Everything there goes through `postMessage`, where the whole message is one JSON
+string — so a `Uint8Array` payload arrives as an array of numbers, four
+characters of text per byte, and `create_file` answered every save with
+"expected the file's bytes as the request body, not as JSON".
+
+Headers survive that route (they travel in `options`), so only the bytes needed
+somewhere else to go. They go in pieces: `stage_bytes` takes half a megabyte of
+base64 at a time and appends it to a file in the app's cache, and the save
+command is then handed the name of that file instead of the bytes. The whole
+picture is never a string, never a JSON value, and never in memory in Rust — the
+save is a copy from one file to another. Desktop still uses the raw body; the
+front end picks the door in `backend/staged.ts`, and `Payload` in `commands.rs`
+is the end that does not care which one was used.
+
 ### What saving means
 
 Preview saves in place and leans on macOS Versions to make that safe. Fiddler

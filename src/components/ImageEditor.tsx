@@ -697,7 +697,7 @@ export function ImageEditor({ path, name, volumes = [], closeSignal = 0, onClose
     <div className="image-editor" data-tool={tool}>
       <header className="ed-bar">
         <button className="ed-icon" onClick={() => void askClose()} title="Close (Esc)" aria-label="Close">
-          <CloseIcon size={15} />
+          <CloseIcon />
         </button>
         <div className="ed-title">
           <span className="ed-name">{name}</span>
@@ -714,7 +714,7 @@ export function ImageEditor({ path, name, volumes = [], closeSignal = 0, onClose
           title={`Undo (${keyHint("⌘Z")})`}
           aria-label="Undo"
         >
-          <UndoIcon size={15} />
+          <UndoIcon />
         </button>
         <button
           className="ed-icon"
@@ -723,7 +723,7 @@ export function ImageEditor({ path, name, volumes = [], closeSignal = 0, onClose
           title="Size…"
           aria-label="Size"
         >
-          <ResizeIcon size={15} />
+          <ResizeIcon />
         </button>
         <button
           className="ed-save"
@@ -731,7 +731,7 @@ export function ImageEditor({ path, name, volumes = [], closeSignal = 0, onClose
           disabled={!writable}
           title={writable ? `Save a copy (${keyHint("⌘S")})` : refusal(at, "save a copy here")}
         >
-          <SaveIcon size={14} />
+          <SaveIcon />
           Save a copy
         </button>
       </header>
@@ -797,13 +797,13 @@ export function ImageEditor({ path, name, volumes = [], closeSignal = 0, onClose
         {selection && (
           <div className="ed-group ed-verbs">
             <button className="ed-chip strong" onClick={cropToSelection}>
-              <CropIcon size={13} /> Crop
+              <CropIcon /> Crop
             </button>
             <button className="ed-chip" onClick={() => punchSelection("erase")}>
-              <EraseIcon size={13} /> Delete
+              <EraseIcon /> Delete
             </button>
             <button className="ed-chip" onClick={() => punchSelection("fill")}>
-              <FillIcon size={13} /> Fill
+              <FillIcon /> Fill
             </button>
             <button className="ed-chip" onClick={() => setSelection(null)}>
               Deselect
@@ -813,16 +813,16 @@ export function ImageEditor({ path, name, volumes = [], closeSignal = 0, onClose
 
         <div className="ed-group ed-turns">
           <button className="ed-icon" onClick={() => applyAndClear((d) => rotateDoc(d, -1))} title="Turn left" aria-label="Turn left">
-            <RotateLeftIcon size={15} />
+            <RotateLeftIcon />
           </button>
           <button className="ed-icon" onClick={() => applyAndClear((d) => rotateDoc(d, 1))} title="Turn right" aria-label="Turn right">
-            <RotateRightIcon size={15} />
+            <RotateRightIcon />
           </button>
           <button className="ed-icon" onClick={() => applyAndClear((d) => flipDoc(d, "x"))} title="Mirror" aria-label="Mirror left to right">
-            <FlipHIcon size={15} />
+            <FlipHIcon />
           </button>
           <button className="ed-icon" onClick={() => applyAndClear((d) => flipDoc(d, "y"))} title="Flip" aria-label="Flip top to bottom">
-            <FlipVIcon size={15} />
+            <FlipVIcon />
           </button>
         </div>
       </div>
@@ -875,13 +875,13 @@ export function ImageEditor({ path, name, volumes = [], closeSignal = 0, onClose
       </div>
 
       <nav className="ed-tools" aria-label="Tools">
-        <ToolButton tool="pointer" now={tool} set={setTool} label="Move things" hint="V"><PointerIcon size={17} /></ToolButton>
-        <ToolButton tool="marquee" now={tool} set={setTool} label="Select a rectangle" hint="M"><MarqueeIcon size={17} /></ToolButton>
-        <ToolButton tool="wand" now={tool} set={setTool} label="Select what looks alike" hint="W"><WandIcon size={17} /></ToolButton>
-        <ToolButton tool="shape" now={tool} set={setTool} label="Draw a shape" hint="S"><ShapesIcon size={17} /></ToolButton>
-        <ToolButton tool="text" now={tool} set={setTool} label="Add text" hint="T"><TextIcon size={17} /></ToolButton>
-        <ToolButton tool="pen" now={tool} set={setTool} label="Draw freehand" hint="P"><PenIcon size={17} /></ToolButton>
-        <ToolButton tool="highlighter" now={tool} set={setTool} label="Highlight" hint="H"><HighlightIcon size={17} /></ToolButton>
+        <ToolButton tool="pointer" now={tool} set={setTool} label="Move things" hint="V"><PointerIcon /></ToolButton>
+        <ToolButton tool="marquee" now={tool} set={setTool} label="Select a rectangle" hint="M"><MarqueeIcon /></ToolButton>
+        <ToolButton tool="wand" now={tool} set={setTool} label="Select what looks alike" hint="W"><WandIcon /></ToolButton>
+        <ToolButton tool="shape" now={tool} set={setTool} label="Draw a shape" hint="S"><ShapesIcon /></ToolButton>
+        <ToolButton tool="text" now={tool} set={setTool} label="Add text" hint="T"><TextIcon /></ToolButton>
+        <ToolButton tool="pen" now={tool} set={setTool} label="Draw freehand" hint="P"><PenIcon /></ToolButton>
+        <ToolButton tool="highlighter" now={tool} set={setTool} label="Highlight" hint="H"><HighlightIcon /></ToolButton>
       </nav>
 
       {panel === "size" && (

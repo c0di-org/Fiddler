@@ -4646,6 +4646,14 @@ li.md-task {
  */
 
 .image-editor {
+  /* The glyph sizes live here rather than at each call site in the TSX,
+     because they have to answer a media query: the same 15px close button that
+     reads as small-and-tidy on a laptop reads as a speck on a desktop monitor
+     driven from a phone, which is what DeX is. One number per family of
+     buttons, and the rungs at the end of this block move them together. */
+  --ed-glyph: 24px;
+  --ed-chip-glyph: 18px;
+  --ed-tool-glyph: 28px;
   position: fixed;
   inset: 0;
   z-index: 72;
@@ -4702,8 +4710,8 @@ li.md-task {
 .ed-icon {
   display: grid;
   place-items: center;
-  width: 32px;
-  height: 32px;
+  width: 40px;
+  height: 40px;
   flex: none;
   border: 0;
   border-radius: 8px;
@@ -4712,6 +4720,21 @@ li.md-task {
   cursor: pointer;
 }
 
+/* The glyph, wherever it sits. `flex: none` because an SVG in a flex row with
+   a label beside it is otherwise the first thing squeezed when the line runs
+   out of room, and a half-width icon reads as a rendering fault. */
+.ed-icon svg,
+.ed-save svg,
+.ed-chip svg,
+.ed-tool svg {
+  flex: none;
+  width: var(--ed-glyph);
+  height: var(--ed-glyph);
+}
+
+.ed-chip svg { width: var(--ed-chip-glyph); height: var(--ed-chip-glyph); }
+.ed-tool svg { width: var(--ed-tool-glyph); height: var(--ed-tool-glyph); }
+
 .ed-icon:hover:not(:disabled) { background: rgba(255, 255, 255, 0.1); }
 .ed-icon:disabled { opacity: 0.3; cursor: default; }
 .ed-icon[aria-pressed="true"] { background: rgba(255, 255, 255, 0.16); }
@@ -4719,16 +4742,16 @@ li.md-task {
 .ed-save {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 7px;
   flex: none;
-  height: 32px;
-  padding: 0 13px;
+  height: 40px;
+  padding: 0 15px;
   border: 0;
   border-radius: 8px;
   background: var(--accent);
   color: #fff;
   font: inherit;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 590;
   cursor: pointer;
 }
@@ -4768,16 +4791,16 @@ li.md-task {
 .ed-chip {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  height: 28px;
-  padding: 0 10px;
+  gap: 6px;
+  height: 34px;
+  padding: 0 12px;
   flex: none;
   border: 0;
   border-radius: 7px;
   background: rgba(255, 255, 255, 0.09);
   color: rgba(255, 255, 255, 0.85);
   font: inherit;
-  font-size: 12px;
+  font-size: 13px;
   cursor: pointer;
   white-space: nowrap;
 }
@@ -4788,7 +4811,7 @@ li.md-task {
 .ed-chip.strong:hover { filter: brightness(1.1); }
 
 .ed-hint {
-  font-size: 11px;
+  font-size: 12px;
   color: rgba(255, 255, 255, 0.42);
   white-space: nowrap;
   flex: none;
@@ -4798,7 +4821,7 @@ li.md-task {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  font-size: 11px;
+  font-size: 12px;
   color: rgba(255, 255, 255, 0.6);
   flex: none;
 }
@@ -4814,8 +4837,8 @@ li.md-task {
 .ed-swatches, .ed-widths { display: flex; gap: 4px; flex: none; }
 
 .ed-swatch {
-  width: 22px;
-  height: 22px;
+  width: 26px;
+  height: 26px;
   border: 0;
   border-radius: 50%;
   cursor: pointer;
@@ -4831,8 +4854,8 @@ li.md-task {
 .ed-width {
   display: grid;
   place-items: center;
-  width: 26px;
-  height: 24px;
+  width: 32px;
+  height: 30px;
   border: 0;
   border-radius: 6px;
   background: rgba(255, 255, 255, 0.09);
@@ -4841,7 +4864,7 @@ li.md-task {
 
 .ed-width i {
   display: block;
-  width: 15px;
+  width: 19px;
   border-radius: 3px;
   background: rgba(255, 255, 255, 0.85);
 }
@@ -4921,8 +4944,8 @@ li.md-task {
 .ed-tool {
   display: grid;
   place-items: center;
-  width: 40px;
-  height: 36px;
+  width: 52px;
+  height: 46px;
   border: 0;
   border-radius: 9px;
   background: transparent;
@@ -5102,18 +5125,26 @@ li.md-task {
   .ed-loading::after { animation: none; opacity: 1; }
 }
 
-/* A phone: the tools get finger-sized, and the panels stop being popovers and
-   become sheets, because a 340px card floating over a 390px screen is a modal
-   pretending not to be one. */
+/* A finger: everything grows again, glyphs included. The sizes above are what
+   a pointer wants; these are what a thumb wants, and the difference is one
+   number per family now rather than a restatement per button. */
 @media (pointer: coarse) {
-  .ed-tool { width: 46px; height: 44px; }
-  .ed-icon { width: 40px; height: 40px; }
-  .ed-chip { height: 34px; padding: 0 12px; }
-  .ed-swatch { width: 28px; height: 28px; }
-  .ed-width { width: 32px; height: 30px; }
-  .ed-context { min-height: 48px; }
+  .image-editor { --ed-glyph: 23px; --ed-tool-glyph: 27px; --ed-chip-glyph: 18px; }
+  .ed-tool { width: 54px; height: 50px; }
+  .ed-icon { width: 44px; height: 44px; }
+  .ed-save { height: 44px; }
+  .ed-chip { height: 38px; padding: 0 14px; }
+  .ed-swatch { width: 30px; height: 30px; }
+  .ed-width { width: 36px; height: 32px; }
+  .ed-context { min-height: 52px; }
 }
 
+/* A phone, where the panels stop being popovers and become sheets, because a
+   340px card floating over a 390px screen is a modal pretending not to be one.
+   The seven tools also have to fit a 360px screen in one row — the strip does
+   not wrap and does not scroll — so this is the one rung that makes something
+   smaller rather than larger. It comes last, so it wins over the coarse sizes
+   above: a phone is also coarse. */
 @media (max-width: 560px) {
   .ed-panel {
     right: 8px;
@@ -5125,6 +5156,17 @@ li.md-task {
   .ed-status { bottom: 80px; }
   .ed-name { font-size: 12px; }
   .ed-save { padding: 0 10px; }
+  .image-editor { --ed-tool-glyph: 24px; --ed-glyph: 21px; }
+  .ed-tools { gap: 2px; padding-left: 4px; padding-right: 4px; }
+  .ed-tool { width: 46px; height: 46px; }
+  /* The bar is the other row that has to fit: three buttons, Save a copy, and
+     the filename in whatever is left. The filename is what loses if these grow
+     here, so they don't — and Save a copy gives some back, because on a 360px
+     screen the difference between a 21px glyph and a 17px one is two more
+     letters of the name you are editing. */
+  .ed-icon { width: 40px; height: 40px; }
+  .ed-save { height: 40px; font-size: 12px; gap: 5px; }
+  .ed-save svg { width: 17px; height: 17px; }
 }
 
 /* ======================================================= touch chrome ==
