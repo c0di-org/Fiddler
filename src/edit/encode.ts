@@ -98,9 +98,19 @@ export async function encodeDoc(
  * wrong by an order of magnitude between a screenshot and a photograph of
  * leaves.
  *
- * The winning settings are then re-rendered rather than remembered from the
- * probe, which costs one more encode and means the bytes that reach the disk
- * are the bytes that were measured, not a second attempt at them.
+ * Both of the expensive things a probe does are kept, because the search asks
+ * for the same ones again and again and a 12-megapixel picture is not cheap to
+ * hold twice, let alone make twice:
+ *
+ * - **The winning probe's blob is the file.** Every quality the bisection tries
+ *   produces the exact bytes that quality would write, so re-encoding the
+ *   winner afterwards is a third of the wall-clock spent making a second copy
+ *   of a file we already have. This also removes the one way the saved file
+ *   could differ from the size that was measured.
+ * - **The canvas is kept between probes at the same scale.** The whole quality
+ *   search happens at one scale, so this is one 12-megapixel allocation for the
+ *   run instead of one per probe — which on a phone is the difference between a
+ *   render and a garbage collection.
  */
 export async function encodeToFit(
   source: Source,
@@ -111,13 +121,24 @@ export async function encodeToFit(
   onProbe?: (n: number) => void
 ): Promise<Encoded> {
   let probes = 0;
+  // Keyed by the snapped scale and quality the search hands us, which are the
+  // same numbers it reports in the plan — so the lookup at the end is exact.
+  const encoded = new Map<string, Blob>();
+  let rendered: { scale: number; canvas: HTMLCanvasElement } | null = null;
+  const canvasAt = (scale: number) => {
+    if (rendered?.scale !== scale) {
+      rendered = { scale, canvas: renderAtScale(source, doc, scale, matte) };
+    }
+    return rendered.canvas;
+  };
+
   const plan = await planForTarget(
     exportSize(doc),
     targetBytes,
     async (scale, quality) => {
       onProbe?.(++probes);
-      const canvas = renderAtScale(source, doc, scale, matte);
-      const blob = await encodeCanvas(canvas, format, quality);
+      const blob = await encodeCanvas(canvasAt(scale), format, quality);
+      encoded.set(`${scale}:${quality}`, blob);
       // Let the frame breathe: a dozen encodes back to back on a phone is long
       // enough that a progress line which never repaints is worse than none.
       //
@@ -134,7 +155,13 @@ export async function encodeToFit(
     hasQuality(format) ? {} : { maxQuality: 1, floorQuality: 1, scaleQuality: 1 }
   );
 
-  const canvas = renderAtScale(source, doc, plan.scale, matte);
+  // The plan always names settings that were probed, so the blob is normally
+  // already here. The fallback is for the one case that reports settings it
+  // never got to try: a probe budget of zero.
+  const winner = encoded.get(`${plan.scale}:${plan.quality}`);
+  if (winner) return { blob: winner, width: plan.width, height: plan.height, plan };
+
+  const canvas = canvasAt(plan.scale);
   const blob = await encodeCanvas(canvas, format, plan.quality);
   return { blob, width: canvas.width, height: canvas.height, plan };
 }

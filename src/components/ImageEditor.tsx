@@ -32,6 +32,7 @@ import {
   keepsTransparency,
   renameFor,
   SIZE_PRESETS,
+  type Encoded,
   type Format,
 } from "../edit/encode";
 import { clampUnit, rectFromCorners, type UnitRect } from "../edit/geometry";
@@ -629,22 +630,43 @@ export function ImageEditor({ path, name, volumes = [], closeSignal = 0, onClose
 
   // ----------------------------------------------------------------- saving
 
+  /**
+   * Where a slow save went, in a sentence, and nothing at all when it was
+   * quick.
+   *
+   * A save can genuinely take seconds: hitting a file size means encoding the
+   * whole picture once per probe, and a phone encodes twelve megapixels at
+   * something like a fifth of a laptop's rate. When that happens the useful
+   * thing to say is not "this is normal" but which half of it was slow — the
+   * encoding or the write — because those have completely different answers and
+   * only one of them is Fiddler's to fix.
+   */
+  const cost = (began: number, drawn: number, finished: number, encoded: Encoded) => {
+    const total = (finished - began) / 1000;
+    if (total < 1.5) return "";
+    const probes = encoded.plan?.probes ?? 1;
+    return ` Took ${total.toFixed(1)} s — ${((drawn - began) / 1000).toFixed(1)} s over ${probes} encode${probes === 1 ? "" : "s"}, ${((finished - drawn) / 1000).toFixed(1)} s writing.`;
+  };
+
   const save = useCallback(
     async (format: Format, target: number | null, quality: number, matte: string | null) => {
       if (!source || !doc) return;
       setBusy(target ? "Finding the settings…" : "Saving…");
       setNote(null);
+      const began = performance.now();
       try {
         const encoded = target
           ? await encodeToFit(source, doc, format, target, matte, (n) =>
               setBusy(`Trying settings… (${n})`)
             )
           : await encodeDoc(source, doc, format, quality, matte);
+        const drawn = performance.now();
 
         setBusy("Writing…");
         const wanted = renameFor(name, format);
         const free = await ipc.freeName(parent, wanted);
         const written = await ipc.createFile(parent, free, await blobBytes(encoded.blob));
+        const finished = performance.now();
 
         // Three different things happened and they are worth three different
         // sentences. "Met the target" and "was already under it" get conflated
@@ -652,11 +674,11 @@ export function ImageEditor({ path, name, volumes = [], closeSignal = 0, onClose
         // something clever with a number it never touched.
         const where = `${free} — ${encoded.width}×${encoded.height}, ${formatSize(encoded.blob.size, false)}`;
         if (encoded.plan && !encoded.plan.met) {
-          setNote(`Saved ${where}. That is the smallest this picture would go.`);
+          setNote(`Saved ${where}. That is the smallest this picture would go.${cost(began, drawn, finished, encoded)}`);
         } else if (encoded.plan?.unchanged) {
-          setNote(`Saved ${where} — already under the limit, so nothing was given up.`);
+          setNote(`Saved ${where} — already under the limit, so nothing was given up.${cost(began, drawn, finished, encoded)}`);
         } else {
-          setNote(`Saved ${where}.`);
+          setNote(`Saved ${where}.${cost(began, drawn, finished, encoded)}`);
         }
         setPanel("none");
         onSaved(written, free);
