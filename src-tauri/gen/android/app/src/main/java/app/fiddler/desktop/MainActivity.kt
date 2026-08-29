@@ -5,9 +5,22 @@ import android.net.Uri
 import android.os.Bundle
 import android.os.Environment
 import android.provider.Settings
+import android.webkit.WebView
 import androidx.activity.enableEdgeToEdge
 
 class MainActivity : TauriActivity() {
+  /**
+   * The webview, kept so that `onPause` can undo what its own superclass just
+   * did. See the override at the bottom — this reference exists for that one
+   * call and nothing else.
+   */
+  private var webView: WebView? = null
+
+  override fun onWebViewCreate(webView: WebView) {
+    super.onWebViewCreate(webView)
+    this.webView = webView
+  }
+
   override fun onCreate(savedInstanceState: Bundle?) {
     enableEdgeToEdge()
     super.onCreate(savedInstanceState)
@@ -51,5 +64,32 @@ class MainActivity : TauriActivity() {
     super.onNewIntent(intent)
     setIntent(intent)
     OpenedFile.offer(this, intent)
+  }
+
+  /**
+   * Keep the book playing when the screen goes off.
+   *
+   * `WryActivity.onPause` calls `WebView.onPause`, which is documented as
+   * pausing "extra processing associated with this WebView and its associated
+   * DOM" — and in practice that includes any `<audio>` element mid-sentence.
+   * So locking the phone stopped an audiobook, every time, with no way for the
+   * front end to know it had happened.
+   *
+   * `mWebView` is private up there and the superclass chain gives no way to
+   * skip a link, so this undoes the pause rather than preventing it. The
+   * webview is off screen either way; what is being resumed is the DOM and the
+   * media element inside it, not any drawing.
+   *
+   * Conditional on the playback service actually being up, which is what keeps
+   * this from being a battery bug: a Fiddler backgrounded with nothing playing
+   * pauses exactly as it always did. And the flag is read rather than asked
+   * for, because there is no room to bind to a service inside `onPause` while
+   * the phone is finishing locking.
+   */
+  override fun onPause() {
+    super.onPause()
+    if (Playback.active) {
+      runCatching { webView?.onResume() }
+    }
   }
 }

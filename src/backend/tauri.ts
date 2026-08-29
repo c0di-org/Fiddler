@@ -198,6 +198,15 @@ const backend: Backend = {
   setBackEnabled: (enabled) => invoke<void>("set_back_enabled", { enabled }),
 
   onBack: (fn) => listen("fiddler:back", () => fn()),
+
+  setPlaybackState: (state) => invoke<void>("set_playback_state", { state }),
+
+  clearPlaybackState: () => invoke<void>("clear_playback_state"),
+
+  onTransport: (fn) =>
+    listen<{ action: string; value: number }>("fiddler:transport", (e) =>
+      fn(e.payload.action, e.payload.value)
+    ),
 };
 
 export default backend;

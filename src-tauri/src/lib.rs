@@ -17,6 +17,7 @@ mod nearby;
 mod opened;
 mod volumes;
 mod peers;
+mod playback;
 mod share;
 #[cfg(target_os = "macos")]
 mod page;
@@ -52,6 +53,10 @@ pub fn run() {
             opened::remember(app.handle().clone());
             // Same reason, one line later: Back is pressed long before anything slow.
             back::remember(app.handle().clone());
+            // And a third: a headphone button can be pressed before the
+            // webview has finished booting, which is exactly what happens when
+            // Android restarts Fiddler to deliver one.
+            playback::remember(app.handle().clone());
             let cache = Arc::new(GitCache::new());
             let watcher = FsWatcher::start(app.handle().clone(), cache.clone());
             let thumbs = ThumbPool::start(app.handle().clone());
@@ -104,6 +109,8 @@ pub fn run() {
             commands::install_apk,
             commands::take_opened_files,
             commands::set_back_enabled,
+            commands::set_playback_state,
+            commands::clear_playback_state,
             commands::share_paths,
             commands::reveal_in_finder,
             commands::has_open_handler,

@@ -14,6 +14,20 @@
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="29" />
     <!-- Required before Android will let this app hand an APK to its package installer. -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- A book has to keep playing with the screen off, and Android's answer
+         to "this app is doing something the user can hear" is a foreground
+         service of type mediaPlayback. Without the service the webview is a
+         background app and gets reaped mid-chapter; without the type, API 34
+         refuses to start the service at all. POST_NOTIFICATIONS is asked for
+         at the moment the first book plays — the notification *is* the
+         transport control, so a refusal costs the lock screen buttons. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- No WAKE_LOCK: a foreground service playing audio already keeps the CPU
+         awake through the audio path, and asking for a permission we don't use
+         is a line on the install screen that buys nothing. -->
+
     <!-- The tick at the moment a long press lands. It is what makes the press
          feel like something the app did rather than something it noticed, and
          it is the only feedback available while the finger is still covering
@@ -89,6 +103,16 @@
                 <data android:mimeType="application/octet-stream" />
             </intent-filter>
         </activity>
+
+        <!-- The service that keeps a book alive and puts it on the lock
+             screen. Not exported: everything that reaches it comes from this
+             app's own PendingIntents. Headphone and Bluetooth buttons need no
+             receiver here — since Lollipop they go to whichever MediaSession
+             was last active, which is the one this service holds. -->
+        <service
+            android:name=".PlaybackService"
+            android:exported="false"
+            android:foregroundServiceType="mediaPlayback" />
 
         <provider
           android:name="androidx.core.content.FileProvider"

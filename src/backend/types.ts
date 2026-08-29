@@ -41,6 +41,28 @@ import type {
  * pass its own through untouched. */
 export type Unlisten = () => void;
 
+/** What the system's transport controls should be showing. Milliseconds
+ * rather than seconds because every platform media API below this is integer
+ * milliseconds, and rounding once here beats rounding in three places. */
+export interface PlaybackState {
+  playing: boolean;
+  /** The chapter. */
+  title: string;
+  /** The book. */
+  subtitle: string;
+  positionMs: number;
+  /** 0 where the file hasn't said yet, which the controls read as "unknown". */
+  durationMs: number;
+  speed: number;
+  /** A real path to a picture, not a URL: the platform decodes this itself. */
+  artPath: string | null;
+  canPrevious: boolean;
+  canNext: boolean;
+  /** Seconds, for the labels on the two skip buttons. */
+  skipBack: number;
+  skipForward: number;
+}
+
 export interface Backend {
   // ------------------------------------------------------------- browsing
 
@@ -249,6 +271,29 @@ export interface Backend {
    * reason `onIncomingFile` is: what to do with the press is decided from
    * front-end state, and a payload would only be a staler copy of it. */
   onBack(fn: () => void): Promise<Unlisten>;
+
+  // ------------------------------------------------------------- playback
+
+  /** Put what is playing on the system's transport controls, and keep it
+   * there.
+   *
+   * Optional, so its presence is the capability — same rule as the archive
+   * pair. Only Android implements it, and there it does two jobs at once. The
+   * visible one is the lock screen and the notification. The invisible one is
+   * the reason a book keeps playing at all: a foreground service is what stops
+   * Android reaping a backgrounded webview, and this call is what starts one.
+   *
+   * Called on every state change rather than only on play, because a
+   * notification showing the wrong chapter is worse than no notification. */
+  setPlaybackState?(state: PlaybackState): Promise<void>;
+
+  /** Nothing is playing any more: take the controls down and let the process
+   * be an ordinary background app again. */
+  clearPlaybackState?(): Promise<void>;
+
+  /** A transport press from outside the app — a notification button, a
+   * headphone remote, a car. Carries the verb and, for a scrub, where to. */
+  onTransport?(fn: (action: string, value: number) => void): Promise<Unlisten>;
 
   // --------------------------------------------------- browser-only additions
   //

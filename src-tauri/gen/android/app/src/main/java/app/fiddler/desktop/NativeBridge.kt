@@ -22,4 +22,9 @@ object NativeBridge {
   /** The user pressed Back while the front end had somewhere of its own to go.
    * See `BackGesture`, which only forwards the press once asked to. */
   @JvmStatic external fun back()
+
+  /** A transport press from outside the app — the notification, the lock
+   * screen, a headphone remote, a car. Carries the verb and, for a scrub,
+   * where to in milliseconds. See `PlaybackService`. */
+  @JvmStatic external fun transport(action: String, value: Long)
 }

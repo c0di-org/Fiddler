@@ -63,6 +63,12 @@ dependencies {
     implementation("androidx.activity:activity-ktx:1.10.1")
     implementation("com.google.android.material:material:1.12.0")
     implementation("androidx.lifecycle:lifecycle-process:2.10.0")
+    // MediaSessionCompat, MediaButtonReceiver and the MediaStyle notification.
+    // The old support-library shape rather than Media3 on purpose: Media3's
+    // session is built around owning an ExoPlayer, and the thing playing here
+    // is an <audio> element in the webview. What is needed is a session that
+    // can be *told* what is happening, which is exactly what this one is.
+    implementation("androidx.media:media:1.7.0")
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test.ext:junit:1.1.4")
     androidTestImplementation("androidx.test.espresso:espresso-core:3.5.0")

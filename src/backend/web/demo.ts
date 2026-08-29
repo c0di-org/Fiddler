@@ -10,7 +10,7 @@
  * why they read as `Projects`, `Documents`, `Pictures`, `Music` and `Downloads`
  * rather than anything more imaginative. */
 
-import { architectureDiagram, booklet, chord, PALETTES, wallpaper } from "./demo-art";
+import { architectureDiagram, bookCover, booklet, chord, PALETTES, wallpaper } from "./demo-art";
 import { MemoryProvider } from "./memory-fs";
 
 export const DEMO_MOUNT = "Fiddler Demo";
@@ -90,6 +90,23 @@ export function buildDemo(): MemoryProvider {
 
   fs.seedFile("Music/A major.wav", chord(), daysAgo(20));
 
+  // ------------------------------------------------------------ Audiobooks
+  //
+  // A folder of numbered chapters beside a cover, which is what an audiobook
+  // is on disk everywhere. Tap chapter one and the rest becomes a queue in
+  // that order — chapter ten after chapter nine, not after chapter one — the
+  // bar at the bottom outlives walking away from this folder, and the cover
+  // here is the picture it shows. The chapters are eight seconds each rather
+  // than eight hours, which is the one thing about this demo that isn't real.
+  svg("Audiobooks/The Wind in the Willows/cover.svg", bookCover(), daysAgo(30));
+  CHAPTERS.forEach(([number, title], i) => {
+    fs.seedFile(
+      `Audiobooks/The Wind in the Willows/${number} ${title}.wav`,
+      chord(8, 196 * (1 + i * 0.09)),
+      daysAgo(30 - i)
+    );
+  });
+
   // ------------------------------------------------------------- Downloads
 
   text("Downloads/receipt.txt", RECEIPT, daysAgo(12));
@@ -97,6 +114,17 @@ export function buildDemo(): MemoryProvider {
 
   return fs;
 }
+
+/** Numbered so the padding is visible: `02` and `10` sort correctly in any
+ * order, which is exactly what the naming is for. */
+const CHAPTERS: [string, string][] = [
+  ["01", "The River Bank"],
+  ["02", "The Open Road"],
+  ["03", "The Wild Wood"],
+  ["04", "Mr Badger"],
+  ["09", "Wayfarers All"],
+  ["10", "The Further Adventures of Toad"],
+];
 
 // ---------------------------------------------------------------- contents
 

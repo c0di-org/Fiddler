@@ -893,6 +893,24 @@ pub fn set_back_enabled(enabled: bool) -> Result<(), String> {
     crate::back::set_enabled(enabled)
 }
 
+/// Put what is playing on the system's transport controls, and keep it there.
+///
+/// Called on every meaningful change rather than only on play, because a lock
+/// screen showing the chapter before last is worse than one showing nothing —
+/// and because on Android this call is also what holds the foreground service
+/// up, which is the only reason a book survives the screen going off.
+#[tauri::command]
+pub fn set_playback_state(state: crate::playback::PlaybackState) -> Result<(), String> {
+    crate::playback::set(state)
+}
+
+/// Nothing is playing: take the controls down and let this be an ordinary
+/// background app again.
+#[tauri::command]
+pub fn clear_playback_state() -> Result<(), String> {
+    crate::playback::clear()
+}
+
 /// Hand these files to the system's share sheet.
 ///
 /// The one verb every platform has and no filesystem does. Takes the whole

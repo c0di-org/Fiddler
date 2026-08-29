@@ -1,11 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { flushSync } from "react-dom";
 
+import { coverIn, folderOf, tracksIn } from "./audio/book";
+import * as player from "./audio/player";
 import { ContextMenu, type MenuItem } from "./components/ContextMenu";
 import { DetailList } from "./components/DetailList";
 import { GlyphDefs } from "./components/FileGlyph";
 import { IconGrid, type GridCell } from "./components/IconGrid";
 import { ImageEditor } from "./components/ImageEditor";
+import { MiniPlayer } from "./components/MiniPlayer";
+import { NowPlaying } from "./components/NowPlaying";
 import { PdfReader } from "./components/PdfReader";
 import { PreviewPane } from "./components/PreviewPane";
 import { QuickLook } from "./components/QuickLook";
@@ -163,6 +167,15 @@ export default function App() {
    * `editorClose` exists: the discard question belongs to the surface that
    * knows whether anything has been drawn. */
   const [pictureClose, setPictureClose] = useState(0);
+  /** Whether the full-screen player is up. The *playing* is not state here at
+   * all — it lives in `audio/player.ts`, outside React, which is the only way a
+   * book survives walking into another folder. This flag is only about whether
+   * the big controls are on screen. */
+  const [nowPlaying, setNowPlaying] = useState(false);
+  /** Bumped to ask the player to close whatever it has open, innermost first —
+   * the same idiom as `pictureClose`, and for the same reason: which of the
+   * player's sheets is up is the player's business. */
+  const [nowPlayingClose, setNowPlayingClose] = useState(0);
   /** Bumped to ask the editor to close itself. Routed through the editor rather
    * than closing it from here because the unsaved-changes question belongs to
    * the component that knows whether there are any. */
@@ -187,6 +200,10 @@ export default function App() {
   readerActive.current = !!reader;
   const pictureActive = useRef(false);
   pictureActive.current = !!picture;
+  /** And the full-screen player, which owns space, the arrows and Escape while
+   * it is up. */
+  const playerActive = useRef(false);
+  playerActive.current = nowPlaying;
 
   const home = places.find((p) => p.icon === "home")?.path ?? "";
 
@@ -1157,6 +1174,39 @@ export default function App() {
   }, []);
 
   /**
+   * Hand a recording to the player, with the rest of its folder behind it.
+   *
+   * The queue is the whole point. An audiobook is a folder of forty files and
+   * playing one of them is never what was meant — what was meant is "start
+   * here and keep going", which is what a book does when you open it. So the
+   * folder becomes the queue, in `natural` order rather than the view's, and
+   * the file that was tapped is where the needle goes down.
+   *
+   * Where the file isn't in the folder on screen — a search result, a hit from
+   * another device — there is no folder to queue, and one track is the honest
+   * answer rather than a queue assembled from somewhere nobody is looking.
+   */
+  const playAudio = useCallback(
+    (t: Target) => {
+      const folder = folderOf(t.path);
+      const siblings = folder === store.path ? entries : [];
+      const tracks = siblings.length > 0 ? tracksIn(siblings, folder) : [];
+      const known = tracks.findIndex((track) => track.path === t.path);
+      if (known === -1) {
+        player.open([{ path: t.path, name: t.name, folder }], 0, null);
+      } else {
+        player.open(tracks, known, coverIn(siblings));
+      }
+      // On a phone, tapping a book and getting a bar at the bottom is an
+      // answer nobody sees. On a desktop, a full-screen takeover for a
+      // double-clicked file is more than was asked for. Both get the bar; only
+      // touch gets the screen.
+      if (caps.directTouch) setNowPlaying(true);
+    },
+    [entries, store.path]
+  );
+
+  /**
    * What ↵ and a double-click do.
    *
    * On a Mac this hands the file to whatever the person actually uses — the
@@ -1200,6 +1250,16 @@ export default function App() {
           await ipc.openExternal(shortcut.url);
           return;
         }
+        // Audio stays here, ahead of the hand-off, for the same reason the PDF
+        // does and then one more. The shared reason: on two of the three
+        // targets there is nothing to hand it to. The extra one is that
+        // Fiddler is the only thing that knows where you were — sending an
+        // audiobook to another player means starting chapter nine from the
+        // top, every time, forever.
+        if (routeOf(t.name) === "audio") {
+          playAudio(t);
+          return;
+        }
         const system = caps.handOff && (await ipc.hasOpenHandler(t.path));
         if (system) {
           await ipc.openExternal(t.path);
@@ -1234,7 +1294,7 @@ export default function App() {
         flash(`Could not open “${t.name}”`);
       }
     },
-    [go, flash, openInEditor, unpack]
+    [go, flash, openInEditor, unpack, playAudio]
   );
 
   useEffect(() => {
@@ -1748,6 +1808,14 @@ export default function App() {
               onPick: () => setPicture({ path: t.path, name: t.name }),
             });
           }
+          // Named separately from Open even though Open does the same thing,
+          // because for a book the two are different intentions: Open is "what
+          // is this", and Play is "carry on from where I was" — which is what
+          // this one actually does, and the only place that promise is written
+          // down where someone will read it.
+          if (route === "audio") {
+            items.push({ label: "Play", onPick: () => playAudio(t) });
+          }
           // The way *into* the editor now that ↵ goes to the OS. It used to
           // call openTarget, which made it a second Open under a different name.
           //
@@ -1900,7 +1968,7 @@ export default function App() {
       const title = t ? (many > 1 ? `${many} items` : t.name) : undefined;
       if (items.length > 0) setMenu({ x, y, items, sheet, title });
     },
-    [openTarget, openInEditor, flash, go, selection, selected.length, targets, favorites, favorite, unfavorite, copySelected, cutSelected, duplicateSelected, compressSelected, unpack, shareable.length, shareSelected, trashSelected, clipboard, paste, newFolder, newTextFile, mountFolder, undoNext, undo, volumes]
+    [openTarget, openInEditor, playAudio, flash, go, selection, selected.length, targets, favorites, favorite, unfavorite, copySelected, cutSelected, duplicateSelected, compressSelected, unpack, shareable.length, shareSelected, trashSelected, clipboard, paste, newFolder, newTextFile, mountFolder, undoNext, undo, volumes]
   );
 
   /**
@@ -1961,6 +2029,11 @@ export default function App() {
     if (picture) return () => setPictureClose((n) => n + 1);
     if (reader) return () => setReader(null);
     if (editor) return () => setEditorClose((n) => n + 1);
+    // Above Quick Look because that is the order they stack in: play a file
+    // from the preview and the player is what is in front of you. It gets the
+    // press rather than consuming it — a sheet inside the player closes first,
+    // which is the player's own business to decide.
+    if (nowPlaying) return () => setNowPlayingClose((n) => n + 1);
     if (quickLook)
       return () => {
         setQuickLook(false);
@@ -1990,7 +2063,7 @@ export default function App() {
       };
     if (store.canBack) return () => void store.back();
     return null;
-  }, [menu, picture, reader, editor, quickLook, accessOpen, renamingId, selection.size, filter, store.canBack, focusView]);
+  }, [menu, picture, reader, editor, nowPlaying, quickLook, accessOpen, renamingId, selection.size, filter, store.canBack, focusView]);
 
   const wantsBack = backStep !== null;
   useEffect(() => {
@@ -2096,6 +2169,7 @@ export default function App() {
     // The overlays own the keyboard while they're up, and the view they're
     // covering keeps focus underneath them.
     if (s.quickLook || editorActive.current || readerActive.current || pictureActive.current) return;
+    if (playerActive.current) return;
 
     const modifier = e.metaKey || e.ctrlKey;
     if (modifier) {
@@ -2188,6 +2262,7 @@ export default function App() {
       if (((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "r") || e.key === "F5") {
         e.preventDefault();
         if (editorActive.current || readerActive.current || pictureActive.current || kb.current.quickLook) return;
+        if (playerActive.current) return;
         if (store.path) void store.invalidateDirs([store.path]);
         const root = store.listing?.repoRoot;
         if (root) void ipc.refreshRepo(root);
@@ -2215,6 +2290,8 @@ export default function App() {
       // And for the picture editor, which owns ⌘Z, ⌘A, Delete and every bare
       // letter that names a tool.
       if (pictureActive.current) return;
+      // And the player, which owns space and Escape while its screen is up.
+      if (playerActive.current) return;
       // Chords are matched on the lowercased key: with Shift held, Chromium —
       // and so every Android WebView — reports "N" where WKWebView reports
       // "n", which is how ⇧⌘N could work on a Mac and be dead on DeX.
@@ -2344,6 +2421,7 @@ export default function App() {
     const onMouse = (e: MouseEvent) => {
       if (e.button !== 3 && e.button !== 4) return;
       if (editorActive.current || readerActive.current || pictureActive.current || kb.current.quickLook) return;
+      if (playerActive.current) return;
       // A press with a menu open spends itself on closing the menu; also
       // navigating underneath it would be two answers to one click.
       if (document.querySelector(".ctx-menu, .ctx-sheet")) return;
@@ -2469,6 +2547,11 @@ export default function App() {
           <span>Files and folders you drop stay in this tab.</span>
         </div>
       )}
+      {/* The row that is the file browser. It is wrapped so that the player's
+          bar can be a sibling below it rather than something floating over the
+          bottom of the folder: a bar that overlaps the last row of a list is a
+          bar that hides a file. */}
+      <div className="app-body">
       <Sidebar
         places={places}
         devices={devices}
@@ -2721,6 +2804,22 @@ export default function App() {
         </footer>
         )}
       </main>
+      </div>
+
+      {/* Rendered unconditionally and empty until something is playing: the bar
+          subscribes to the player itself, so nothing above it has to re-render
+          four times a second to keep a scrubber moving. */}
+      <MiniPlayer onOpen={() => setNowPlaying(true)} />
+
+      {nowPlaying && (
+        <NowPlaying
+          closeSignal={nowPlayingClose}
+          onClose={() => {
+            setNowPlaying(false);
+            focusView();
+          }}
+        />
+      )}
 
       {quickLook && lead?.target.entry && (
         <QuickLook
@@ -2743,6 +2842,14 @@ export default function App() {
               ? () => {
                   setQuickLook(false);
                   setPicture({ path: lead.target.path, name: lead.target.name });
+                }
+              : undefined
+          }
+          onPlay={
+            routeOf(lead.target.entry.name) === "audio"
+              ? () => {
+                  setQuickLook(false);
+                  playAudio(lead.target);
                 }
               : undefined
           }

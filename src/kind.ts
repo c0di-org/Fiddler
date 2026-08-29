@@ -63,6 +63,14 @@ const KINDS: Record<string, string> = {
   mp3: "MP3 audio",
   wav: "WAV audio",
   m4a: "AAC audio",
+  // The audiobook container: an MP4 holding AAC, distinguished from `.m4a`
+  // only by the extension and by carrying chapters. Naming it is worth a line
+  // — a folder of these is the thing the player was written for.
+  m4b: "Audiobook",
+  aac: "AAC audio",
+  flac: "FLAC audio",
+  ogg: "Ogg audio",
+  opus: "Opus audio",
 
   zip: "ZIP archive",
   gz: "Gzip archive",
