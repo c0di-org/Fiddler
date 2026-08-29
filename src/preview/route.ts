@@ -44,10 +44,13 @@ const ART = new Set([
   "pptx", "doc", "docx", "xls", "xlsx", "epub", "usdz", "obj", "stl",
 ]);
 
-// These are handed directly to Android WebView. `preload="metadata"` means
-// opening Quick Look reads only the small container header; actual bytes stream
-// when the user presses play, through Android's media stack.
-const AUDIO = new Set(["mp3", "m4a", "aac", "wav", "ogg", "oga", "opus", "flac", "weba"]);
+// The audio route is a door rather than a preview: Quick Look shows what the
+// file is and where you got to, and Play hands it to `audio/player.ts`, which
+// lives outside the view tree and so outlives the folder. See `docs/audio.md`.
+// Opening one of these never asks the system first — Fiddler is the only thing
+// that knows the position, and handing an audiobook to another player means
+// starting chapter nine from the top, every time.
+const AUDIO = new Set(["mp3", "m4a", "m4b", "aac", "wav", "ogg", "oga", "opus", "flac", "weba"]);
 const VIDEO = new Set(["mp4", "m4v", "mov", "webm", "3gp", "3g2"]);
 
 const NAMED: Record<string, Route> = {

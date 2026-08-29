@@ -20,6 +20,7 @@ Cross-platform file management for macOS, Android/DeX, and the web.
 - **Transfer progress and cancel** for longer copies and cross-volume moves, with rollback on cancel or failure.
 - **Zip archives** on macOS and Android: compress a selection into a zip beside it, and extract one in place. Both report progress, can be cancelled, and can be undone.
 - **Quick Look** for folders, images, audio, video, Markdown, source/text files, links, and PDFs.
+- **Audio player** that keeps playing while you browse. The folder becomes the queue in chapter order, positions are remembered per file with a run-up scaled to how long you were away, and a book reopens on the chapter you were in. Playback speed, a sleep timer, and a chapter list. On Android it plays with the screen off, with lock-screen and notification controls, headphone buttons, and the right behaviour for calls and unplugged headphones. See [docs/audio.md](docs/audio.md).
 - **PDF reader** with single-page or spread layout, fit-to-page/width, keyboard/touch navigation, full screen, and remembered reading position.
 - **Image editing** with rectangle and magic-wand selection, crop, delete to transparency, fill, rotate, mirror, and resize. Markup adds boxes, ovals, lines, arrows, freehand, highlighter, and text. Save a copy as JPEG, PNG, or WebP — or give a target file size and let Fiddler find the settings that meet it.
 - **Text editing** inside Fiddler. On desktop, Open uses the system handler when one exists and falls back to the editor when it does not.
@@ -153,6 +154,23 @@ On Android and the web, use `Ctrl` where the interface shows `⌘`. With a DeX k
 
 Right-click an item for file actions on pointer devices. Long-press on touch devices to select and access the same actions.
 
+### Audio
+
+| Action | Shortcut |
+| --- | --- |
+| Play / pause | `Space` in the player, or the keyboard's play key |
+| Skip back / forward | `←` / `→` on the timeline |
+| Previous / next chapter | The media keys, or the buttons |
+| Close the player | `Esc` |
+
+The bar at the bottom stays put while you browse. Tap it for the full screen,
+where the speed, the sleep timer and the chapter list live. Skip intervals
+default to 15 seconds back and 30 forward and can be changed beside the speed.
+
+On Android, playback continues with the screen off and the notification carries
+skip back, play/pause and skip forward; swiping that notification away puts the
+book down and keeps your place.
+
 ### PDF reader
 
 | Action | Shortcut |
@@ -203,6 +221,7 @@ npm run deploy
 ## Current limitations
 
 - Archives are zip only. `.tar.gz`, `.7z` and `.rar` keep their icons and their previews, but Fiddler will not unpack them; password-protected zips are left to the system. The web build has no archive support at all.
+- The audio player reads no tags: chapter names come from filenames and the cover from a picture beside them. Chapter marks *inside* a single long `.m4b` are not read either, so one file plays as one recording.
 - No tabs or column view yet.
 - Drag and drop works inside Fiddler, but native drag in/out of Finder is not implemented yet.
 - The browser build cannot provide native Git, USB/MTP, volume, or real nearby-device features.

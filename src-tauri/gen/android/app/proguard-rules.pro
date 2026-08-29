@@ -37,3 +37,4 @@
 # since the JNI signatures spell them out.
 -keep,includedescriptorclasses class app.fiddler.desktop.ApkInstaller { *; }
 -keep,includedescriptorclasses class app.fiddler.desktop.PdfPreview { *; }
+-keep,includedescriptorclasses class app.fiddler.desktop.Playback { *; }

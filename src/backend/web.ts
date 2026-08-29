@@ -523,6 +523,11 @@ const backend: Backend = {
     return () => {};
   },
 
+  // No `setPlaybackState` here, and that absence is the point: a tab has no
+  // lock screen to put a book on, and nothing keeps it alive that isn't the
+  // browser's own doing. `navigator.mediaSession` still works in the page, so
+  // the browser's media controls get the title without any of this.
+
   // ------------------------------------------------- browser-only additions
 
   openFolder,

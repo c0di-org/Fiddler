@@ -72,4 +72,7 @@ export const {
   onBack,
   openFolder,
   importDropped,
+  setPlaybackState,
+  clearPlaybackState,
+  onTransport,
 } = backend;

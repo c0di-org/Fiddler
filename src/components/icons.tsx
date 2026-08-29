@@ -27,6 +27,24 @@ const stroked = (path: React.ReactNode) =>
     );
   };
 
+/** Solid glyphs. Transport controls read as shapes rather than outlines —
+ * a stroked triangle at 14px is a smudge, and these are pressed in the dark. */
+const filled = (path: React.ReactNode) =>
+  function Icon({ size = 14, className }: P) {
+    return (
+      <svg
+        width={size}
+        height={size}
+        viewBox="0 0 16 16"
+        fill="currentColor"
+        className={className}
+        aria-hidden="true"
+      >
+        {path}
+      </svg>
+    );
+  };
+
 export const Chevron = stroked(<path d="M6 3.5 10.5 8 6 12.5" />);
 export const ChevronLeft = stroked(<path d="M10 3.5 5.5 8 10 12.5" />);
 export const GripIcon = stroked(
@@ -488,6 +506,83 @@ export const EmptyIcon = stroked(
 
 /** A shortcut's destination, drawn from the shared path data in `preview/link`
  * so the glyph and the web build's thumbnail are the same picture. */
+// ------------------------------------------------------------------- playback
+
+export const PlayIcon = filled(<path d="M4.5 2.9v10.2a.6.6 0 0 0 .92.5l8-5.1a.6.6 0 0 0 0-1l-8-5.1a.6.6 0 0 0-.92.5Z" />);
+export const PauseIcon = filled(
+  <path d="M4.25 2.5h2.2a.5.5 0 0 1 .5.5v10a.5.5 0 0 1-.5.5h-2.2a.5.5 0 0 1-.5-.5V3a.5.5 0 0 1 .5-.5Zm5.3 0h2.2a.5.5 0 0 1 .5.5v10a.5.5 0 0 1-.5.5h-2.2a.5.5 0 0 1-.5-.5V3a.5.5 0 0 1 .5-.5Z" />
+);
+export const PrevTrackIcon = filled(
+  <path d="M4 3.2v9.6a.5.5 0 0 0 1 0V8.9l6.2 3.95a.5.5 0 0 0 .8-.42V3.57a.5.5 0 0 0-.8-.42L5 7.1V3.2a.5.5 0 0 0-1 0Z" />
+);
+export const NextTrackIcon = filled(
+  <path d="M12 3.2v9.6a.5.5 0 0 1-1 0V8.9l-6.2 3.95a.5.5 0 0 1-.8-.42V3.57a.5.5 0 0 1 .8-.42L11 7.1V3.2a.5.5 0 0 1 1 0Z" />
+);
+export const MoonIcon = stroked(
+  <path d="M13.2 9.6A5.4 5.4 0 0 1 6.4 2.8a5.6 5.6 0 1 0 6.8 6.8Z" />
+);
+export const SpeedIcon = stroked(
+  <>
+    <path d="M2.6 12a6 6 0 1 1 10.8 0" />
+    <path d="M8 8.6 10.8 6" />
+  </>
+);
+export const HeadphonesIcon = stroked(
+  <>
+    <path d="M3 10.5V8a5 5 0 0 1 10 0v2.5" />
+    <path d="M3 9.75h1.25a.75.75 0 0 1 .75.75v2a.75.75 0 0 1-.75.75H3.5A1.5 1.5 0 0 1 2 11.75v-.5a1.5 1.5 0 0 1 1-1.5Zm10 0h-1.25a.75.75 0 0 0-.75.75v2a.75.75 0 0 0 .75.75h.75a1.5 1.5 0 0 0 1.5-1.5v-.5a1.5 1.5 0 0 0-1-1.5Z" />
+  </>
+);
+export const CheckIcon = stroked(<path d="M3.5 8.5 6.5 11.5 12.5 5" />);
+export const QueueIcon = stroked(
+  <>
+    <path d="M2.5 4h11M2.5 7.5h11M2.5 11h6" />
+    <path d="M11.4 10 14 11.6l-2.6 1.6z" fill="currentColor" stroke="none" />
+  </>
+);
+
+/**
+ * The two skip buttons, which carry their own interval.
+ *
+ * A bare arrow is ambiguous — every player picks a different number, and the
+ * one that matters here is the one *this* player is set to. Drawing the digits
+ * inside the arc is what every audiobook app converged on, and it is worth the
+ * bespoke glyph: these are the two controls that get pressed most.
+ */
+export function SkipIcon({ seconds, back, size = 22 }: { seconds: number; back?: boolean; size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.7"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className="skip-icon"
+      aria-hidden="true"
+      style={back ? { transform: "scaleX(-1)" } : undefined}
+    >
+      <path d="M12 4.6a7.4 7.4 0 1 0 7.02 5.06" />
+      <path d="M13.9 1.9 19.6 4.8 16.4 8.9" />
+      <text
+        x="12"
+        y="15.6"
+        textAnchor="middle"
+        fontSize="8.2"
+        fontWeight="600"
+        fill="currentColor"
+        stroke="none"
+        // The arc is mirrored for the back button; the number must not be.
+        transform={back ? "scale(-1,1) translate(-24,0)" : undefined}
+      >
+        {seconds}
+      </text>
+    </svg>
+  );
+}
+
 export function LinkMark({ kind, size = 14, className }: P & { kind: LinkKind }) {
   return (
     <svg

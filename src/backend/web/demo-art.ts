@@ -105,10 +105,13 @@ export function architectureDiagram(): string {
 
 /** A few seconds of a major chord, so the audio player has something to play.
  * Written straight into a WAV container because that keeps the whole demo tree
- * synchronous to build — no encoder, no await, no loading state. */
-export function chord(): Blob {
+ * synchronous to build — no encoder, no await, no loading state.
+ *
+ * `root` moves the chord so a folder of them sounds like different chapters
+ * rather than the same file six times, which is the only way to hear that the
+ * player really did go on to the next one. */
+export function chord(seconds = 4, root = 220): Blob {
   const rate = 22050;
-  const seconds = 4;
   const frames = rate * seconds;
   const buffer = new ArrayBuffer(44 + frames * 2);
   const view = new DataView(buffer);
@@ -130,7 +133,7 @@ export function chord(): Blob {
   ascii(36, "data");
   view.setUint32(40, frames * 2, true);
 
-  const voices = [220, 277.18, 329.63, 440]; // A3 major, plus the octave
+  const voices = [root, root * 1.26, root * 1.5, root * 2]; // major, plus the octave
   for (let i = 0; i < frames; i++) {
     const t = i / rate;
     // A slow attack and a long decay; a square-edged start would just click.
@@ -141,6 +144,32 @@ export function chord(): Blob {
   }
 
   return new Blob([buffer], { type: "audio/wav" });
+}
+
+/** A book cover, so the player has something on it.
+ *
+ * Deliberately the only picture in its folder as well as being called
+ * `cover.svg` — `coverIn` has two ways to find a cover and the demo exercises
+ * both at once. */
+export function bookCover(): string {
+  return [
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 600" width="600" height="600">`,
+    `<defs><linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">`,
+    `<stop offset="0" stop-color="#1c3f5e"/><stop offset="0.55" stop-color="#3f7f8c"/>`,
+    `<stop offset="1" stop-color="#c7a86a"/></linearGradient></defs>`,
+    `<rect width="600" height="600" fill="url(#sky)"/>`,
+    `<circle cx="452" cy="150" r="52" fill="#f4e3b4" opacity="0.9"/>`,
+    `<path d="M0 470 C 120 430 190 470 300 452 C 410 434 500 468 600 442 L600 600 L0 600Z" fill="#1d3b28"/>`,
+    `<path d="M0 512 C 140 486 240 520 360 500 C 470 482 540 508 600 496 L600 600 L0 600Z" fill="#12281b"/>`,
+    `<g fill="#0d1f14"><path d="M120 500 l14 -74 14 74z"/><path d="M162 504 l10 -54 10 54z"/></g>`,
+    `<text x="300" y="252" text-anchor="middle" font-family="Georgia, serif" font-size="46" `,
+    `fill="#f6efdd" letter-spacing="1">The Wind in the</text>`,
+    `<text x="300" y="308" text-anchor="middle" font-family="Georgia, serif" font-size="46" `,
+    `fill="#f6efdd" letter-spacing="1">Willows</text>`,
+    `<text x="300" y="356" text-anchor="middle" font-family="Georgia, serif" font-size="20" `,
+    `fill="rgba(246,239,221,0.75)" letter-spacing="3">KENNETH GRAHAME</text>`,
+    `</svg>`,
+  ].join("");
 }
 
 /* ------------------------------------------------------------------ pdf --

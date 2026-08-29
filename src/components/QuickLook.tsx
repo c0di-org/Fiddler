@@ -1,5 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { trackTitle } from "../audio/book";
+import { markFor, progressOf } from "../audio/positions";
+import { clock, span } from "../audio/time";
+import { useAudioMarks } from "../audio/use-player";
 import { formatSize } from "../format";
 import * as ipc from "../ipc";
 import { kindOf } from "../kind";
@@ -9,7 +13,7 @@ import { isTextual, routeOf } from "../preview/route";
 import type { Entry, TextHead } from "../types";
 import { CodeView } from "./CodeView";
 import { FileGlyph, FolderGlyph } from "./FileGlyph";
-import { BookIcon, Chevron, ChevronLeft, LinkMark, MoreIcon, ShareIcon, WandIcon } from "./icons";
+import { BookIcon, Chevron, ChevronLeft, LinkMark, MoreIcon, PlayIcon, ShareIcon, WandIcon } from "./icons";
 import { MarkdownView } from "./MarkdownView";
 import { PdfView } from "./PdfView";
 import { ZoomableImage } from "./ZoomableImage";
@@ -64,9 +68,13 @@ interface Props {
    * something you go on to read, and a photograph is something you go on to
    * change, and neither is the other. */
   onEdit?: () => void;
+  /** Hand this recording to the player that outlives the preview. Passed only
+   * for the audio route, and absent where there is no folder behind the file
+   * to make a queue out of. */
+  onPlay?: () => void;
 }
 
-export function QuickLook({ entry, index, total, onStep, onClose, onShare, onMore, onRead, onEdit }: Props) {
+export function QuickLook({ entry, index, total, onStep, onClose, onShare, onMore, onRead, onEdit, onPlay }: Props) {
   const route = routeOf(entry.name);
   const isDir = entry.kind === "dir" || (entry.kind === "symlink" && entry.linkToDir);
   const [page, setPage] = useState(1);
@@ -217,7 +225,7 @@ export function QuickLook({ entry, index, total, onStep, onClose, onShare, onMor
             swipe.current = null;
           }}
         >
-          <Body entry={entry} route={route} isDir={isDir} page={page} onPages={setPages} />
+          <Body entry={entry} route={route} isDir={isDir} page={page} onPages={setPages} onPlay={onPlay} />
           {total > 1 && (
             // The same steps, visible: on a tablet the swipe needs something
             // that says it exists, and a mouse on DeX has no arrow keys under
@@ -276,12 +284,14 @@ function Body({
   isDir,
   page,
   onPages,
+  onPlay,
 }: {
   entry: Entry;
   route: ReturnType<typeof routeOf>;
   isDir: boolean;
   page: number;
   onPages: (n: number) => void;
+  onPlay?: () => void;
 }) {
   if (isDir) {
     return <Folder entry={entry} />;
@@ -295,7 +305,7 @@ function Body({
     return <Picture entry={entry} />;
   }
 
-  if (route === "audio") return <Audio entry={entry} />;
+  if (route === "audio") return <Audio entry={entry} onPlay={onPlay} />;
 
   if (route === "video") return <Video entry={entry} />;
 
@@ -526,15 +536,46 @@ function useMediaUrl(path: string): string | null {
   return url;
 }
 
-function Audio({ entry }: { entry: Entry }) {
-  const src = useMediaUrl(entry.path);
+/**
+ * Audio in Quick Look, which is a door rather than a player.
+ *
+ * There used to be a bare `<audio controls>` here, and it was the wrong shape
+ * in a way no amount of styling fixes: the element dies with the preview, so
+ * pressing play and then pressing Escape — or the arrow key that moves to the
+ * next file, which is what Quick Look is *for* — stopped the sound. A preview
+ * of a four-hour recording that can only play while you stare at it is not a
+ * preview of a recording.
+ *
+ * So this says what the file is, says where you got to, and hands it to the
+ * player that outlives the preview. One button.
+ */
+function Audio({ entry, onPlay }: { entry: Entry; onPlay?: () => void }) {
+  const marks = useAudioMarks();
+  const mark = markFor(marks, entry.path);
+  const done = progressOf(mark);
+  const resume = mark && !mark.done ? mark.at : 0;
+
   return (
     <div className="ql-media ql-audio">
       <FileGlyph entry={entry} size={180} />
-      {src && (
-        <audio controls preload="metadata" src={src}>
-          This device can’t play this audio format.
-        </audio>
+      <div className="ql-audio-name">{trackTitle(entry.name)}</div>
+      {mark && mark.duration > 0 && (
+        <>
+          <div className="ql-audio-bar">
+            <span style={{ width: `${Math.round((done ?? 0) * 100)}%` }} />
+          </div>
+          <div className="ql-audio-note">
+            {mark.done
+              ? `Finished · ${clock(mark.duration)}`
+              : `${clock(resume)} of ${clock(mark.duration)} · ${span(mark.duration - resume)} left`}
+          </div>
+        </>
+      )}
+      {onPlay && (
+        <button className="ql-audio-play" onClick={onPlay}>
+          <PlayIcon size={15} />
+          {resume > 0 ? `Resume from ${clock(resume)}` : "Play"}
+        </button>
       )}
     </div>
   );
