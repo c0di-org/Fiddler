@@ -21,7 +21,7 @@ concurrency:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, nucchuck]
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v5
@@ -65,10 +65,10 @@ jobs:
           sdkmanager "platforms;android-36" "build-tools;36.0.0" "ndk;27.2.12479018"
           echo "NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
 
-      - name: Configure Rust for Android
-        run: |
-          rustup default stable
-          rustup target add aarch64-linux-android
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.88.0"
+          targets: aarch64-linux-android
 
       - name: Install JavaScript dependencies
         run: npm ci
