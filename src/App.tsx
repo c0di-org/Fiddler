@@ -153,6 +153,7 @@ export default function App() {
   const [selectedDirCount, setSelectedDirCount] = useState<number | null | undefined>(undefined);
   const [tint, setTint] = useState<Tint>(loadTint);
   const [systemTint, setSystemTint] = useState(false);
+  const [defaultFileManager, setDefaultFileManager] = useState<boolean | null>(null);
   const [editor, setEditor] = useState<EditorState | null>(null);
   /** The PDF being read, if one is. A reader rather than a hand-off: a phone
    * and a browser have nothing to hand a PDF *to*, and on a Mac the answer to
@@ -216,6 +217,28 @@ export default function App() {
   }, []);
 
   useEffect(() => () => window.clearTimeout(toastTimer.current), []);
+
+  useEffect(() => {
+    if (platform !== "linux") return;
+    let alive = true;
+    void ipc
+      .isDefaultFileManager()
+      .then((value) => alive && setDefaultFileManager(value))
+      .catch(() => alive && setDefaultFileManager(false));
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const makeDefaultFileManager = useCallback(async () => {
+    try {
+      await ipc.makeDefaultFileManager();
+      setDefaultFileManager(true);
+      flash("Fiddler is now the default file manager");
+    } catch (error) {
+      flash(`Couldn’t make Fiddler the default — ${String(error)}`);
+    }
+  }, [flash]);
 
   /** Ask the current view to reveal a selection made by keyboard navigation. */
   const revealCursor = useCallback(() => setRevealSelection((n) => n + 1), []);
@@ -2764,6 +2787,15 @@ export default function App() {
         ) : (
         <footer className="statusbar">
           <TintPicker tint={tint} systemAvailable={systemTint} onPick={setTint} />
+          {platform === "linux" && defaultFileManager === false && (
+            <button
+              className="status-default-manager"
+              onClick={() => void makeDefaultFileManager()}
+              title="Use Fiddler when folders are opened from the Linux desktop"
+            >
+              Make default
+            </button>
+          )}
           {/* A transfer outranks the count while it runs: it is the only thing
               down here that is still happening, and the only one with a
               button. */}
