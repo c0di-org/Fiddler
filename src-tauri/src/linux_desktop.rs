@@ -26,7 +26,10 @@ pub fn handle_management_args(args: &[String]) -> bool {
     if args.iter().any(|arg| arg == "--make-default") {
         match make_default() {
             Ok(()) => println!("Fiddler is now the default handler for folders."),
-            Err(error) => eprintln!("{error}"),
+            Err(error) => {
+                eprintln!("{error}");
+                std::process::exit(1);
+            }
         }
         return true;
     }
