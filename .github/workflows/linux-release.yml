@@ -18,8 +18,8 @@ permissions:
   contents: write
 
 concurrency:
-  group: linux-release-${{ github.ref }}
-  cancel-in-progress: false
+  group: linux-only-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
