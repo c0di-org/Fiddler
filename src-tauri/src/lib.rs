@@ -28,7 +28,10 @@ mod page;
 mod page;
 #[cfg(target_os = "macos")]
 mod thumb;
-#[cfg(not(target_os = "macos"))]
+#[cfg(target_os = "linux")]
+#[path = "thumb_linux.rs"]
+mod thumb;
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
 #[path = "thumb_mobile.rs"]
 mod thumb;
 mod thumb_pool;
