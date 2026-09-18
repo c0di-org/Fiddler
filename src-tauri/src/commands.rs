@@ -1007,11 +1007,28 @@ pub fn has_open_handler(path: String) -> bool {
     }
 }
 
-/// Nowhere else has a desktop to hand off to, so the answer is always no and
-/// the editor is always the destination. `caps.handOff` means the UI doesn't
-/// ask, but the command exists so the two backends stay the same shape.
 #[tauri::command]
-#[cfg(not(target_os = "macos"))]
+#[cfg(target_os = "linux")]
+pub fn has_open_handler(path: String) -> bool {
+    use gio::prelude::*;
+
+    let file = gio::File::for_path(path);
+    let Ok(info) = file.query_info(
+        gio::FILE_ATTRIBUTE_STANDARD_CONTENT_TYPE,
+        gio::FileQueryInfoFlags::NONE,
+        gio::Cancellable::NONE,
+    ) else {
+        return false;
+    };
+    let Some(content_type) = info.content_type() else {
+        return false;
+    };
+    gio::AppInfo::default_for_type(content_type.as_str(), false).is_some()
+}
+
+/// Mobile and other non-desktop targets have nowhere to hand a local path.
+#[tauri::command]
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
 pub fn has_open_handler(_path: String) -> bool {
     false
 }
