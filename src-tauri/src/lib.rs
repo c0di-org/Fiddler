@@ -128,6 +128,8 @@ pub fn run() {
             commands::pdf_meta,
             commands::pdf_page,
             commands::install_apk,
+            commands::is_default_file_manager,
+            commands::make_default_file_manager,
             commands::take_opened_locations,
             commands::set_back_enabled,
             commands::set_playback_state,
