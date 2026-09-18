@@ -206,7 +206,7 @@ pub fn is_default() -> bool {
 }
 
 fn dbus_exec(input: &str) -> String {
-    format!("\"{}\"", input.replace('\\', "\\\\").replace('"', "\\""))
+    format!("\"{}\"", input.replace('\\', "\\\\").replace('"', "\\\""))
 }
 
 #[cfg(test)]
