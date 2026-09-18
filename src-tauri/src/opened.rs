@@ -132,4 +132,25 @@ mod tests {
         let found = from_inputs(["--gapplication-service".into()], None, false);
         assert!(found.is_empty());
     }
+
+    #[test]
+    fn relative_paths_use_the_launching_process_directory() {
+        let root = std::env::temp_dir().join(format!("fiddler-opened-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("folder")).unwrap();
+        std::fs::write(root.join("photo.png"), b"not really a png").unwrap();
+
+        let folders = from_inputs(["folder".into()], Some(&root), false);
+        assert_eq!(folders.len(), 1);
+        assert_eq!(folders[0].path, root.join("folder").to_string_lossy());
+        assert!(!folders[0].select);
+
+        let files = from_inputs(["photo.png".into()], Some(&root), true);
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].path, root.join("photo.png").to_string_lossy());
+        assert!(files[0].select);
+        assert!(files[0].preview);
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
 }
