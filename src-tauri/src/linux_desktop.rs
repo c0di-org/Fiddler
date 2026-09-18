@@ -250,10 +250,10 @@ pub fn is_default() -> bool {
     }
 
     let Some(config) = dirs::config_dir() else { return false };
-    std::fs::read_to_string(config.join("mimeapps.list"))
-        .ok()
-        .and_then(|content| mimeapps_default(&content))
-        .is_some_and(|desktop| desktop == "Fiddler.desktop")
+    match std::fs::read_to_string(config.join("mimeapps.list")) {
+        Ok(content) => mimeapps_default(&content) == Some("Fiddler.desktop"),
+        Err(_) => false,
+    }
 }
 
 fn set_mimeapps_default() -> Result<(), String> {
