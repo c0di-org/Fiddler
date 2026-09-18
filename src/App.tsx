@@ -41,7 +41,7 @@ import { contentTerms, prepareSearch, search, type SearchKind, type SearchRecord
 import { TreeStore, type Row } from "./store/tree";
 import { invert, remember, take as takeUndo, undoStore } from "./undo";
 import { applyTint, hasSystemAccent, loadTint, saveTint, watchTint, type Tint } from "./tint";
-import type { ContentSearch, DeviceAccess, EjectOutcome, Entry, Favorite, NearbyAccess, NearbyEntry, NearbySearch, PairRequest, PairingInfo, PeerDevice, Place, TransferOutcome, TransferProgress, UsbDevice, Volume, WorktreeInfo } from "./types";
+import type { ContentSearch, DeviceAccess, EjectOutcome, Entry, Favorite, IncomingLocation, NearbyAccess, NearbyEntry, NearbySearch, PairRequest, PairingInfo, PeerDevice, Place, TransferOutcome, TransferProgress, UsbDevice, Volume, WorktreeInfo } from "./types";
 import { volumeFor } from "./volumes";
 
 /** Read once, at module load, because the store is built from it. */
@@ -248,28 +248,31 @@ export default function App() {
    * came from, with the arrow keys already able to walk its neighbours.
    */
   const openIncoming = useCallback(
-    async (paths: string[]) => {
-      const [first, ...rest] = paths;
+    async (locations: IncomingLocation[]) => {
+      const [first, ...rest] = locations;
       if (!first) return;
-      // `parentOf` answers "" at a root because it only ever gets compared for
-      // equality; here it has to be somewhere we can actually navigate to.
-      const dir = parentOf(first) || "/";
-      const name = first.slice(first.lastIndexOf("/") + 1);
 
       setFilter("");
       setRestoreNote(null);
-      // Being sent a `.env` and shown an empty folder is worse than a preference
-      // moving. The switch is a visible one — `⇧⌘.` — so this doesn't hide.
+
+      if (!first.select) {
+        setSelection(new Set());
+        setQuickLook(false);
+        await store.navigate(first.path);
+        revealCursor();
+        return;
+      }
+
+      const dir = parentOf(first.path) || "/";
+      const name = first.path.slice(first.path.lastIndexOf("/") + 1);
       if (name.startsWith(".") && !store.showHidden) await store.setShowHidden(true);
       await store.navigate(dir);
 
-      // Sharing five photos selects five, so the next thing anyone does — copy
-      // them, move them — has them all. Only the ones that landed in the same
-      // folder, since that's the only folder now open; `first` goes in last
-      // because the most recent selection is what Quick Look shows.
-      const siblings = rest.filter((p) => (parentOf(p) || "/") === dir);
-      setSelection(new Set([...siblings, first]));
-      setQuickLook(true);
+      const siblings = rest
+        .filter((location) => location.select && (parentOf(location.path) || "/") === dir)
+        .map((location) => location.path);
+      setSelection(new Set([...siblings, first.path]));
+      setQuickLook(first.preview);
       revealCursor();
     },
     [revealCursor]
@@ -289,7 +292,7 @@ export default function App() {
       // here rather than in its own effect so the two can't race for the first
       // screen. Arriving later is fine: the nudge below lands on a live browser.
       if (caps.incomingFiles) {
-        const incoming = await ipc.takeIncomingFiles().catch(() => []);
+        const incoming = await ipc.takeIncomingLocations().catch(() => []);
         if (cancelled) return;
         if (incoming.length > 0) {
           await openIncoming(incoming);
@@ -332,9 +335,9 @@ export default function App() {
   useEffect(() => {
     if (!caps.incomingFiles) return;
     let alive = true;
-    const stop = ipc.onIncomingFile(() => {
+    const stop = ipc.onIncomingLocation(() => {
       void ipc
-        .takeIncomingFiles()
+        .takeIncomingLocations()
         .then((incoming) => {
           if (alive) void openIncoming(incoming);
         })
