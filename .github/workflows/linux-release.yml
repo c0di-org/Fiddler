@@ -80,94 +80,21 @@ jobs:
           rm -rf package-check appimage-check
           mkdir package-check appimage-check
           dpkg-deb -x "$DEB" package-check
+
           DESKTOP="package-check/usr/share/applications/Fiddler.desktop"
           META="package-check/usr/share/metainfo/app.fiddler.desktop.metainfo.xml"
+          BINARY="package-check/usr/bin/fiddler"
           test -f "$DESKTOP"
           test -f "$META"
+          test -x "$BINARY"
+
           desktop-file-validate "$DESKTOP"
           appstreamcli validate --no-net "$META"
-          test -x package-check/usr/bin/fiddler
-          dbus-run-session -- package-check/usr/bin/fiddler --is-default | grep -Eq '^(yes|no)
-          grep -Fxq 'MimeType=inode/directory;' "$DESKTOP"
-          grep -Fxq 'Exec=fiddler %U' "$DESKTOP"
-          grep -Fq 'FileManager;' "$DESKTOP"
-
-          chmod +x "$APPIMAGE"
-          ABS_APPIMAGE="$(realpath "$APPIMAGE")"
-          (
-            cd appimage-check
-            "$ABS_APPIMAGE" --appimage-extract >/dev/null
-          )
-          APP_DESKTOP="$(find appimage-check/squashfs-root -name 'Fiddler.desktop' -print -quit)"
-          test -n "$APP_DESKTOP"
-          grep -Fxq 'MimeType=inode/directory;' "$APP_DESKTOP"
-          grep -Fxq 'Exec=fiddler %U' "$APP_DESKTOP"
-
-      - name: Collect release artifacts
-        id: package
-        shell: bash
-        run: |
-          set -euo pipefail
-          VERSION="$(node -p "require('./src-tauri/tauri.conf.json').version")"
-          DEB="$(find src-tauri/target/release/bundle/deb -maxdepth 1 -name '*.deb' -print -quit)"
-          APPIMAGE="$(find src-tauri/target/release/bundle/appimage -maxdepth 1 -name '*.AppImage' -print -quit)"
-          test -n "$DEB"
-          test -n "$APPIMAGE"
-
-          mkdir -p linux-artifact
-          cp "$DEB" "linux-artifact/Fiddler-${VERSION}-amd64.deb"
-          cp "$APPIMAGE" "linux-artifact/Fiddler-${VERSION}-x86_64.AppImage"
-          chmod +x "linux-artifact/Fiddler-${VERSION}-x86_64.AppImage"
-          (
-            cd linux-artifact
-            sha256sum "Fiddler-${VERSION}-amd64.deb" "Fiddler-${VERSION}-x86_64.AppImage" > SHA256SUMS-linux.txt
-          )
-
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "Built Fiddler $VERSION for Ubuntu/Linux" >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Upload Linux packages
-        uses: actions/upload-artifact@v4
-        with:
-          name: fiddler-linux-${{ steps.package.outputs.version }}
-          path: linux-artifact/*
-          if-no-files-found: error
-          retention-days: 14
-
-      - name: Publish GitHub release
-        if: github.event_name != 'pull_request'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          VERSION: ${{ steps.package.outputs.version }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          TAG="linux-v${VERSION}"
-          cat > release-notes.md <<EOF
-          Ubuntu/Linux build of Fiddler ${VERSION}, produced by GitHub Actions from ${GITHUB_SHA}.
-
-          Assets:
-          - Debian package for x86_64 Ubuntu-compatible systems
-          - AppImage for x86_64 Linux systems
-          - SHA-256 checksums
-
-          CI builds on Ubuntu 22.04 to keep the glibc baseline compatible with Ubuntu 22.04 and newer.
-          EOF
-
-          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release upload "$TAG" linux-artifact/* --clobber --repo "$GITHUB_REPOSITORY"
-          else
-            gh release create "$TAG" linux-artifact/* \
-              --repo "$GITHUB_REPOSITORY" \
-              --target "$GITHUB_SHA" \
-              --title "Fiddler ${VERSION} for Linux" \
-              --notes-file release-notes.md
-          fi
-
           grep -Fxq 'GenericName=File Manager' "$DESKTOP"
           grep -Fxq 'MimeType=inode/directory;' "$DESKTOP"
           grep -Fxq 'Exec=fiddler %U' "$DESKTOP"
           grep -Fq 'FileManager;' "$DESKTOP"
+          dbus-run-session -- "$BINARY" --is-default | grep -Eq '^(yes|no)$'
 
           chmod +x "$APPIMAGE"
           ABS_APPIMAGE="$(realpath "$APPIMAGE")"
@@ -222,6 +149,14 @@ jobs:
           TAG="linux-v${VERSION}"
           cat > release-notes.md <<EOF
           Ubuntu/Linux build of Fiddler ${VERSION}, produced by GitHub Actions from ${GITHUB_SHA}.
+
+          Linux desktop integration includes:
+          - inode/directory registration and %U URI activation
+          - single-instance folder/file activation
+          - freedesktop FileManager1 support when Fiddler is the default
+          - XDG-aware Places and GIO mounted volumes
+          - freedesktop shared image thumbnails
+          - Debian package and AppImage artifacts
 
           Assets:
           - Debian package for x86_64 Ubuntu-compatible systems
