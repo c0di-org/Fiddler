@@ -65,6 +65,8 @@ export const {
   openExternal,
   hasOpenHandler,
   installApk,
+  isDefaultFileManager,
+  makeDefaultFileManager,
   takeIncomingLocations,
   onIncomingLocation,
   sharePaths,
