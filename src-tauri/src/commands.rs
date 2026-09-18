@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::archive;
 use crate::content_search::{self, ContentSearch};
@@ -189,6 +189,18 @@ pub async fn list_dir(
             .await
             .map_err(|e| e.to_string())?;
     }
+    // Linux thumbnails and media currently use the original local file rather
+    // than a rendered cache entry. Tauri's asset protocol refuses arbitrary
+    // filesystem paths unless they are explicitly scoped, so grant the tree the
+    // user just opened before any thumbnail/media URL is handed to WebKit.
+    //
+    // Keep this Linux-only: macOS renders previews into $APPCACHE, and Android
+    // already scopes /storage in tauri.conf.json.
+    #[cfg(target_os = "linux")]
+    app.asset_protocol_scope()
+        .allow_directory(Path::new(&path), true)
+        .map_err(|e| format!("couldn't allow previews in {path}: {e}"))?;
+
     let cache = state.cache.clone();
     let watcher = state.watcher.clone();
 
