@@ -263,5 +263,5 @@ npm run deploy
 - The audio player reads no tags: chapter names come from filenames and the cover from a picture beside them. Chapter marks *inside* a single long `.m4b` are not read either, so one file plays as one recording.
 - No tabs or column view yet.
 - Drag and drop works inside Fiddler, but native drag in/out of Finder is not implemented yet.
-- On Linux, core file operations, Git, USB/MTP, nearby devices, archives, audio, and text/image editing are available. Finder-only reveal/terminal actions and system sharing are hidden; mounted-volume discovery/eject and native PDF page rasterisation are not implemented yet.
+- On Linux, core file operations, Git, USB/MTP, nearby devices, archives, audio, text/image editing, mounted-volume discovery/eject, and shared raster thumbnails are available. macOS-only Finder actions and system sharing are hidden; native PDF page rasterisation is not implemented yet.
 - The browser build cannot provide native Git, USB/MTP, volume, or real nearby-device features.
