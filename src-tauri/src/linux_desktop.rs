@@ -44,7 +44,11 @@ pub fn forward_existing(inputs: &[String]) -> bool {
     let Ok(proxy) = zbus::blocking::Proxy::new(&connection, APP_BUS, APP_PATH, APP_IFACE) else {
         return false;
     };
-    let result: zbus::Result<()> = proxy.call("Activate", &(inputs.to_vec(),));
+    let cwd = std::env::current_dir()
+        .ok()
+        .map(|path| path.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let result: zbus::Result<()> = proxy.call("Activate", &(inputs.to_vec(), cwd));
     result.is_ok()
 }
 
@@ -54,8 +58,8 @@ struct ApplicationService {
 
 #[interface(name = "app.fiddler.desktop.Application")]
 impl ApplicationService {
-    fn activate(&self, inputs: Vec<String>) {
-        let cwd = std::env::current_dir().ok();
+    fn activate(&self, inputs: Vec<String>, cwd: String) {
+        let cwd = (!cwd.is_empty()).then(|| std::path::PathBuf::from(cwd));
         opened::push(opened::from_inputs(inputs, cwd.as_deref(), false));
         focus(&self.app);
     }
