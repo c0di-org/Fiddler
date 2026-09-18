@@ -503,6 +503,11 @@ const backend: Backend = {
 
   installApk: unavailable("Installing apps"),
 
+  isDefaultFileManager: async () => false,
+
+  makeDefaultFileManager: unavailable("Changing the default file manager"),
+
+
   /** A tab is not something the OS can hand a file to. Files arrive here by
    * being dragged onto the window instead — see `importDropped`. */
   async takeIncomingLocations() {
