@@ -241,6 +241,10 @@ export interface Backend {
   hasOpenHandler(path: string): Promise<boolean>;
   /** Launch Android's package installer for a selected APK. */
   installApk(path: string): Promise<void>;
+  /** Whether Linux currently resolves inode/directory to Fiddler. */
+  isDefaultFileManager(): Promise<boolean>;
+  /** Explicitly make Fiddler the user's inode/directory handler. */
+  makeDefaultFileManager(): Promise<void>;
 
   /** Files or folders another app or the desktop asked Fiddler to show. */
   takeIncomingLocations(): Promise<IncomingLocation[]>;
