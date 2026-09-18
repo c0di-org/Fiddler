@@ -217,7 +217,7 @@ fn install_user_desktop_entry(exe: &std::path::Path) -> Result<(), String> {
     let applications = data.join("applications");
     std::fs::create_dir_all(&applications).map_err(|e| e.to_string())?;
     let body = format!(
-        "[Desktop Entry]\nVersion=1.5\nType=Application\nName=Fiddler\nGenericName=File Manager\nComment=A git-aware cross-platform file manager\nExec={} %U\nTerminal=false\nStartupNotify=true\nCategories=System;Utility;FileTools;FileManager;\nMimeType=inode/directory;\n",
+        "[Desktop Entry]\nVersion=1.5\nType=Application\nName=Fiddler\nGenericName=File Manager\nComment=A git-aware cross-platform file manager\nKeywords=files;folders;manager;filesystem;browse;\nExec={} %U\nStartupWMClass=fiddler\nIcon=fiddler\nTerminal=false\nStartupNotify=true\nCategories=System;Utility;FileTools;FileManager;\nMimeType=inode/directory;\n",
         dbus_exec(&exe.to_string_lossy())
     );
     std::fs::write(applications.join("Fiddler.desktop"), body).map_err(|e| e.to_string())?;
