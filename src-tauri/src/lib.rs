@@ -73,6 +73,11 @@ pub fn run() {
             {
                 let cwd = std::env::current_dir().ok();
                 opened::push(opened::from_inputs(initial_args.clone(), cwd.as_deref(), false));
+                if let Some(cache) = dirs::cache_dir() {
+                    let _ = app
+                        .asset_protocol_scope()
+                        .allow_directory(cache.join("thumbnails"), true);
+                }
                 linux_desktop::start(app.handle().clone());
             }
             // Same reason, one line later: Back is pressed long before anything slow.
