@@ -112,7 +112,7 @@ jobs:
           HOME="$PORTABLE_HOME/home" \
           XDG_DATA_HOME="$PORTABLE_HOME/data" \
           XDG_CONFIG_HOME="$PORTABLE_HOME/config" \
-          dbus-run-session -- "$ABS_APPIMAGE" --make-default
+          dbus-run-session -- "$ABS_APPIMAGE" --appimage-extract-and-run --make-default
           USER_DESKTOP="$PORTABLE_HOME/data/applications/Fiddler.desktop"
           test -f "$USER_DESKTOP"
           desktop-file-validate "$USER_DESKTOP"
