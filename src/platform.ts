@@ -82,7 +82,7 @@ export const caps: Capabilities = {
   folderPicker: platform === "web" && hasDirectoryPicker(),
   dropImport: platform === "web",
   handOff: platform !== "web",
-  incomingFiles: platform === "android",
+  incomingFiles: platform === "android" || platform === "linux",
 };
 
 /** A shortcut hint for a tooltip, written once in Mac notation and translated
