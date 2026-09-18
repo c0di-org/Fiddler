@@ -296,6 +296,7 @@ mod tests {
         assert_eq!(queued(&q).0, ["/nope/1.png", "/nope/2.png", "/nope/3.png"]);
     }
 
+    #[cfg(target_os = "macos")]
     #[test]
     fn each_renderer_gets_its_own_lane() {
         let mut q = Queue::default();
@@ -311,6 +312,7 @@ mod tests {
         assert_eq!(lane(&q.text), ["/nope/notes.md"]);
     }
 
+    #[cfg(target_os = "macos")]
     #[test]
     fn a_slow_deck_never_holds_up_a_folder_of_source() {
         let mut q = Queue::default();
@@ -323,6 +325,24 @@ mod tests {
         // in line for a worker rather than third.
         assert_eq!(lane(&q.text), ["/nope/main.rs", "/nope/lib.rs"]);
         assert_eq!(lane(&q.quicklook), ["/nope/huge.key"]);
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[test]
+    fn unsupported_preview_lanes_settle_without_work() {
+        let mut q = Queue::default();
+        let hits = q.admit(vec![
+            req("/nope/photo.jpg"),
+            req("/nope/paper.pdf"),
+            req("/nope/clip.mov"),
+            req("/nope/notes.md"),
+        ]);
+        assert_eq!(lane(&q.raster), ["/nope/photo.jpg"]);
+        assert!(lane(&q.page).is_empty());
+        assert!(lane(&q.quicklook).is_empty());
+        assert!(lane(&q.text).is_empty());
+        assert_eq!(hits.len(), 3);
+        assert!(hits.iter().all(|hit| hit.src.is_none()));
     }
 
     #[test]

@@ -4,7 +4,7 @@
 
 # Fiddler
 
-Cross-platform file management for macOS, Android/DeX, and the web.
+Cross-platform file management for macOS, Ubuntu/Linux, Android/DeX, and the web.
 
 **[Try the web app](https://files.c0di.com)**
 
@@ -121,6 +121,34 @@ Build the native app with:
 npm run tauri -- build
 ```
 
+### Ubuntu / Linux
+
+The packaged Linux build targets x86_64 Ubuntu-compatible systems. Ubuntu 22.04 is the compatibility baseline used by CI.
+
+Install the Tauri system prerequisites, plus udev headers used by Fiddler's USB/MTP support:
+
+```bash
+sudo apt update
+sudo apt install libwebkit2gtk-4.1-dev \
+  build-essential curl wget file libxdo-dev libssl-dev \
+  libayatana-appindicator3-dev librsvg2-dev libudev-dev
+```
+
+Then run from source with:
+
+```bash
+npm ci
+npm run tauri -- dev
+```
+
+Build installable packages with:
+
+```bash
+npm run tauri -- build --bundles deb,appimage
+```
+
+GitHub Actions runs the TypeScript and Rust tests on Ubuntu, builds both packages, and publishes them on a `linux-v<version>` GitHub release when the app version changes on `main`.
+
 ### Android / Samsung DeX
 
 The Android build supports touch, keyboard, and pointer input. Long-press starts selection on touch devices; after that, tap additional items to toggle them. Share uses Android's system chooser, and incoming files from Open with/share flows open in Fiddler.
@@ -224,4 +252,5 @@ npm run deploy
 - The audio player reads no tags: chapter names come from filenames and the cover from a picture beside them. Chapter marks *inside* a single long `.m4b` are not read either, so one file plays as one recording.
 - No tabs or column view yet.
 - Drag and drop works inside Fiddler, but native drag in/out of Finder is not implemented yet.
+- On Linux, core file operations, Git, USB/MTP, nearby devices, archives, audio, and text/image editing are available. Finder-only reveal/terminal actions and system sharing are hidden; mounted-volume discovery/eject and native PDF page rasterisation are not implemented yet.
 - The browser build cannot provide native Git, USB/MTP, volume, or real nearby-device features.

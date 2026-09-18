@@ -12,13 +12,17 @@
 declare const __FIDDLER_WEB__: boolean;
 const isWebBuild = typeof __FIDDLER_WEB__ !== "undefined" && __FIDDLER_WEB__;
 
-export type Platform = "macos" | "android" | "web";
+export type Platform = "macos" | "linux" | "android" | "web";
 
-export const platform: Platform = isWebBuild
-  ? "web"
-  : /Android/i.test(navigator.userAgent)
-    ? "android"
-    : "macos";
+export function detectPlatform(webBuild: boolean, userAgent: string): Platform {
+  if (webBuild) return "web";
+  if (/Android/i.test(userAgent)) return "android";
+  if (/Linux/i.test(userAgent)) return "linux";
+  return "macos";
+}
+
+const userAgent = typeof navigator !== "undefined" ? navigator.userAgent : "";
+export const platform: Platform = detectPlatform(isWebBuild, userAgent);
 
 /** True where the primary pointer can't hover — a phone or tablet, or a Mac
  * being driven by touch. Finder's select-then-open two-step is wrong there:
@@ -69,7 +73,7 @@ const hasDirectoryPicker = () =>
 export const caps: Capabilities = {
   reveal: platform === "macos",
   terminal: platform === "macos",
-  share: platform !== "web",
+  share: platform === "macos" || platform === "android",
   trash: platform !== "android",
   installApk: platform === "android",
   directTouch: platform === "android" || (platform === "web" && coarsePointer()),
@@ -82,7 +86,7 @@ export const caps: Capabilities = {
 };
 
 /** A shortcut hint for a tooltip, written once in Mac notation and translated
- * for keyboards that have no ⌘. On Android and the web the handlers already
+ * for keyboards that have no ⌘. On Linux, Android and the web the handlers already
  * accept Ctrl (and Alt for ⌥); this makes the labels stop advertising a Mac
  * chord to a keyboard that can't type one. */
 export function keyHint(mac: string): string {
@@ -103,6 +107,8 @@ export function permissionHelp(): string {
       return "Fiddler needs All files access to read this folder. Grant it in Android Settings › Apps › Fiddler.";
     case "web":
       return "Your browser did not grant access to this folder. Try opening it again.";
+    case "linux":
+      return "Fiddler could not read this folder. Check that your Linux user has permission to read it.";
     default:
       return "Fiddler needs permission to read this folder. Grant it in System Settings › Privacy & Security › Files and Folders.";
   }

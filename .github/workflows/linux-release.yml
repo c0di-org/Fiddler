@@ -1,0 +1,127 @@
+name: Linux release
+
+on:
+  pull_request:
+    paths:
+      - 'src/**'
+      - 'src-tauri/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/linux-release.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'src-tauri/tauri.conf.json'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: linux-only-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Configure Rust
+        run: |
+          rustup default stable
+          rustup show
+
+      - name: Install Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            build-essential \
+            curl \
+            wget \
+            file \
+            libxdo-dev \
+            libssl-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libudev-dev
+
+      - name: Install JavaScript dependencies
+        run: npm ci
+
+      - name: Run TypeScript tests
+        run: npm test
+
+      - name: Run Rust tests
+        run: cargo test --manifest-path src-tauri/Cargo.toml --locked
+
+      - name: Build Linux packages
+        run: npx tauri build --bundles deb,appimage
+
+      - name: Collect release artifacts
+        id: package
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="$(node -p "require('./src-tauri/tauri.conf.json').version")"
+          DEB="$(find src-tauri/target/release/bundle/deb -maxdepth 1 -name '*.deb' -print -quit)"
+          APPIMAGE="$(find src-tauri/target/release/bundle/appimage -maxdepth 1 -name '*.AppImage' -print -quit)"
+          test -n "$DEB"
+          test -n "$APPIMAGE"
+
+          mkdir -p linux-artifact
+          cp "$DEB" "linux-artifact/Fiddler-${VERSION}-amd64.deb"
+          cp "$APPIMAGE" "linux-artifact/Fiddler-${VERSION}-x86_64.AppImage"
+          chmod +x "linux-artifact/Fiddler-${VERSION}-x86_64.AppImage"
+          (
+            cd linux-artifact
+            sha256sum "Fiddler-${VERSION}-amd64.deb" "Fiddler-${VERSION}-x86_64.AppImage" > SHA256SUMS-linux.txt
+          )
+
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Built Fiddler $VERSION for Ubuntu/Linux" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload Linux packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: fiddler-linux-${{ steps.package.outputs.version }}
+          path: linux-artifact/*
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Publish GitHub release
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.package.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="linux-v${VERSION}"
+          cat > release-notes.md <<EOF
+          Ubuntu/Linux build of Fiddler ${VERSION}, produced by GitHub Actions from ${GITHUB_SHA}.
+
+          Assets:
+          - Debian package for x86_64 Ubuntu-compatible systems
+          - AppImage for x86_64 Linux systems
+          - SHA-256 checksums
+
+          CI builds on Ubuntu 22.04 to keep the glibc baseline compatible with Ubuntu 22.04 and newer.
+          EOF
+
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$TAG" linux-artifact/* --clobber --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$TAG" linux-artifact/* \
+              --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" \
+              --title "Fiddler ${VERSION} for Linux" \
+              --notes-file release-notes.md
+          fi
