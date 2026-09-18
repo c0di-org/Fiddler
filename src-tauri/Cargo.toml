@@ -85,7 +85,6 @@ objc2-disk-arbitration = { version = "0.3", default-features = false, features =
 # current-thread tokio runtime on a worker thread and the rest of Fiddler stays
 # synchronous.
 [target.'cfg(not(target_os = "android"))'.dependencies]
-zbus = "5.18"
 trash = "5"
 mtp-rs = "0.30"
 tokio = { version = "1", features = ["rt", "time", "sync", "macros"] }
@@ -95,6 +94,11 @@ bytes = "1"
 # Android's PdfRenderer is part of the OS, is hardware-adjacent, and avoids
 # carrying a large PDF engine in every APK. These two tiny bindings are only
 # linked into the Android build to reach it from the Rust command layer.
+[target.'cfg(target_os = "linux")'.dependencies]
+zbus = "5.18"
+gio = "0.18"
+glib = "0.18"
+
 [target.'cfg(target_os = "android")'.dependencies]
 jni = "0.21"
 ndk-context = "0.1"
@@ -108,7 +112,7 @@ gix = { version = "0.87", default-features = false, features = ["sha1", "status"
 # "how many bytes are left" — DiskArbitration doesn't know and Android's Java
 # API would mean a JNI round trip per volume per poll — so both sides ask the
 # kernel directly.
-[target.'cfg(any(target_os = "macos", target_os = "android"))'.dependencies]
+[target.'cfg(any(target_os = "macos", target_os = "android", target_os = "linux"))'.dependencies]
 libc = "0.2"
 
 # mtp-rs can back a device with a local directory instead of a cable, so the
