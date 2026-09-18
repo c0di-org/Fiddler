@@ -879,18 +879,16 @@ pub fn install_apk(path: String) -> Result<(), String> {
     crate::apk::install(&path)
 }
 
-/// Collect the files other apps have asked Fiddler to open since the last call.
+/// Collect locations other apps or the desktop asked Fiddler to show.
 ///
-/// Draining rather than peeking is what makes this safe to call from more than
-/// one place — at startup and again on every nudge — without opening the same
-/// file twice. Paths that have since gone are dropped here rather than sent on
-/// to become an empty folder: a share sheet's copy can be cleaned up between
-/// being resolved and being collected.
+/// Paths that vanished between activation and collection are dropped. Folders
+/// are kept: Linux's inode/directory handler opens them directly, while files
+/// are selected in their parent.
 #[tauri::command]
-pub fn take_opened_files() -> Vec<String> {
+pub fn take_opened_locations() -> Vec<crate::opened::IncomingLocation> {
     crate::opened::take()
         .into_iter()
-        .filter(|path| Path::new(path).is_file())
+        .filter(|location| Path::new(&location.path).exists())
         .collect()
 }
 
