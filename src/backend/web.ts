@@ -505,11 +505,11 @@ const backend: Backend = {
 
   /** A tab is not something the OS can hand a file to. Files arrive here by
    * being dragged onto the window instead — see `importDropped`. */
-  async takeIncomingFiles() {
+  async takeIncomingLocations() {
     return [];
   },
 
-  async onIncomingFile() {
+  async onIncomingLocation() {
     return () => {};
   },
 
