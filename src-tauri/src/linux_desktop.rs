@@ -179,7 +179,9 @@ fn start_file_manager_service(app: AppHandle) {
 
 pub fn make_default() -> Result<(), String> {
     let exe = installed_executable()?;
-    install_user_desktop_entry(&exe)?;
+    if !std::path::Path::new("/usr/share/applications/Fiddler.desktop").is_file() {
+        install_user_desktop_entry(&exe)?;
+    }
 
     set_mimeapps_default()?;
 
