@@ -872,6 +872,26 @@ pub fn sidebar_places() -> Vec<Place> {
 }
 
 #[tauri::command]
+pub fn is_default_file_manager() -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        return crate::linux_desktop::is_default();
+    }
+    #[cfg(not(target_os = "linux"))]
+    false
+}
+
+#[tauri::command]
+pub fn make_default_file_manager() -> Result<(), String> {
+    #[cfg(target_os = "linux")]
+    {
+        return crate::linux_desktop::make_default();
+    }
+    #[cfg(not(target_os = "linux"))]
+    Err("Default file-manager integration is only available on Linux".into())
+}
+
+#[tauri::command]
 pub fn install_apk(path: String) -> Result<(), String> {
     let path = PathBuf::from(path);
     if !path
