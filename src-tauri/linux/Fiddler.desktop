@@ -7,7 +7,6 @@ Comment={{comment}}
 Keywords=files;folders;manager;filesystem;browse;
 TryExec={{exec}}
 Exec={{exec}} %U
-StartupWMClass={{exec}}
 Icon={{icon}}
 Terminal=false
 StartupNotify=true
