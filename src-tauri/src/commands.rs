@@ -848,8 +848,9 @@ pub fn sidebar_places() -> Vec<Place> {
     {
         let home = dirs::home_dir().unwrap_or_default();
         let mut out = Vec::new();
-        let mut push = |name: &str, p: PathBuf, icon: &str| {
-            if p.is_dir() {
+        let mut push = |name: &str, p: Option<PathBuf>, icon: &str| {
+            let Some(p) = p else { return };
+            if p.is_dir() && !out.iter().any(|held: &Place| held.path == p.to_string_lossy()) {
                 out.push(Place {
                     name: name.to_string(),
                     path: p.to_string_lossy().into_owned(),
@@ -858,11 +859,14 @@ pub fn sidebar_places() -> Vec<Place> {
             }
         };
 
-        push("Developer", home.join("Developer"), "code");
-        push("Home", home.clone(), "home");
-        push("Desktop", home.join("Desktop"), "desktop");
-        push("Documents", home.join("Documents"), "doc");
-        push("Downloads", home.join("Downloads"), "download");
+        push("Developer", Some(home.join("Developer")), "code");
+        push("Home", Some(home), "home");
+        // On Linux these come from XDG user-dirs, so localized or relocated
+        // Desktop/Documents/Downloads folders appear where the desktop says
+        // they are rather than where an English home-directory layout guesses.
+        push("Desktop", dirs::desktop_dir(), "desktop");
+        push("Documents", dirs::document_dir(), "doc");
+        push("Downloads", dirs::download_dir(), "download");
         out
     }
 }
