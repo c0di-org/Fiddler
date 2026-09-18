@@ -181,13 +181,14 @@ pub fn make_default() -> Result<(), String> {
     let exe = installed_executable()?;
     install_user_desktop_entry(&exe)?;
 
-    let status = Command::new("xdg-mime")
+    set_mimeapps_default()?;
+
+    // Keep desktop-specific caches in sync when xdg-utils is present. The
+    // freedesktop mimeapps.list written above is the source of truth, so a
+    // minimal system without xdg-mime still works.
+    let _ = Command::new("xdg-mime")
         .args(["default", "Fiddler.desktop", "inode/directory"])
-        .status()
-        .map_err(|e| format!("couldn't run xdg-mime: {e}"))?;
-    if !status.success() {
-        return Err(format!("xdg-mime exited with {status}"));
-    }
+        .status();
 
     let data = dirs::data_local_dir().ok_or("couldn't find the user data directory")?;
     let services = data.join("dbus-1/services");
@@ -229,13 +230,100 @@ fn install_user_desktop_entry(exe: &std::path::Path) -> Result<(), String> {
 }
 
 pub fn is_default() -> bool {
-    Command::new("xdg-mime")
+    if let Some(answer) = Command::new("xdg-mime")
         .args(["query", "default", "inode/directory"])
         .output()
         .ok()
         .filter(|out| out.status.success())
         .and_then(|out| String::from_utf8(out.stdout).ok())
-        .is_some_and(|answer| answer.trim() == "Fiddler.desktop")
+    {
+        return answer.trim() == "Fiddler.desktop";
+    }
+
+    let Some(config) = dirs::config_dir() else { return false };
+    std::fs::read_to_string(config.join("mimeapps.list"))
+        .ok()
+        .and_then(|content| mimeapps_default(&content))
+        .is_some_and(|desktop| desktop == "Fiddler.desktop")
+}
+
+fn set_mimeapps_default() -> Result<(), String> {
+    let config = dirs::config_dir().ok_or("couldn't find the user config directory")?;
+    std::fs::create_dir_all(&config).map_err(|e| e.to_string())?;
+    let path = config.join("mimeapps.list");
+    let current = std::fs::read_to_string(&path).unwrap_or_default();
+    std::fs::write(&path, update_mimeapps(&current)).map_err(|e| e.to_string())
+}
+
+fn update_mimeapps(input: &str) -> String {
+    let mut lines: Vec<String> = input.lines().map(str::to_owned).collect();
+    set_ini_value(
+        &mut lines,
+        "Default Applications",
+        "inode/directory",
+        "Fiddler.desktop;",
+    );
+    set_ini_value(
+        &mut lines,
+        "Added Associations",
+        "inode/directory",
+        "Fiddler.desktop;",
+    );
+    let mut output = lines.join("\n");
+    output.push('\n');
+    output
+}
+
+fn set_ini_value(lines: &mut Vec<String>, section: &str, key: &str, value: &str) {
+    let header = format!("[{section}]");
+    let start = lines.iter().position(|line| line.trim() == header);
+    let start = match start {
+        Some(index) => index,
+        None => {
+            if !lines.is_empty() && !lines.last().is_some_and(|line| line.is_empty()) {
+                lines.push(String::new());
+            }
+            lines.push(header);
+            lines.push(format!("{key}={value}"));
+            return;
+        }
+    };
+
+    let end = lines[start + 1..]
+        .iter()
+        .position(|line| {
+            let trimmed = line.trim();
+            trimmed.starts_with('[') && trimmed.ends_with(']')
+        })
+        .map(|offset| start + 1 + offset)
+        .unwrap_or(lines.len());
+
+    let prefix = format!("{key}=");
+    if let Some(index) = (start + 1..end).find(|&index| lines[index].trim_start().starts_with(&prefix)) {
+        lines[index] = format!("{key}={value}");
+    } else {
+        lines.insert(end, format!("{key}={value}"));
+    }
+}
+
+fn mimeapps_default(input: &str) -> Option<&str> {
+    let mut in_defaults = false;
+    for line in input.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with('[') && trimmed.ends_with(']') {
+            in_defaults = trimmed == "[Default Applications]";
+            continue;
+        }
+        if in_defaults {
+            if let Some(value) = trimmed.strip_prefix("inode/directory=") {
+                return value
+                    .split(';')
+                    .map(str::trim)
+                    .find(|value| !value.is_empty());
+            }
+        }
+    }
+    None
 }
 
 fn dbus_exec(input: &str) -> String {
@@ -250,5 +338,23 @@ mod tests {
     fn executable_paths_are_quoted_for_dbus_activation() {
         assert_eq!(dbus_exec("/usr/bin/fiddler"), "\"/usr/bin/fiddler\"");
         assert_eq!(dbus_exec("/home/A B/Fiddler"), "\"/home/A B/Fiddler\"");
+    }
+
+    #[test]
+    fn mimeapps_update_preserves_other_defaults() {
+        let input = "[Default Applications]\ntext/plain=org.gnome.TextEditor.desktop;\n\n[Added Associations]\nimage/png=org.gnome.Loupe.desktop;\n";
+        let updated = update_mimeapps(input);
+        assert!(updated.contains("text/plain=org.gnome.TextEditor.desktop;"));
+        assert!(updated.contains("image/png=org.gnome.Loupe.desktop;"));
+        assert!(updated.contains("inode/directory=Fiddler.desktop;"));
+        assert_eq!(mimeapps_default(&updated), Some("Fiddler.desktop"));
+    }
+
+    #[test]
+    fn mimeapps_update_creates_missing_sections() {
+        let updated = update_mimeapps("");
+        assert!(updated.contains("[Default Applications]"));
+        assert!(updated.contains("[Added Associations]"));
+        assert_eq!(mimeapps_default(&updated), Some("Fiddler.desktop"));
     }
 }
