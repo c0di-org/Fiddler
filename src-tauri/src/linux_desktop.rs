@@ -131,6 +131,14 @@ fn start_file_manager_service(app: AppHandle) {
     std::thread::spawn(move || {
         let Some(runtime) = runtime() else { return };
         loop {
+            // Owning this well-known name changes where desktop "Show in
+            // Folder" requests go. Only claim it after the user has explicitly
+            // made Fiddler their directory handler.
+            if !is_default() {
+                std::thread::sleep(Duration::from_secs(2));
+                continue;
+            }
+
             let Ok(builder) = connection::Builder::session() else {
                 std::thread::sleep(Duration::from_secs(2));
                 continue;
@@ -147,13 +155,17 @@ fn start_file_manager_service(app: AppHandle) {
                 continue;
             };
             match runtime.block_on(builder.build()) {
-                Ok(_connection) => {
-                    runtime.block_on(pending::<()>());
-                    return;
+                Ok(connection) => {
+                    // Drop the name again if the user changes their default
+                    // file manager while Fiddler is running.
+                    while is_default() {
+                        std::thread::sleep(Duration::from_secs(2));
+                    }
+                    drop(connection);
                 }
                 Err(_) => {
                     // Another file manager currently owns the standard name.
-                    // Never replace it; if it exits, claim the interface.
+                    // Never replace it.
                     std::thread::sleep(Duration::from_secs(2));
                 }
             }
