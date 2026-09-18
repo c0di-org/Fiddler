@@ -102,10 +102,22 @@ jobs:
             cd appimage-check
             "$ABS_APPIMAGE" --appimage-extract >/dev/null
           )
-          APP_DESKTOP="$(find appimage-check/squashfs-root -name 'Fiddler.desktop' -print -quit)"
-          test -n "$APP_DESKTOP"
-          grep -Fxq 'MimeType=inode/directory;' "$APP_DESKTOP"
-          grep -Fxq 'Exec=fiddler %U' "$APP_DESKTOP"
+          test -x appimage-check/squashfs-root/usr/bin/fiddler
+
+          # A portable AppImage is not installed into the desktop by default.
+          # Its explicit "make default" action must create a valid per-user
+          # desktop entry pointing back to the AppImage itself.
+          PORTABLE_HOME="$(mktemp -d)"
+          mkdir -p "$PORTABLE_HOME/home" "$PORTABLE_HOME/data" "$PORTABLE_HOME/config"
+          HOME="$PORTABLE_HOME/home" \
+          XDG_DATA_HOME="$PORTABLE_HOME/data" \
+          XDG_CONFIG_HOME="$PORTABLE_HOME/config" \
+          dbus-run-session -- "$ABS_APPIMAGE" --make-default
+          USER_DESKTOP="$PORTABLE_HOME/data/applications/Fiddler.desktop"
+          test -f "$USER_DESKTOP"
+          desktop-file-validate "$USER_DESKTOP"
+          grep -Fxq 'MimeType=inode/directory;' "$USER_DESKTOP"
+          grep -Fq "Exec=\"$ABS_APPIMAGE\" %U" "$USER_DESKTOP"
 
       - name: Collect release artifacts
         id: package
