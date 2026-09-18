@@ -190,6 +190,11 @@ const backend: Backend = {
 
   installApk: (path) => invoke<void>("install_apk", { path }),
 
+  isDefaultFileManager: () => invoke<boolean>("is_default_file_manager"),
+
+  makeDefaultFileManager: () => invoke<void>("make_default_file_manager"),
+
+
   takeIncomingLocations: () => invoke<IncomingLocation[]>("take_opened_locations"),
 
   onIncomingLocation: (fn) => listen("fiddler:opened-location", () => fn()),
