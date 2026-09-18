@@ -1,58 +1,92 @@
-//! Files another app asked Fiddler to open.
+//! Locations another app, the desktop shell, or D-Bus asked Fiddler to show.
 //!
-//! Android delivers these to the Activity as intents, and `OpenedFile.kt`
-//! resolves each one to a path off the main thread before handing it here. The
-//! paths are pushed rather than fetched, which is what keeps this side free of
-//! JNI: the call arrives on a Java thread that already has an env, so nothing
-//! here ever has to reach back into Java to ask a question.
-//!
-//! The list is the truth and the event is only a hint. Files that arrive before
-//! the webview exists — a cold start, which is the common case — simply wait,
-//! and are collected when the front end boots.
+//! The queue is the truth and the event is only a hint. Requests that arrive
+//! before the webview exists simply wait and are collected during bootstrap.
 
-use std::sync::Mutex;
+use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
 
-static PENDING: Mutex<Vec<String>> = Mutex::new(Vec::new());
+use serde::Serialize;
+use tauri::{AppHandle, Emitter};
 
-/// Collect what has arrived, and clear it.
-///
-/// Draining rather than peeking is what makes this safe to call from more than
-/// one place — at startup, and again on every hint — without opening the same
-/// file twice.
-pub fn take() -> Vec<String> {
+const OPENED_EVENT: &str = "fiddler:opened-location";
+static PENDING: Mutex<Vec<IncomingLocation>> = Mutex::new(Vec::new());
+static APP: OnceLock<AppHandle> = OnceLock::new();
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IncomingLocation {
+    pub path: String,
+    /// Select the item in its parent rather than opening it as the current folder.
+    pub select: bool,
+    /// Open Quick Look after selecting it.
+    pub preview: bool,
+}
+
+pub fn remember(app: AppHandle) {
+    let _ = APP.set(app);
+}
+
+pub fn take() -> Vec<IncomingLocation> {
     PENDING
         .lock()
         .map(|mut pending| std::mem::take(&mut *pending))
         .unwrap_or_default()
 }
 
-#[cfg(target_os = "android")]
-mod imp {
-    use std::sync::OnceLock;
+pub fn push(locations: impl IntoIterator<Item = IncomingLocation>) {
+    let found: Vec<_> = locations.into_iter().collect();
+    if found.is_empty() {
+        return;
+    }
+    if let Ok(mut pending) = PENDING.lock() {
+        pending.extend(found);
+    }
+    if let Some(app) = APP.get() {
+        let _ = app.emit(OPENED_EVENT, ());
+    }
+}
 
+pub fn from_inputs(
+    inputs: impl IntoIterator<Item = String>,
+    cwd: Option<&Path>,
+    preview_files: bool,
+) -> Vec<IncomingLocation> {
+    inputs
+        .into_iter()
+        .filter(|input| !input.starts_with("--"))
+        .filter_map(|input| local_path(&input, cwd))
+        .filter(|path| path.exists())
+        .map(|path| {
+            let select = !path.is_dir();
+            IncomingLocation {
+                path: path.to_string_lossy().into_owned(),
+                select,
+                preview: select && preview_files,
+            }
+        })
+        .collect()
+}
+
+fn local_path(input: &str, cwd: Option<&Path>) -> Option<PathBuf> {
+    if input.starts_with("file:") {
+        return url::Url::parse(input).ok()?.to_file_path().ok();
+    }
+    let path = PathBuf::from(input);
+    if path.is_absolute() {
+        Some(path)
+    } else {
+        Some(cwd.unwrap_or_else(|| Path::new(".")).join(path))
+    }
+}
+
+#[cfg(target_os = "android")]
+mod android {
     use jni::objects::{JClass, JObjectArray, JString};
     use jni::JNIEnv;
-    use tauri::{AppHandle, Emitter};
 
-    /// Where the hint is delivered. Carries no payload: the list is collected
-    /// by command, so the event cannot go stale or disagree with it.
-    const OPENED_EVENT: &str = "fiddler:opened-file";
+    use super::{push, IncomingLocation};
 
-    /// Set once during `setup`. Files can land before that on a cold start,
-    /// which is exactly the case `PENDING` already covers.
-    static APP: OnceLock<AppHandle> = OnceLock::new();
-
-    pub fn remember(app: AppHandle) {
-        let _ = APP.set(app);
-    }
-
-    /// Called from `NativeBridge.kt` once the paths have been resolved.
-    ///
-    /// # Safety
-    /// Invoked by the JVM on Kotlin's resolver thread with a live env and a
-    /// `String[]`. Anything unreadable in that array is skipped rather than
-    /// unwrapped — this runs under `panic = "abort"`, where a bad element would
-    /// take the whole app down for one file.
     #[no_mangle]
     pub extern "system" fn Java_app_fiddler_desktop_NativeBridge_opened(
         mut env: JNIEnv,
@@ -71,29 +105,31 @@ mod imp {
                 continue;
             }
             if let Ok(path) = env.get_string(&JString::from(item)) {
-                found.push(String::from(path));
+                found.push(IncomingLocation {
+                    path: String::from(path),
+                    select: true,
+                    preview: true,
+                });
             }
         }
-        if found.is_empty() {
-            return;
-        }
-
-        if let Ok(mut pending) = super::PENDING.lock() {
-            pending.extend(found);
-        }
-        if let Some(app) = APP.get() {
-            let _ = app.emit(OPENED_EVENT, ());
-        }
+        push(found);
     }
 }
 
-#[cfg(not(target_os = "android"))]
-mod imp {
-    use tauri::AppHandle;
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-    /// Nothing hands a running Fiddler a file to open anywhere else yet. macOS
-    /// has `application:openFiles:`, which would land here when it's wired up.
-    pub fn remember(_app: AppHandle) {}
+    #[test]
+    fn file_uris_become_local_paths() {
+        let dir = std::env::temp_dir();
+        let encoded = url::Url::from_file_path(&dir).unwrap().to_string();
+        assert_eq!(local_path(&encoded, None).unwrap(), dir);
+    }
+
+    #[test]
+    fn flags_are_not_treated_as_paths() {
+        let found = from_inputs(["--gapplication-service".into()], None, false);
+        assert!(found.is_empty());
+    }
 }
-
-pub use imp::remember;
