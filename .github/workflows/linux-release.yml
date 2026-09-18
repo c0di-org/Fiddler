@@ -65,8 +65,13 @@ jobs:
       - name: Run Rust tests
         run: cargo test --manifest-path src-tauri/Cargo.toml --locked
 
-      - name: Build Linux packages
-        run: npx tauri build --bundles deb,appimage
+      - name: Build Debian package
+        run: npx tauri build --bundles deb
+
+      - name: Build AppImage
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: "1"
+        run: npx tauri build --bundles appimage --verbose
 
       - name: Verify Linux desktop integration
         shell: bash
