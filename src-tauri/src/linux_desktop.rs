@@ -160,11 +160,15 @@ fn start_file_manager_service(app: AppHandle) {
             };
             match runtime.block_on(builder.build()) {
                 Ok(connection) => {
-                    // Drop the name again if the user changes their default
-                    // file manager while Fiddler is running.
-                    while is_default() {
-                        std::thread::sleep(Duration::from_secs(2));
-                    }
+                    // Keep the current-thread runtime alive while we own the
+                    // name: zbus dispatches method calls on this runtime. A
+                    // blocking sleep here would leave the service registered
+                    // but unable to answer ShowItems/ShowFolders requests.
+                    runtime.block_on(async {
+                        while is_default() {
+                            tokio::time::sleep(Duration::from_secs(2)).await;
+                        }
+                    });
                     drop(connection);
                 }
                 Err(_) => {
