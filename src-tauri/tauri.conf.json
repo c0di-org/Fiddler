@@ -40,6 +40,19 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "linux": {
+      "deb": {
+        "desktopTemplate": "linux/Fiddler.desktop",
+        "files": {
+          "/usr/share/metainfo/app.fiddler.desktop.metainfo.xml": "linux/app.fiddler.desktop.metainfo.xml"
+        }
+      },
+      "appimage": {
+        "files": {
+          "/usr/share/metainfo/app.fiddler.desktop.metainfo.xml": "linux/app.fiddler.desktop.metainfo.xml"
+        }
+      }
+    }
   }
 }
