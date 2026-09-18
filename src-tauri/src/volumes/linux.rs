@@ -35,13 +35,10 @@ fn volume_from_mount(mount: &gio::Mount) -> Option<Volume> {
         return None;
     }
 
-    let attrs = [
-        gio::FILE_ATTRIBUTE_FILESYSTEM_FREE,
-        gio::FILE_ATTRIBUTE_FILESYSTEM_SIZE,
-        gio::FILE_ATTRIBUTE_FILESYSTEM_READONLY,
-        gio::FILE_ATTRIBUTE_FILESYSTEM_REMOTE,
-    ]
-    .join(",");
+    // gio 0.18 exposes these constants as GStr values, which do not
+    // implement slice join. The attribute names are part of GIO's stable public
+    // namespace, so pass the standard query string directly.
+    let attrs = "filesystem::free,filesystem::size,filesystem::readonly,filesystem::remote";
 
     let info = root
         .query_filesystem_info(&attrs, gio::Cancellable::NONE)
@@ -49,10 +46,10 @@ fn volume_from_mount(mount: &gio::Mount) -> Option<Volume> {
 
     let remote = info
         .as_ref()
-        .is_some_and(|info| info.attribute_boolean(gio::FILE_ATTRIBUTE_FILESYSTEM_REMOTE));
+        .is_some_and(|info| info.boolean(gio::FILE_ATTRIBUTE_FILESYSTEM_REMOTE));
     let read_only = info
         .as_ref()
-        .is_some_and(|info| info.attribute_boolean(gio::FILE_ATTRIBUTE_FILESYSTEM_READONLY));
+        .is_some_and(|info| info.boolean(gio::FILE_ATTRIBUTE_FILESYSTEM_READONLY));
     let free_space = info
         .as_ref()
         .map(|info| info.attribute_uint64(gio::FILE_ATTRIBUTE_FILESYSTEM_FREE))
