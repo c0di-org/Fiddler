@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { detectPlatform } from "./platform";
+import { detectPlatform } from "./platform.ts";
 
 test("detects Ubuntu/Linux desktop builds", () => {
   assert.equal(
