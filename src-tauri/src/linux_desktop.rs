@@ -174,6 +174,9 @@ fn start_file_manager_service(app: AppHandle) {
 }
 
 pub fn make_default() -> Result<(), String> {
+    let exe = installed_executable()?;
+    install_user_desktop_entry(&exe)?;
+
     let status = Command::new("xdg-mime")
         .args(["default", "Fiddler.desktop", "inode/directory"])
         .status()
@@ -185,13 +188,39 @@ pub fn make_default() -> Result<(), String> {
     let data = dirs::data_local_dir().ok_or("couldn't find the user data directory")?;
     let services = data.join("dbus-1/services");
     std::fs::create_dir_all(&services).map_err(|e| e.to_string())?;
-    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     let body = format!(
         "[D-BUS Service]\nName=org.freedesktop.FileManager1\nExec={} --gapplication-service\n",
         dbus_exec(&exe.to_string_lossy())
     );
     std::fs::write(services.join("org.freedesktop.FileManager1.service"), body)
         .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+fn installed_executable() -> Result<std::path::PathBuf, String> {
+    if let Some(appimage) = std::env::var_os("APPIMAGE") {
+        let path = std::path::PathBuf::from(appimage);
+        if path.is_file() {
+            return Ok(path);
+        }
+    }
+    std::env::current_exe().map_err(|e| e.to_string())
+}
+
+fn install_user_desktop_entry(exe: &std::path::Path) -> Result<(), String> {
+    let data = dirs::data_local_dir().ok_or("couldn't find the user data directory")?;
+    let applications = data.join("applications");
+    std::fs::create_dir_all(&applications).map_err(|e| e.to_string())?;
+    let body = format!(
+        "[Desktop Entry]\nVersion=1.5\nType=Application\nName=Fiddler\nGenericName=File Manager\nComment=A git-aware cross-platform file manager\nExec={} %U\nTerminal=false\nStartupNotify=true\nCategories=System;Utility;FileTools;FileManager;\nMimeType=inode/directory;\n",
+        dbus_exec(&exe.to_string_lossy())
+    );
+    std::fs::write(applications.join("Fiddler.desktop"), body).map_err(|e| e.to_string())?;
+
+    // Refresh the per-user MIME cache when the standard helper is installed.
+    // xdg-mime still writes the preference itself, so this is intentionally
+    // best-effort for minimal systems and portable AppImages.
+    let _ = Command::new("update-desktop-database").arg(&applications).status();
     Ok(())
 }
 
