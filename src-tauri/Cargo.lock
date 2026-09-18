@@ -1070,6 +1070,7 @@ dependencies = [
  "bytes",
  "dirs",
  "futures",
+ "gdk-pixbuf",
  "gio",
  "gix",
  "glib",
