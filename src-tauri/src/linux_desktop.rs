@@ -2,13 +2,13 @@
 //! org.freedesktop.FileManager1.
 
 use std::future::pending;
-use std::path::Path;
 use std::process::Command;
+use std::time::Duration;
 
 use tauri::{AppHandle, Manager};
 use zbus::{connection, interface};
 
-use crate::opened::{self, IncomingLocation};
+use crate::opened;
 
 const APP_BUS: &str = "app.fiddler.desktop";
 const APP_PATH: &str = "/app/fiddler/desktop";
@@ -22,9 +22,21 @@ fn focus(app: &AppHandle) {
     }
 }
 
-/// Forward a second invocation to the already-running Fiddler.
-///
-/// Returns true only when an existing instance accepted the activation.
+pub fn handle_management_args(args: &[String]) -> bool {
+    if args.iter().any(|arg| arg == "--make-default") {
+        match make_default() {
+            Ok(()) => println!("Fiddler is now the default handler for folders."),
+            Err(error) => eprintln!("{error}"),
+        }
+        return true;
+    }
+    if args.iter().any(|arg| arg == "--is-default") {
+        println!("{}", if is_default() { "yes" } else { "no" });
+        return true;
+    }
+    false
+}
+
 pub fn forward_existing(inputs: &[String]) -> bool {
     let Ok(connection) = zbus::blocking::Connection::session() else {
         return false;
@@ -32,7 +44,8 @@ pub fn forward_existing(inputs: &[String]) -> bool {
     let Ok(proxy) = zbus::blocking::Proxy::new(&connection, APP_BUS, APP_PATH, APP_IFACE) else {
         return false;
     };
-    proxy.call::<_, _, ()>("Activate", &(inputs.to_vec())).is_ok()
+    let result: zbus::Result<()> = proxy.call("Activate", &(inputs.to_vec(),));
+    result.is_ok()
 }
 
 struct ApplicationService {
@@ -96,54 +109,58 @@ pub fn start(app: AppHandle) {
     start_file_manager_service(app);
 }
 
+fn runtime() -> Option<tokio::runtime::Runtime> {
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .ok()
+}
+
 fn start_app_service(app: AppHandle) {
     std::thread::spawn(move || {
-        let Ok(runtime) = tokio::runtime::Builder::new_current_thread().enable_all().build() else {
-            return;
-        };
-        runtime.block_on(async move {
-            let Ok(_connection) = connection::Builder::session()
-                .and_then(|builder| builder.name(APP_BUS))
-                .and_then(|builder| builder.serve_at(APP_PATH, ApplicationService { app }))
-                .and_then(|builder| Ok(builder))
-                .and_then(|builder| Ok(builder))
-            else {
-                return;
-            };
-            let Ok(_connection) = _connection.build().await else {
-                return;
-            };
-            pending::<()>().await;
-        });
+        let Some(runtime) = runtime() else { return };
+        let Ok(builder) = connection::Builder::session() else { return };
+        let Ok(builder) = builder.name(APP_BUS) else { return };
+        let Ok(builder) = builder.serve_at(APP_PATH, ApplicationService { app }) else { return };
+        let Ok(_connection) = runtime.block_on(builder.build()) else { return };
+        runtime.block_on(pending::<()>());
     });
 }
 
 fn start_file_manager_service(app: AppHandle) {
     std::thread::spawn(move || {
-        let Ok(runtime) = tokio::runtime::Builder::new_current_thread().enable_all().build() else {
-            return;
-        };
-        runtime.block_on(async move {
-            let Ok(builder) = connection::Builder::session()
-                .and_then(|builder| builder.name("org.freedesktop.FileManager1"))
-                .and_then(|builder| builder.serve_at(
-                    "/org/freedesktop/FileManager1",
-                    FileManagerService { app },
-                ))
-            else {
-                return;
+        let Some(runtime) = runtime() else { return };
+        loop {
+            let Ok(builder) = connection::Builder::session() else {
+                std::thread::sleep(Duration::from_secs(2));
+                continue;
             };
-            let Ok(_connection) = builder.build().await else {
-                // Another file manager owns the well-known name. Do not replace it.
-                return;
+            let Ok(builder) = builder.name("org.freedesktop.FileManager1") else {
+                std::thread::sleep(Duration::from_secs(2));
+                continue;
             };
-            pending::<()>().await;
-        });
+            let Ok(builder) = builder.serve_at(
+                "/org/freedesktop/FileManager1",
+                FileManagerService { app: app.clone() },
+            ) else {
+                std::thread::sleep(Duration::from_secs(2));
+                continue;
+            };
+            match runtime.block_on(builder.build()) {
+                Ok(_connection) => {
+                    runtime.block_on(pending::<()>());
+                    return;
+                }
+                Err(_) => {
+                    // Another file manager currently owns the standard name.
+                    // Never replace it; if it exits, claim the interface.
+                    std::thread::sleep(Duration::from_secs(2));
+                }
+            }
+        }
     });
 }
 
-/// Explicit opt-in for becoming the directory handler. This never runs at
-/// install time; changing a user's default is their choice.
 pub fn make_default() -> Result<(), String> {
     let status = Command::new("xdg-mime")
         .args(["default", "Fiddler.desktop", "inode/directory"])
@@ -153,15 +170,13 @@ pub fn make_default() -> Result<(), String> {
         return Err(format!("xdg-mime exited with {status}"));
     }
 
-    // A per-user activation file avoids installing a system-wide competing
-    // FileManager1 service. D-Bus searches XDG_DATA_HOME before system data.
     let data = dirs::data_local_dir().ok_or("couldn't find the user data directory")?;
     let services = data.join("dbus-1/services");
     std::fs::create_dir_all(&services).map_err(|e| e.to_string())?;
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     let body = format!(
         "[D-BUS Service]\nName=org.freedesktop.FileManager1\nExec={} --gapplication-service\n",
-        shell_word(&exe.to_string_lossy())
+        dbus_exec(&exe.to_string_lossy())
     );
     std::fs::write(services.join("org.freedesktop.FileManager1.service"), body)
         .map_err(|e| e.to_string())?;
@@ -178,12 +193,8 @@ pub fn is_default() -> bool {
         .is_some_and(|answer| answer.trim() == "Fiddler.desktop")
 }
 
-fn shell_word(input: &str) -> String {
-    if input.bytes().all(|b| b.is_ascii_alphanumeric() || b"/._-+".contains(&b)) {
-        input.to_string()
-    } else {
-        format!("'{}'", input.replace('\\'', "'\\''"))
-    }
+fn dbus_exec(input: &str) -> String {
+    format!("\"{}\"", input.replace('\\', "\\\\").replace('"', "\\""))
 }
 
 #[cfg(test)]
@@ -191,7 +202,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn simple_executable_paths_need_no_quotes() {
-        assert_eq!(shell_word("/usr/bin/fiddler"), "/usr/bin/fiddler");
+    fn executable_paths_are_quoted_for_dbus_activation() {
+        assert_eq!(dbus_exec("/usr/bin/fiddler"), "\"/usr/bin/fiddler\"");
+        assert_eq!(dbus_exec("/home/A B/Fiddler"), "\"/home/A B/Fiddler\"");
     }
 }
