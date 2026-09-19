@@ -178,6 +178,8 @@ const backend: Backend = {
 
   mediaUrl: async (path) => convertFileSrc(path),
 
+  htmlUrl: async (path) => convertFileSrc(path),
+
   systemAccent: () => invoke<[number, number, number] | null>("system_accent"),
 
   revealInFinder: (path) => invoke<void>("reveal_in_finder", { path }),
