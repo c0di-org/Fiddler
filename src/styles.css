@@ -3159,6 +3159,123 @@ li.md-task {
   background: var(--fill);
 }
 
+/* HTML is a page first and source second. The same viewer is used in the side
+   pane and Quick Look so phone, DeX and desktop never disagree about which one
+   "preview" means. */
+.html-preview {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+}
+
+.preview .html-preview {
+  flex: none;
+  width: 100%;
+  height: 300px;
+  margin-bottom: 16px;
+  overflow: hidden;
+  border: 1px solid var(--hair-soft);
+  border-radius: var(--r-md);
+}
+
+.html-preview-switch {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  min-height: 34px;
+  padding: 4px;
+  border-bottom: 1px solid var(--hair-soft);
+  background: var(--bg);
+}
+
+.html-preview-switch button {
+  height: 26px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--r-pill);
+  background: transparent;
+  color: var(--fg-dim);
+  font: inherit;
+  font-size: 11.5px;
+}
+
+.html-preview-switch button:hover {
+  color: var(--fg);
+  background: var(--fill-hover);
+}
+
+.html-preview-switch button.active {
+  color: var(--fg);
+  background: var(--fill-strong);
+}
+
+.html-preview-frame {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  width: 100%;
+  border: 0;
+  background: #fff;
+}
+
+.html-preview > .code-scroller {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  background: var(--bg);
+}
+
+.html-preview-status {
+  flex: 1;
+  display: grid;
+  place-items: center;
+  min-height: 0;
+  padding: 20px;
+  color: var(--fg-dim);
+  background: var(--bg);
+  font-size: 12px;
+  text-align: center;
+}
+
+.html-preview-truncated {
+  flex: none;
+  padding: 7px 10px;
+  border-top: 1px solid var(--hair-soft);
+  color: var(--fg-faint);
+  background: var(--bg);
+  font-size: 10.5px;
+  text-align: center;
+}
+
+.html-preview.dense .html-preview-switch {
+  min-height: 30px;
+  padding: 3px;
+}
+
+.html-preview.dense .html-preview-switch button {
+  height: 24px;
+  padding: 0 8px;
+  font-size: 10.5px;
+}
+
+@media (pointer: coarse) {
+  .html-preview-switch {
+    min-height: 50px;
+    padding: 4px 8px;
+  }
+
+  .html-preview-switch button {
+    min-width: 88px;
+    height: 42px;
+    font-size: 13px;
+  }
+}
+
 /* ========================================================== quick look == */
 
 .ql-scrim {

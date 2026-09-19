@@ -78,6 +78,10 @@ export function fileVisualKind(nameOrPath: string): FileVisualKind {
     case "markdown":
     case "text":
       return "document";
+    case "html":
+      // HTML still wears the code glyph even though its default preview is now
+      // rendered. Changing the preview shouldn't unexpectedly recolour files.
+      return "code";
     case "code":
       return DOCUMENT_ART.has(ext) ? "document" : "code";
     case "art":

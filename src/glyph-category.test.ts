@@ -9,6 +9,7 @@ test("visual kinds share the preview router's knowledge", () => {
   assert.equal(fileVisualKind("song.opus"), "audio");
   assert.equal(fileVisualKind("movie.m4v"), "video");
   assert.equal(fileVisualKind("README"), "document");
+  assert.equal(fileVisualKind("index.html"), "code");
 });
 
 test("config, data, archives, links and PDFs keep distinct silhouettes", () => {

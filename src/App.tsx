@@ -1286,6 +1286,19 @@ export default function App() {
           playAudio(t);
           return;
         }
+        // HTML has a useful destination here even when the platform has a
+        // browser registered for it: Open means the same rendered preview that
+        // Quick Look shows, with source one tap away. This is especially useful
+        // on Android, where handing a local HTML path to another app is brittle.
+        if (routeOf(t.name) === "html") {
+          // A context-menu Open may target something outside the standing
+          // selection. Quick Look follows the selection, so make this file the
+          // lead before opening the viewer rather than previewing the old one.
+          anchorRef.current = t.id;
+          setSelection(new Set([t.id]));
+          setQuickLook(true);
+          return;
+        }
         const system = caps.handOff && (await ipc.hasOpenHandler(t.path));
         if (system) {
           await ipc.openExternal(t.path);
@@ -1850,7 +1863,7 @@ export default function App() {
           // work on them, and the only thing picking it ever produced was a
           // toast. "none" stays: a `LICENSE`, a `Makefile`, a `.env` have no
           // extension to route on and are exactly what this item is for.
-          if (route !== null && (isTextual(route) || route === "none")) {
+          if (route !== null && (isTextual(route) || route === "html" || route === "none")) {
             items.push({
               label: "Edit Text File",
               onPick: () => {
