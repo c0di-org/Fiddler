@@ -1,5 +1,5 @@
 [Desktop Entry]
-Version=1.5
+Version=1.0
 Type=Application
 Name={{name}}
 GenericName=File Manager
@@ -11,5 +11,5 @@ Icon={{icon}}
 Terminal=false
 StartupNotify=true
 StartupWMClass={{exec}}
-Categories=System;Utility;FileTools;FileManager;
+Categories=System;FileTools;FileManager;
 MimeType=inode/directory;
