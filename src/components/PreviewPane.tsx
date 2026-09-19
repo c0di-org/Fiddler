@@ -6,7 +6,8 @@ import { kindOf } from "../kind";
 import { isTextual, routeOf } from "../preview/route";
 import type { Entry, Inspect, TextHead, WorktreeInfo } from "../types";
 import { CodeView } from "./CodeView";
-import { FileGlyph, FolderGlyph } from "./FileGlyph";\nimport { HtmlPreview } from "./HtmlPreview";
+import { FileGlyph, FolderGlyph } from "./FileGlyph";
+import { HtmlPreview } from "./HtmlPreview";
 import { BookIcon } from "./icons";
 import { GitDot } from "./GitDot";
 import { MarkdownView } from "./MarkdownView";
@@ -39,8 +40,10 @@ interface Props {
 export function PreviewPane({ entry, worktree, count, onRead }: Props) {
   const path = entry?.path ?? worktree?.path ?? null;
   const route = entry ? routeOf(entry.name) : "none";
+  const asHtml = !!entry && entry.kind !== "dir" && route === "html";
   // Text reads better as text than as a picture of text, so files that have
-  // something to say skip the thumbnail entirely.
+  // something to say skip the thumbnail entirely. HTML gets its own rendered
+  // viewer below, with source available from the same control.
   const asText = !!entry && entry.kind !== "dir" && isTextual(route);
 
   const [thumb, setThumb] = useState<string | null>(null);
@@ -97,7 +100,9 @@ export function PreviewPane({ entry, worktree, count, onRead }: Props) {
 
   return (
     <aside className="preview">
-      {asHtml && entry ? (\n        <HtmlPreview entry={entry} dense />\n      ) : asText && entry && head && !head.binary ? (
+      {asHtml && entry ? (
+        <HtmlPreview entry={entry} dense />
+      ) : asText && entry && head && !head.binary ? (
         // Markdown scrolls as one flowed document; code keeps its own scroller
         // so the virtualization has a viewport it can measure.
         route === "markdown" ? (
