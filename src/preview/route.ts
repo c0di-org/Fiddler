@@ -6,7 +6,7 @@
 /** The routes that are read rather than looked at. */
 export type TextRoute = "markdown" | "code" | "text";
 
-export type Route = TextRoute | "pdf" | "image" | "audio" | "video" | "art" | "link" | "none";
+export type Route = TextRoute | "html" | "pdf" | "image" | "audio" | "video" | "art" | "link" | "none";
 
 /** Shortcut files, which hold one destination and nothing else. Ahead of
  * `CODE` deliberately: a `.webloc` is XML and a `.url` is INI, and showing
@@ -19,7 +19,7 @@ const IMAGE = new Set([
   "rw2", "srw", "pef", "svg",
 ]);
 
-const MARKDOWN = new Set(["md", "mdx", "markdown"]);
+const MARKDOWN = new Set(["md", "mdx", "markdown"]);\nconst HTML = new Set(["html", "htm"]);
 
 /**
  * Prose: wrapped to a measure, no grammar. Records — logs, CSVs — deliberately
@@ -31,7 +31,7 @@ const PLAIN = new Set(["txt", "text", "rst", "srt", "vtt"]);
 const CODE = new Set([
   "log", "csv", "tsv",
   "json", "jsonc", "json5", "yaml", "yml", "toml", "ini", "cfg", "conf", "env", "properties",
-  "xml", "plist", "html", "htm", "css", "scss", "sass", "less", "sql", "graphql", "diff", "patch",
+  "xml", "plist", "css", "scss", "sass", "less", "sql", "graphql", "diff", "patch",
   "sh", "zsh", "bash", "fish", "ps1", "bat", "rs", "go", "py", "rb", "swift", "java", "kt", "kts",
   "gradle", "c", "h", "cpp", "cc", "cxx", "hpp", "hh", "cs", "m", "mm", "php", "lua", "pl", "r",
   "ts", "tsx", "js", "jsx", "mjs", "cjs", "vue", "svelte", "dart", "ex", "exs", "erl", "hs",
