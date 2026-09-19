@@ -74,6 +74,29 @@ async function mediaUrl(path: string): Promise<string> {
   return url;
 }
 
+/** Object URLs for HTML previews. Keep these separate from media URLs because
+ * an .html file made in Fiddler starts life as a text/plain Blob; an iframe
+ * needs text/html to render it rather than display its source. */
+const htmlUrls = new Map<string, string>();
+const HTML_CAP = 12;
+
+async function htmlUrl(path: string): Promise<string> {
+  const hit = htmlUrls.get(path);
+  if (hit) return hit;
+
+  const source = await vfs.readBlob(path);
+  const bytes = await source.arrayBuffer();
+  const url = URL.createObjectURL(new Blob([bytes], { type: "text/html" }));
+  htmlUrls.set(path, url);
+  while (htmlUrls.size > HTML_CAP) {
+    const oldest = htmlUrls.keys().next();
+    if (oldest.done) break;
+    URL.revokeObjectURL(htmlUrls.get(oldest.value)!);
+    htmlUrls.delete(oldest.value);
+  }
+  return url;
+}
+
 // ------------------------------------------------------------ pdf pages
 
 /** Rasterised PDF pages, by path, page and render size.
@@ -108,6 +131,11 @@ function invalidate(path: string) {
   if (media) {
     URL.revokeObjectURL(media);
     mediaUrls.delete(path);
+  }
+  const html = htmlUrls.get(path);
+  if (html) {
+    URL.revokeObjectURL(html);
+    htmlUrls.delete(path);
   }
   dropPages(path);
   void import("./web/pdf").then((pdf) => pdf.forget(path)).catch(() => {});
@@ -467,6 +495,8 @@ const backend: Backend = {
   fileSrc: (path) => path,
 
   mediaUrl,
+
+  htmlUrl,
 
   // -------------------------------------------------------------- system
 
