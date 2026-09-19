@@ -6,7 +6,7 @@ import { kindOf } from "../kind";
 import { isTextual, routeOf } from "../preview/route";
 import type { Entry, Inspect, TextHead, WorktreeInfo } from "../types";
 import { CodeView } from "./CodeView";
-import { FileGlyph, FolderGlyph } from "./FileGlyph";
+import { FileGlyph, FolderGlyph } from "./FileGlyph";\nimport { HtmlPreview } from "./HtmlPreview";
 import { BookIcon } from "./icons";
 import { GitDot } from "./GitDot";
 import { MarkdownView } from "./MarkdownView";
@@ -54,7 +54,7 @@ export function PreviewPane({ entry, worktree, count, onRead }: Props) {
     if (!path || count !== 1) return;
 
     let alive = true;
-    if (entry?.thumbable && !asText) {
+    if (entry?.thumbable && !asText && !asHtml) {
       void ipc
         .thumbnail(path, 512)
         .then((r) => alive && setThumb(r))
@@ -74,7 +74,7 @@ export function PreviewPane({ entry, worktree, count, onRead }: Props) {
     return () => {
       alive = false;
     };
-  }, [path, count, entry?.thumbable, asText]);
+  }, [path, count, entry?.thumbable, asText, asHtml]);
 
   if (count === 0) {
     return (
@@ -97,7 +97,7 @@ export function PreviewPane({ entry, worktree, count, onRead }: Props) {
 
   return (
     <aside className="preview">
-      {asText && entry && head && !head.binary ? (
+      {asHtml && entry ? (\n        <HtmlPreview entry={entry} dense />\n      ) : asText && entry && head && !head.binary ? (
         // Markdown scrolls as one flowed document; code keeps its own scroller
         // so the virtualization has a viewport it can measure.
         route === "markdown" ? (
