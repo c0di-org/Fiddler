@@ -23,7 +23,10 @@ concurrency:
 
 jobs:
   build:
-    runs-on: [self-hosted, linux, nucchuck]
+    # PRs stay on hosted 22.04 (glibc + no self-hosted PR). Releases use nucchuck.
+    # The Default runner group must allow this workflow file for the nucchuck path:
+    #   c0di-org/Fiddler/.github/workflows/linux-release.yml@refs/heads/main
+    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-22.04' || fromJSON('["self-hosted", "linux", "nucchuck"]') }}
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v5
@@ -39,22 +42,7 @@ jobs:
           rustup show
 
       - name: Install Linux build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libwebkit2gtk-4.1-dev \
-            build-essential \
-            curl \
-            wget \
-            file \
-            libxdo-dev \
-            libssl-dev \
-            libayatana-appindicator3-dev \
-            librsvg2-dev \
-            libudev-dev \
-            desktop-file-utils \
-            appstream \
-            dbus
+        run: bash scripts/install-linux-build-deps.sh
 
       - name: Install JavaScript dependencies
         run: npm ci
@@ -180,7 +168,9 @@ jobs:
           - AppImage for x86_64 Linux systems
           - SHA-256 checksums
 
-          CI builds on Ubuntu 22.04 to keep the glibc baseline compatible with Ubuntu 22.04 and newer.
+          Pull-request CI builds on Ubuntu 22.04. Tagged Linux releases build on nucchuck
+          after the host packages are already installed (no sudo apt-get on that box).
+          Those release binaries follow the host glibc (Ubuntu 26.04).
           EOF
 
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
