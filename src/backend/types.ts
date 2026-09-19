@@ -225,6 +225,11 @@ export interface Backend {
    * can hand back a URL, so it cannot be synchronous. */
   mediaUrl(path: string): Promise<string>;
 
+  /** A URL for rendering an HTML file inside Fiddler's sandboxed preview.
+   * Native builds serve the real file so relative assets resolve beside it.
+   * The web build may need to relabel mounted bytes as text/html first. */
+  htmlUrl(path: string): Promise<string>;
+
   // -------------------------------------------------------------- system
 
   /** The OS accent colour as sRGB bytes, or null where there isn't one to read. */
