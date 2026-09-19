@@ -1,6 +1,6 @@
 [package]
 name = "fiddler"
-version = "0.5.1"
+version = "0.5.2"
 description = "A git-native file browser"
 edition = "2021"
 # 1.85 is mtp-rs's floor; everything else here still builds on 1.77.
@@ -22,6 +22,7 @@ uuid = { version = "1", features = ["v4", "serde"] }
 notify = "8"
 dirs = "6"
 num_cpus = "1"
+url = "2.5"
 
 # Zip is the one archive format all three of the places Fiddler's files come
 # from can already make and read: Finder's Compress, Android's share sheet, and
@@ -93,6 +94,12 @@ bytes = "1"
 # Android's PdfRenderer is part of the OS, is hardware-adjacent, and avoids
 # carrying a large PDF engine in every APK. These two tiny bindings are only
 # linked into the Android build to reach it from the Rust command layer.
+[target.'cfg(target_os = "linux")'.dependencies]
+zbus = "5.18"
+gio = "0.18"
+glib = "0.18"
+gdk-pixbuf = "0.18"
+
 [target.'cfg(target_os = "android")'.dependencies]
 jni = "0.21"
 ndk-context = "0.1"
@@ -106,7 +113,7 @@ gix = { version = "0.87", default-features = false, features = ["sha1", "status"
 # "how many bytes are left" — DiskArbitration doesn't know and Android's Java
 # API would mean a JNI round trip per volume per poll — so both sides ask the
 # kernel directly.
-[target.'cfg(any(target_os = "macos", target_os = "android"))'.dependencies]
+[target.'cfg(any(target_os = "macos", target_os = "android", target_os = "linux"))'.dependencies]
 libc = "0.2"
 
 # mtp-rs can back a device with a local directory instead of a cable, so the

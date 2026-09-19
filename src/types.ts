@@ -121,6 +121,14 @@ export interface Place {
   icon: string;
 }
 
+export interface IncomingLocation {
+  path: string;
+  /** Select this item in its parent instead of opening it as the current folder. */
+  select: boolean;
+  /** Open Quick Look after selecting it. */
+  preview: boolean;
+}
+
 /** A Fiddler device visible on the local network. It is never browsable until paired. */
 export interface PeerDevice {
   id: string;

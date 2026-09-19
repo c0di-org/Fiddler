@@ -1064,20 +1064,22 @@ dependencies = [
 
 [[package]]
 name = "fiddler"
-version = "0.5.1"
+version = "0.5.2"
 dependencies = [
  "block2",
  "bytes",
  "dirs",
  "futures",
+ "gdk-pixbuf",
+ "gio",
  "gix",
+ "glib",
  "jni",
  "libc",
  "mtp-rs",
  "ndk-context",
  "notify",
  "num_cpus",
- "objc2",
  "objc2-core-foundation",
  "objc2-core-graphics",
  "objc2-core-text",
@@ -1085,15 +1087,18 @@ dependencies = [
  "objc2-foundation",
  "objc2-image-io",
  "objc2-quick-look-thumbnailing",
- "serde",
+ "objc2",
  "serde_json",
- "tauri",
+ "serde",
  "tauri-build",
  "tauri-plugin-opener",
+ "tauri",
  "time",
  "tokio",
  "trash",
+ "url",
  "uuid",
+ "zbus",
  "zip",
 ]
 

@@ -23,7 +23,10 @@ concurrency:
 
 jobs:
   build:
-    runs-on: ubuntu-22.04
+    # PRs stay on hosted 22.04 (glibc + no self-hosted PR). Releases use nucchuck.
+    # The Default runner group must allow this workflow file for the nucchuck path:
+    #   c0di-org/Fiddler/.github/workflows/linux-release.yml@refs/heads/main
+    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-22.04' || fromJSON('["self-hosted", "linux", "nucchuck"]') }}
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v5
@@ -39,19 +42,7 @@ jobs:
           rustup show
 
       - name: Install Linux build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libwebkit2gtk-4.1-dev \
-            build-essential \
-            curl \
-            wget \
-            file \
-            libxdo-dev \
-            libssl-dev \
-            libayatana-appindicator3-dev \
-            librsvg2-dev \
-            libudev-dev
+        run: bash scripts/install-linux-build-deps.sh
 
       - name: Install JavaScript dependencies
         run: npm ci
@@ -62,8 +53,64 @@ jobs:
       - name: Run Rust tests
         run: cargo test --manifest-path src-tauri/Cargo.toml --locked
 
-      - name: Build Linux packages
-        run: npx tauri build --bundles deb,appimage
+      - name: Build Debian package
+        run: npx tauri build --bundles deb
+
+      - name: Build AppImage
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: "1"
+        run: npx tauri build --bundles appimage --verbose
+
+      - name: Verify Linux desktop integration
+        shell: bash
+        run: |
+          set -euo pipefail
+          DEB="$(find src-tauri/target/release/bundle/deb -maxdepth 1 -name '*.deb' -print -quit)"
+          APPIMAGE="$(find src-tauri/target/release/bundle/appimage -maxdepth 1 -name '*.AppImage' -print -quit)"
+          test -n "$DEB"
+          test -n "$APPIMAGE"
+
+          rm -rf package-check appimage-check
+          mkdir package-check appimage-check
+          dpkg-deb -x "$DEB" package-check
+
+          DESKTOP="package-check/usr/share/applications/Fiddler.desktop"
+          META="package-check/usr/share/metainfo/app.fiddler.desktop.metainfo.xml"
+          BINARY="package-check/usr/bin/fiddler"
+          test -f "$DESKTOP"
+          test -f "$META"
+          test -x "$BINARY"
+
+          desktop-file-validate "$DESKTOP"
+          appstreamcli validate --no-net "$META"
+          grep -Fxq 'GenericName=File Manager' "$DESKTOP"
+          grep -Fxq 'MimeType=inode/directory;' "$DESKTOP"
+          grep -Fxq 'Exec=fiddler %U' "$DESKTOP"
+          grep -Fq 'FileManager;' "$DESKTOP"
+          dbus-run-session -- "$BINARY" --is-default | grep -Eq '^(yes|no)$'
+
+          chmod +x "$APPIMAGE"
+          ABS_APPIMAGE="$(realpath "$APPIMAGE")"
+          (
+            cd appimage-check
+            "$ABS_APPIMAGE" --appimage-extract >/dev/null
+          )
+          test -x appimage-check/squashfs-root/usr/bin/fiddler
+
+          # A portable AppImage is not installed into the desktop by default.
+          # Its explicit "make default" action must create a valid per-user
+          # desktop entry pointing back to the AppImage itself.
+          PORTABLE_HOME="$(mktemp -d)"
+          mkdir -p "$PORTABLE_HOME/home" "$PORTABLE_HOME/data" "$PORTABLE_HOME/config"
+          HOME="$PORTABLE_HOME/home" \
+          XDG_DATA_HOME="$PORTABLE_HOME/data" \
+          XDG_CONFIG_HOME="$PORTABLE_HOME/config" \
+          dbus-run-session -- "$ABS_APPIMAGE" --appimage-extract-and-run --make-default
+          USER_DESKTOP="$PORTABLE_HOME/data/applications/Fiddler.desktop"
+          test -f "$USER_DESKTOP"
+          desktop-file-validate "$USER_DESKTOP"
+          grep -Fxq 'MimeType=inode/directory;' "$USER_DESKTOP"
+          grep -Fq "Exec=\"$ABS_APPIMAGE\" %U" "$USER_DESKTOP"
 
       - name: Collect release artifacts
         id: package
@@ -108,12 +155,22 @@ jobs:
           cat > release-notes.md <<EOF
           Ubuntu/Linux build of Fiddler ${VERSION}, produced by GitHub Actions from ${GITHUB_SHA}.
 
+          Linux desktop integration includes:
+          - inode/directory registration and %U URI activation
+          - single-instance folder/file activation
+          - freedesktop FileManager1 support when Fiddler is the default
+          - XDG-aware Places and GIO mounted volumes
+          - freedesktop shared image thumbnails
+          - Debian package and AppImage artifacts
+
           Assets:
           - Debian package for x86_64 Ubuntu-compatible systems
           - AppImage for x86_64 Linux systems
           - SHA-256 checksums
 
-          CI builds on Ubuntu 22.04 to keep the glibc baseline compatible with Ubuntu 22.04 and newer.
+          Pull-request CI builds on Ubuntu 22.04. Tagged Linux releases build on nucchuck
+          after the host packages are already installed (no sudo apt-get on that box).
+          Those release binaries follow the host glibc (Ubuntu 26.04).
           EOF
 
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then

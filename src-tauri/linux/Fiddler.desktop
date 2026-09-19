@@ -1,0 +1,15 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name={{name}}
+GenericName=File Manager
+Comment={{comment}}
+Keywords=files;folders;manager;filesystem;browse;
+TryExec={{exec}}
+Exec={{exec}} %U
+Icon={{icon}}
+Terminal=false
+StartupNotify=true
+StartupWMClass={{exec}}
+Categories=System;FileTools;FileManager;
+MimeType=inode/directory;

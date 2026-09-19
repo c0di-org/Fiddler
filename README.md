@@ -147,7 +147,18 @@ Build installable packages with:
 npm run tauri -- build --bundles deb,appimage
 ```
 
-GitHub Actions runs the TypeScript and Rust tests on Ubuntu, builds both packages, and publishes them on a `linux-v<version>` GitHub release when the app version changes on `main`.
+GitHub Actions runs the TypeScript and Rust tests on Ubuntu, validates the packaged desktop/AppStream metadata, builds both packages, and publishes them on a `linux-v<version>` GitHub release when the app version changes on `main`.
+
+The installed Debian package registers Fiddler as a handler for `inode/directory`. You can make it the default from the **Make default** button in Fiddler's status bar, or explicitly from a shell:
+
+```bash
+fiddler --make-default
+fiddler --is-default
+```
+
+Desktop launches accept paths and `file://` URIs. A second launch is forwarded to the running Fiddler instance. When Fiddler is the directory default it also implements `org.freedesktop.FileManager1`, so desktop **Show in Folder** requests open the containing folder and select the requested item.
+
+Linux Places use the XDG user-directory configuration instead of assuming English `~/Desktop`, `~/Documents`, and `~/Downloads` paths. Mounted drives come from GIO/GVfs and can be unmounted/ejected from the sidebar. Raster thumbnails use the shared freedesktop thumbnail cache under `$XDG_CACHE_HOME/thumbnails`.
 
 ### Android / Samsung DeX
 
@@ -178,7 +189,7 @@ Android deletions are permanent and require confirmation because Android does no
 | Move to Trash | `⌘⌫` |
 | Refresh | `F5` or `⌘R` |
 
-On Android and the web, use `Ctrl` where the interface shows `⌘`. With a DeX keyboard, `Enter` opens, `F2` renames, `Delete` deletes, and `Alt+←` / `Alt+→` move through history.
+On Linux, Android and the web, use `Ctrl` where the interface shows `⌘`. With a DeX keyboard, `Enter` opens, `F2` renames, `Delete` deletes, and `Alt+←` / `Alt+→` move through history.
 
 Right-click an item for file actions on pointer devices. Long-press on touch devices to select and access the same actions.
 
@@ -252,5 +263,5 @@ npm run deploy
 - The audio player reads no tags: chapter names come from filenames and the cover from a picture beside them. Chapter marks *inside* a single long `.m4b` are not read either, so one file plays as one recording.
 - No tabs or column view yet.
 - Drag and drop works inside Fiddler, but native drag in/out of Finder is not implemented yet.
-- On Linux, core file operations, Git, USB/MTP, nearby devices, archives, audio, and text/image editing are available. Finder-only reveal/terminal actions and system sharing are hidden; mounted-volume discovery/eject and native PDF page rasterisation are not implemented yet.
+- On Linux, core file operations, Git, USB/MTP, nearby devices, archives, audio, text/image editing, mounted-volume discovery/eject, and shared raster thumbnails are available. macOS-only Finder actions and system sharing are hidden; native PDF page rasterisation is not implemented yet.
 - The browser build cannot provide native Git, USB/MTP, volume, or real nearby-device features.

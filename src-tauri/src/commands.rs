@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::archive;
 use crate::content_search::{self, ContentSearch};
@@ -189,6 +189,18 @@ pub async fn list_dir(
             .await
             .map_err(|e| e.to_string())?;
     }
+    // Linux thumbnails and media currently use the original local file rather
+    // than a rendered cache entry. Tauri's asset protocol refuses arbitrary
+    // filesystem paths unless they are explicitly scoped, so grant the tree the
+    // user just opened before any thumbnail/media URL is handed to WebKit.
+    //
+    // Keep this Linux-only: macOS renders previews into $APPCACHE, and Android
+    // already scopes /storage in tauri.conf.json.
+    #[cfg(target_os = "linux")]
+    app.asset_protocol_scope()
+        .allow_directory(Path::new(&path), true)
+        .map_err(|e| format!("couldn't allow previews in {path}: {e}"))?;
+
     let cache = state.cache.clone();
     let watcher = state.watcher.clone();
 
@@ -836,8 +848,9 @@ pub fn sidebar_places() -> Vec<Place> {
     {
         let home = dirs::home_dir().unwrap_or_default();
         let mut out = Vec::new();
-        let mut push = |name: &str, p: PathBuf, icon: &str| {
-            if p.is_dir() {
+        let mut push = |name: &str, p: Option<PathBuf>, icon: &str| {
+            let Some(p) = p else { return };
+            if p.is_dir() && !out.iter().any(|held: &Place| held.path == p.to_string_lossy()) {
                 out.push(Place {
                     name: name.to_string(),
                     path: p.to_string_lossy().into_owned(),
@@ -846,13 +859,36 @@ pub fn sidebar_places() -> Vec<Place> {
             }
         };
 
-        push("Developer", home.join("Developer"), "code");
-        push("Home", home.clone(), "home");
-        push("Desktop", home.join("Desktop"), "desktop");
-        push("Documents", home.join("Documents"), "doc");
-        push("Downloads", home.join("Downloads"), "download");
+        push("Developer", Some(home.join("Developer")), "code");
+        push("Home", Some(home), "home");
+        // On Linux these come from XDG user-dirs, so localized or relocated
+        // Desktop/Documents/Downloads folders appear where the desktop says
+        // they are rather than where an English home-directory layout guesses.
+        push("Desktop", dirs::desktop_dir(), "desktop");
+        push("Documents", dirs::document_dir(), "doc");
+        push("Downloads", dirs::download_dir(), "download");
         out
     }
+}
+
+#[tauri::command]
+pub fn is_default_file_manager() -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        return crate::linux_desktop::is_default();
+    }
+    #[cfg(not(target_os = "linux"))]
+    false
+}
+
+#[tauri::command]
+pub fn make_default_file_manager() -> Result<(), String> {
+    #[cfg(target_os = "linux")]
+    {
+        return crate::linux_desktop::make_default();
+    }
+    #[cfg(not(target_os = "linux"))]
+    Err("Default file-manager integration is only available on Linux".into())
 }
 
 #[tauri::command]
@@ -867,18 +903,16 @@ pub fn install_apk(path: String) -> Result<(), String> {
     crate::apk::install(&path)
 }
 
-/// Collect the files other apps have asked Fiddler to open since the last call.
+/// Collect locations other apps or the desktop asked Fiddler to show.
 ///
-/// Draining rather than peeking is what makes this safe to call from more than
-/// one place — at startup and again on every nudge — without opening the same
-/// file twice. Paths that have since gone are dropped here rather than sent on
-/// to become an empty folder: a share sheet's copy can be cleaned up between
-/// being resolved and being collected.
+/// Paths that vanished between activation and collection are dropped. Folders
+/// are kept: Linux's inode/directory handler opens them directly, while files
+/// are selected in their parent.
 #[tauri::command]
-pub fn take_opened_files() -> Vec<String> {
+pub fn take_opened_locations() -> Vec<crate::opened::IncomingLocation> {
     crate::opened::take()
         .into_iter()
-        .filter(|path| Path::new(path).is_file())
+        .filter(|location| Path::new(&location.path).exists())
         .collect()
 }
 
@@ -973,11 +1007,28 @@ pub fn has_open_handler(path: String) -> bool {
     }
 }
 
-/// Nowhere else has a desktop to hand off to, so the answer is always no and
-/// the editor is always the destination. `caps.handOff` means the UI doesn't
-/// ask, but the command exists so the two backends stay the same shape.
 #[tauri::command]
-#[cfg(not(target_os = "macos"))]
+#[cfg(target_os = "linux")]
+pub fn has_open_handler(path: String) -> bool {
+    use gio::prelude::*;
+
+    let file = gio::File::for_path(path);
+    let Ok(info) = file.query_info(
+        gio::FILE_ATTRIBUTE_STANDARD_CONTENT_TYPE,
+        gio::FileQueryInfoFlags::NONE,
+        gio::Cancellable::NONE,
+    ) else {
+        return false;
+    };
+    let Some(content_type) = info.content_type() else {
+        return false;
+    };
+    gio::AppInfo::default_for_type(content_type.as_str(), false).is_some()
+}
+
+/// Mobile and other non-desktop targets have nowhere to hand a local path.
+#[tauri::command]
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
 pub fn has_open_handler(_path: String) -> bool {
     false
 }

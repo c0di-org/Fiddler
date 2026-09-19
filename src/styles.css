@@ -2043,6 +2043,28 @@ body.column-resizing * {
   outline-offset: 1px;
 }
 
+.status-default-manager {
+  justify-self: start;
+  margin-left: 8px;
+  padding: 2px 9px;
+  border: 1px solid var(--hair);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--fg-faint);
+  font: inherit;
+  cursor: default;
+}
+
+.status-default-manager:hover {
+  background: var(--fill-strong);
+  color: var(--fg);
+}
+
+.status-default-manager:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
 /* ------------------------------------------------------------ accent tint */
 
 .tint {

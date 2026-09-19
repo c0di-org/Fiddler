@@ -9,6 +9,8 @@ mod transfer;
 mod fs_scan;
 mod git;
 mod model;
+#[cfg(target_os = "linux")]
+mod linux_desktop;
 // USB devices that aren't running Fiddler. Android has no host-side USB stack
 // to speak MTP with, so this is a desktop capability only.
 #[cfg(not(target_os = "android"))]
@@ -26,7 +28,10 @@ mod page;
 mod page;
 #[cfg(target_os = "macos")]
 mod thumb;
-#[cfg(not(target_os = "macos"))]
+#[cfg(target_os = "linux")]
+#[path = "thumb_linux.rs"]
+mod thumb;
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
 #[path = "thumb_mobile.rs"]
 mod thumb;
 mod thumb_pool;
@@ -45,12 +50,36 @@ use watcher::FsWatcher;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    #[cfg(target_os = "linux")]
+    let initial_args: Vec<String> = std::env::args().skip(1).collect();
+
+    #[cfg(target_os = "linux")]
+    {
+        if linux_desktop::handle_management_args(&initial_args) {
+            return;
+        }
+        if linux_desktop::forward_existing(&initial_args) {
+            return;
+        }
+    }
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .setup(|app| {
+        .setup(move |app| {
             // Before anything slow: a file opened from another app may already
             // be waiting, and its nudge needs somewhere to land.
             opened::remember(app.handle().clone());
+            #[cfg(target_os = "linux")]
+            {
+                let cwd = std::env::current_dir().ok();
+                opened::push(opened::from_inputs(initial_args.clone(), cwd.as_deref(), false));
+                if let Some(cache) = dirs::cache_dir() {
+                    let _ = app
+                        .asset_protocol_scope()
+                        .allow_directory(cache.join("thumbnails"), true);
+                }
+                linux_desktop::start(app.handle().clone());
+            }
             // Same reason, one line later: Back is pressed long before anything slow.
             back::remember(app.handle().clone());
             // And a third: a headphone button can be pressed before the
@@ -107,7 +136,9 @@ pub fn run() {
             commands::pdf_meta,
             commands::pdf_page,
             commands::install_apk,
-            commands::take_opened_files,
+            commands::is_default_file_manager,
+            commands::make_default_file_manager,
+            commands::take_opened_locations,
             commands::set_back_enabled,
             commands::set_playback_state,
             commands::clear_playback_state,

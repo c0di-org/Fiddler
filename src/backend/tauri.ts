@@ -14,6 +14,7 @@ import type {
   EjectOutcome,
   EntryBatch,
   Inspect,
+  IncomingLocation,
   NearbyAccess,
   NearbySearch,
   PairOutcome,
@@ -189,9 +190,14 @@ const backend: Backend = {
 
   installApk: (path) => invoke<void>("install_apk", { path }),
 
-  takeIncomingFiles: () => invoke<string[]>("take_opened_files"),
+  isDefaultFileManager: () => invoke<boolean>("is_default_file_manager"),
 
-  onIncomingFile: (fn) => listen("fiddler:opened-file", () => fn()),
+  makeDefaultFileManager: () => invoke<void>("make_default_file_manager"),
+
+
+  takeIncomingLocations: () => invoke<IncomingLocation[]>("take_opened_locations"),
+
+  onIncomingLocation: (fn) => listen("fiddler:opened-location", () => fn()),
 
   sharePaths: (paths) => invoke<void>("share_paths", { paths }),
 

@@ -33,6 +33,8 @@ pub mod classify;
 mod android;
 #[cfg(target_os = "macos")]
 mod mac;
+#[cfg(target_os = "linux")]
+mod linux;
 
 use std::sync::{Arc, Mutex};
 
@@ -194,11 +196,14 @@ use mac as platform;
 #[cfg(target_os = "android")]
 use android as platform;
 
+#[cfg(target_os = "linux")]
+use linux as platform;
+
 /// Everywhere that is neither macOS nor Android — a Linux or Windows build of
 /// the desktop app. Enumerating volumes there is a real feature and a different
 /// one (udisks2, `GetLogicalDrives`), so this answers nothing rather than
 /// guessing, and the section simply doesn't appear.
-#[cfg(not(any(target_os = "macos", target_os = "android")))]
+#[cfg(not(any(target_os = "macos", target_os = "android", target_os = "linux")))]
 mod platform {
     use super::{EjectOutcome, Volume};
 
@@ -222,7 +227,7 @@ mod platform {
 ///
 /// Not asked of network volumes. A share whose far end has gone answers this
 /// question by not answering, and the watcher thread is the wrong place to wait.
-#[cfg(any(target_os = "macos", target_os = "android"))]
+#[cfg(any(target_os = "macos", target_os = "android", target_os = "linux"))]
 fn stage_of(path: &str, kind: VolumeKind) -> VolumeStage {
     if kind == VolumeKind::Network {
         return VolumeStage::Ready;
