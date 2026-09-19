@@ -59,6 +59,7 @@ export const {
   pdfPage,
   fileSrc,
   mediaUrl,
+  htmlUrl,
   systemAccent,
   revealInFinder,
   openTerminalHere,
