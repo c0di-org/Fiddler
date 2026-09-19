@@ -12,7 +12,8 @@ import { caps, platform } from "../platform";
 import { isTextual, routeOf } from "../preview/route";
 import type { Entry, TextHead } from "../types";
 import { CodeView } from "./CodeView";
-import { FileGlyph, FolderGlyph } from "./FileGlyph";\nimport { HtmlPreview } from "./HtmlPreview";
+import { FileGlyph, FolderGlyph } from "./FileGlyph";
+import { HtmlPreview } from "./HtmlPreview";
 import { BookIcon, Chevron, ChevronLeft, LinkMark, MoreIcon, PlayIcon, ShareIcon, WandIcon } from "./icons";
 import { MarkdownView } from "./MarkdownView";
 import { PdfView } from "./PdfView";
@@ -310,6 +311,8 @@ function Body({
   if (route === "video") return <Video entry={entry} />;
 
   if (route === "link") return <Link entry={entry} />;
+
+  if (route === "html") return <HtmlPreview entry={entry} />;
 
   if (isTextual(route)) {
     return <Text entry={entry} route={route} />;
