@@ -1850,7 +1850,7 @@ export default function App() {
           // work on them, and the only thing picking it ever produced was a
           // toast. "none" stays: a `LICENSE`, a `Makefile`, a `.env` have no
           // extension to route on and are exactly what this item is for.
-          if (route !== null && (isTextual(route) || route === "none")) {
+          if (route !== null && (isTextual(route) || route === "html" || route === "none")) {
             items.push({
               label: "Edit Text File",
               onPick: () => {
