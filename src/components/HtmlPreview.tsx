@@ -45,7 +45,7 @@ export function HtmlPreview({ entry, dense = false }: Props) {
     if (mode !== "rendered" || url || failed) return;
     let alive = true;
     void ipc
-      .mediaUrl(entry.path)
+      .htmlUrl(entry.path)
       .then((resolved) => {
         if (alive) setUrl(resolved);
       })
