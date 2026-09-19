@@ -19,7 +19,8 @@ const IMAGE = new Set([
   "rw2", "srw", "pef", "svg",
 ]);
 
-const MARKDOWN = new Set(["md", "mdx", "markdown"]);\nconst HTML = new Set(["html", "htm"]);
+const MARKDOWN = new Set(["md", "mdx", "markdown"]);
+const HTML = new Set(["html", "htm"]);
 
 /**
  * Prose: wrapped to a measure, no grammar. Records — logs, CSVs — deliberately
@@ -92,6 +93,7 @@ export function routeOf(nameOrPath: string): Route {
 
   if (LINK.has(ext)) return "link";
   if (MARKDOWN.has(ext)) return "markdown";
+  if (HTML.has(ext)) return "html";
   if (ext === "pdf") return "pdf";
   if (IMAGE.has(ext)) return "image";
   if (AUDIO.has(ext)) return "audio";
