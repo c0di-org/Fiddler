@@ -1291,6 +1291,11 @@ export default function App() {
         // Quick Look shows, with source one tap away. This is especially useful
         // on Android, where handing a local HTML path to another app is brittle.
         if (routeOf(t.name) === "html") {
+          // A context-menu Open may target something outside the standing
+          // selection. Quick Look follows the selection, so make this file the
+          // lead before opening the viewer rather than previewing the old one.
+          anchorRef.current = t.id;
+          setSelection(new Set([t.id]));
           setQuickLook(true);
           return;
         }
