@@ -1286,6 +1286,14 @@ export default function App() {
           playAudio(t);
           return;
         }
+        // HTML has a useful destination here even when the platform has a
+        // browser registered for it: Open means the same rendered preview that
+        // Quick Look shows, with source one tap away. This is especially useful
+        // on Android, where handing a local HTML path to another app is brittle.
+        if (routeOf(t.name) === "html") {
+          setQuickLook(true);
+          return;
+        }
         const system = caps.handOff && (await ipc.hasOpenHandler(t.path));
         if (system) {
           await ipc.openExternal(t.path);
